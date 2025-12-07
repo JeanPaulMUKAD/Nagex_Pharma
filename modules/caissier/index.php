@@ -701,11 +701,7 @@ try {
                                 </span>
                             <?php endif; ?>
                         </a>
-                        <a href="?page=promotions"
-                            class="menu-item block py-2.5 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'promotions' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
-                            <i class="fas fa-percent mr-3 w-5 text-center"></i>
-                            <span>Promotions</span>
-                        </a>
+                       
                         <a href="?page=taux_conversion"
                             class="menu-item block py-2.5 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'taux_conversion' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
                             <i class="fas fa-exchange-alt mr-3 w-5 text-center"></i>
@@ -714,29 +710,9 @@ try {
                     </div>
                 </div>
 
-                <!-- Retours -->
-                <div class="mb-6">
-                    <div class="section-title text-xs text-gray-500 font-semibold uppercase tracking-wider mb-2">
-                        <i class="fas fa-undo mr-2"></i>Retours
-                    </div>
-                    <a href="?page=retours"
-                        class="menu-item block py-2.5 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'retours' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
-                        <i class="fas fa-undo-alt mr-3 w-5 text-center"></i>
-                        <span>Gestion retours</span>
-                    </a>
-                </div>
+               
 
-                <!-- Dashboard -->
-                <div class="mb-6">
-                    <div class="section-title text-xs text-gray-500 font-semibold uppercase tracking-wider mb-2">
-                        <i class="fas fa-chart-line mr-2"></i>Dashboard
-                    </div>
-                    <a href="?page=temps_reel"
-                        class="menu-item block py-2.5 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'temps_reel' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
-                        <i class="fas fa-chart-bar mr-3 w-5 text-center"></i>
-                        <span>Temps réel</span>
-                    </a>
-                </div>
+              
             </nav>
 
 
@@ -794,7 +770,8 @@ try {
                                     <div class="ml-4">
                                         <p class="text-gray-600 text-sm font-medium">Commandes en attente</p>
                                         <p class="text-2xl font-bold text-gray-800 mt-1">
-                                            <?php echo $stats['commandes_attente'] ?? 0; ?></p>
+                                            <?php echo $stats['commandes_attente'] ?? 0; ?>
+                                        </p>
                                     </div>
                                 </div>
                                 <p class="text-xs text-blue-600 font-medium mt-2">
@@ -843,7 +820,8 @@ try {
                                     <div class="ml-4">
                                         <p class="text-gray-600 text-sm font-medium">Produits sans prix</p>
                                         <p class="text-2xl font-bold text-gray-800 mt-1">
-                                            <?php echo $stats['produits_sans_prix'] ?? 0; ?></p>
+                                            <?php echo $stats['produits_sans_prix'] ?? 0; ?>
+                                        </p>
                                     </div>
                                 </div>
                                 <p class="text-xs text-yellow-600 font-medium mt-2">
@@ -867,7 +845,8 @@ try {
                                     <div class="ml-4">
                                         <p class="text-gray-600 text-sm font-medium">Transactions</p>
                                         <p class="text-2xl font-bold text-gray-800 mt-1">
-                                            <?php echo $stats['transactions_aujourdhui'] ?? 0; ?></p>
+                                            <?php echo $stats['transactions_aujourdhui'] ?? 0; ?>
+                                        </p>
                                     </div>
                                 </div>
                                 <p class="text-xs text-purple-600 font-medium mt-2">
@@ -1003,7 +982,7 @@ try {
                                             <i class="fas fa-exchange-alt text-purple-600 text-xl"></i>
                                         </div>
                                         <div>
-                                            <h3 class="font-semibold text-purple-700">Mettre à jour taux</h3>
+                                            <h3 class="font-semibold text-green-700">Mettre à jour taux</h3>
                                             <p class="text-sm text-purple-600 opacity-80 mt-1">
                                                 Taux de conversion FC/USD
                                             </p>
@@ -1019,74 +998,407 @@ try {
 
             <?php elseif ($current_page == 'commandes_attente'): ?>
                 <!-- ========== COMMANDES EN ATTENTE ========== -->
-                <div class="mb-6">
-                    <h1 class="text-2xl font-bold text-gray-800">Commandes en attente de paiement</h1>
-                    <p class="text-gray-600">Validez les paiements des clients</p>
-                </div>
-
-                <?php if (count($commandes_attente) > 0): ?>
-                    <div class="bg-white rounded-lg shadow-md overflow-hidden">
-                        <div class="overflow-x-auto">
-                            <table class="min-w-full divide-y divide-gray-200">
-                                <thead class="bg-gray-50">
-                                    <tr>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Commande
-                                        </th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Client</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Montant</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Produits
-                                        </th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="bg-white divide-y divide-gray-200">
-                                    <?php foreach ($commandes_attente as $commande): ?>
-                                        <tr>
-                                            <td class="px-6 py-4">
-                                                <p class="font-bold text-gray-900">#<?php echo e($commande['numero_commande']); ?>
-                                                </p>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <p class="font-semibold"><?php echo e($commande['client_nom']); ?></p>
-                                                <p class="text-sm text-gray-500"><?php echo e($commande['telephone']); ?></p>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <p class="font-bold text-green-600">
-                                                    <?php echo formatMontant($commande['montant_total']); ?>
-                                                </p>
-                                            </td>
-                                            <td class="px-6 py-4 text-sm text-gray-500">
-                                                <?php echo date('d/m/Y H:i', strtotime($commande['date_commande'])); ?>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm">
-                                                    <?php echo $commande['nombre_produits']; ?> produits
-                                                </span>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <button onclick="validerPaiement(<?php echo $commande['id']; ?>)"
-                                                    class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm mr-2">
-                                                    <i class="fas fa-check mr-1"></i>Valider
-                                                </button>
-                                                <button onclick="voirDetails(<?php echo $commande['id']; ?>)"
-                                                    class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
-                                                    <i class="fas fa-eye mr-1"></i>Détails
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
+                <div class="mb-8">
+                    <!-- En-tête avec statistiques -->
+                    <div class="flex items-center justify-between mb-8">
+                        <div class="flex items-center">
+                            <div class="p-3 bg-gradient-to-br from-blue-100 to-blue-200 rounded-xl shadow-sm mr-4">
+                                <i class="fas fa-clock text-blue-600 text-xl"></i>
+                            </div>
+                            <div>
+                                <h1 class="text-2xl font-bold text-gray-800">Commandes en attente de paiement</h1>
+                                <p class="text-gray-600 mt-1">Validez les paiements des clients</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-4">
+                            <?php if (isset($commandes_attente) && count($commandes_attente) > 0): ?>
+                                <div
+                                    class="text-center px-4 py-2 bg-gradient-to-br from-red-50 to-red-100 rounded-xl border border-red-200">
+                                    <div class="text-2xl font-bold text-red-700"><?php echo count($commandes_attente); ?></div>
+                                    <div class="text-xs text-red-600 font-medium">En attente</div>
+                                </div>
+                            <?php endif; ?>
+                            <button onclick="validerTousPaiements()"
+                                class="group bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-5 py-3 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5">
+                                <i class="fas fa-check-double mr-2 group-hover:scale-110 transition-transform"></i>
+                                Valider tous
+                            </button>
                         </div>
                     </div>
-                <?php else: ?>
-                    <div class="bg-white rounded-lg shadow-md p-12 text-center">
-                        <i class="fas fa-check-circle text-green-500 text-5xl mb-4"></i>
-                        <h3 class="text-xl font-semibold text-gray-800 mb-2">Aucune commande en attente</h3>
-                        <p class="text-gray-600">Toutes les commandes sont traitées.</p>
-                    </div>
-                <?php endif; ?>
+
+                    <!-- Statistiques des commandes -->
+                    <?php if (isset($commandes_attente) && count($commandes_attente) > 0): ?>
+                        <?php
+                        $total_montant = 0;
+                        $total_produits = 0;
+                        $commandes_urgentes = 0;
+
+                        foreach ($commandes_attente as $commande) {
+                            $total_montant += $commande['montant_total'];
+                            $total_produits += $commande['nombre_produits'];
+
+                            // Marquer comme urgente si la commande a plus de 30 minutes
+                            $date_commande = strtotime($commande['date_commande']);
+                            if (time() - $date_commande > 1800) { // 30 minutes en secondes
+                                $commandes_urgentes++;
+                            }
+                        }
+                        ?>
+
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                            <div class="bg-gradient-to-br from-white to-blue-50 rounded-xl shadow p-5 border border-blue-200">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <div class="text-lg font-bold text-blue-700"><?php echo count($commandes_attente); ?>
+                                        </div>
+                                        <div class="text-sm text-blue-600">Commandes totales</div>
+                                    </div>
+                                    <div class="p-2 bg-gradient-to-br from-blue-100 to-blue-200 rounded-lg">
+                                        <i class="fas fa-shopping-cart text-blue-600"></i>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="bg-gradient-to-br from-white to-green-50 rounded-xl shadow p-5 border border-green-200">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <div class="text-lg font-bold text-green-700">
+                                            <?php echo formatMontant($total_montant); ?>
+                                        </div>
+                                        <div class="text-sm text-green-600">Montant total</div>
+                                    </div>
+                                    <div class="p-2 bg-gradient-to-br from-green-100 to-green-200 rounded-lg">
+                                        <i class="fas fa-money-bill-wave text-green-600"></i>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div
+                                class="bg-gradient-to-br from-white to-orange-50 rounded-xl shadow p-5 border border-orange-200">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <div class="text-lg font-bold text-orange-700"><?php echo $commandes_urgentes; ?></div>
+                                        <div class="text-sm text-orange-600">À traiter urgent</div>
+                                    </div>
+                                    <div class="p-2 bg-gradient-to-br from-orange-100 to-orange-200 rounded-lg">
+                                        <i class="fas fa-exclamation-triangle text-orange-600"></i>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endif; ?>
+
+                    <?php if (isset($commandes_attente) && count($commandes_attente) > 0): ?>
+                        <!-- Tableau des commandes -->
+                        <div
+                            class="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg overflow-hidden border border-gray-200">
+                            <!-- Filtres et actions -->
+                            <div class="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-gray-100">
+                                <div class="flex flex-col md:flex-row justify-between items-center gap-4">
+                                    <div class="flex items-center">
+                                        <i class="fas fa-filter text-blue-600 mr-2"></i>
+                                        <span class="font-medium text-gray-700"><?php echo count($commandes_attente); ?>
+                                            commande(s) en attente</span>
+                                    </div>
+                                    <div class="flex items-center space-x-2">
+                                        <div class="relative">
+                                            <input type="text" placeholder="Rechercher une commande..."
+                                                class="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm">
+                                            <i
+                                                class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+                                        </div>
+                                        <button class="p-2 border border-gray-300 rounded-lg hover:bg-white transition-colors">
+                                            <i class="fas fa-sort-amount-down text-gray-600"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Tableau -->
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full divide-y divide-gray-200">
+                                    <thead>
+                                        <tr class="bg-gradient-to-r from-gray-50 to-gray-100">
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-hashtag mr-2 text-gray-400"></i> Commande
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-user mr-2 text-gray-400"></i> Client
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-money-bill-wave mr-2 text-gray-400"></i> Montant
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-calendar mr-2 text-gray-400"></i> Date
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-box mr-2 text-gray-400"></i> Produits
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-cogs mr-2 text-gray-400"></i> Actions
+                                                </div>
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white divide-y divide-gray-200">
+                                        <?php foreach ($commandes_attente as $commande): ?>
+                                            <?php
+                                            $date_commande = strtotime($commande['date_commande']);
+                                            $delai_attente = time() - $date_commande;
+                                            $is_urgent = $delai_attente > 1800; // Plus de 30 minutes
+                                            ?>
+                                            <tr
+                                                class="hover:bg-gradient-to-r hover:from-blue-50 hover:to-transparent transition-all duration-200 group <?php echo $is_urgent ? 'bg-gradient-to-r from-orange-50 to-orange-25' : ''; ?>">
+                                                <!-- Numéro de commande -->
+                                                <td class="px-6 py-4">
+                                                    <div class="flex items-center">
+                                                        <div
+                                                            class="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg mr-3 border border-blue-200">
+                                                            <i class="fas fa-shopping-cart text-blue-600 text-sm"></i>
+                                                        </div>
+                                                        <div>
+                                                            <div
+                                                                class="font-bold text-gray-900 group-hover:text-blue-700 transition-colors">
+                                                                #<?php echo htmlspecialchars($commande['numero_commande']); ?>
+                                                            </div>
+                                                            <?php if ($is_urgent): ?>
+                                                                <div class="text-xs text-orange-600 mt-1">
+                                                                    <i class="fas fa-clock mr-1"></i>
+                                                                    En attente depuis <?php echo floor($delai_attente / 60); ?> min
+                                                                </div>
+                                                            <?php endif; ?>
+                                                        </div>
+                                                    </div>
+                                                </td>
+
+                                                <!-- Client -->
+                                                <td class="px-6 py-4">
+                                                    <div>
+                                                        <div class="font-semibold text-gray-900">
+                                                            <?php echo htmlspecialchars($commande['client_nom']); ?>
+                                                        </div>
+                                                        <div class="text-sm text-gray-500 mt-1">
+                                                            <i class="fas fa-phone mr-1 text-xs"></i>
+                                                            <?php echo htmlspecialchars($commande['telephone']); ?>
+                                                        </div>
+                                                    </div>
+                                                </td>
+
+                                                <!-- Montant -->
+                                                <td class="px-6 py-4">
+                                                    <div class="text-lg font-bold text-green-700">
+                                                        <?php echo formatMontant($commande['montant_total']); ?>
+                                                    </div>
+                                                    <div class="text-xs text-gray-500 mt-1">
+                                                        <i
+                                                            class="fas fa-<?php echo $commande['methode_paiement'] == 'especes' ? 'money-bill' : 'credit-card'; ?> mr-1"></i>
+                                                        <?php echo htmlspecialchars($commande['methode_paiement'] ?? 'Non spécifié'); ?>
+                                                    </div>
+                                                </td>
+
+                                                <!-- Date -->
+                                                <td class="px-6 py-4">
+                                                    <div class="text-sm text-gray-900">
+                                                        <?php echo date('d/m/Y', $date_commande); ?>
+                                                    </div>
+                                                    <div class="text-xs text-gray-500 mt-1">
+                                                        <i class="fas fa-clock mr-1"></i>
+                                                        <?php echo date('H:i', $date_commande); ?>
+                                                    </div>
+                                                </td>
+
+                                                <!-- Produits -->
+                                                <td class="px-6 py-4">
+                                                    <div class="flex flex-col space-y-1">
+                                                        <span
+                                                            class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-blue-100 to-blue-50 text-blue-800 border border-blue-200">
+                                                            <i class="fas fa-box mr-1 text-xs"></i>
+                                                            <?php echo $commande['nombre_produits']; ?> produits
+                                                        </span>
+                                                        <?php if (!empty($commande['produit_principal'])): ?>
+                                                            <div class="text-xs text-gray-600">
+                                                                <?php echo htmlspecialchars($commande['produit_principal']); ?>
+                                                            </div>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                </td>
+
+                                                <!-- Actions -->
+                                                <td class="px-6 py-4">
+                                                    <div class="flex items-center space-x-2">
+                                                        <button onclick="validerPaiement(<?php echo $commande['id']; ?>)"
+                                                            class="group/validate relative bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-4 py-2 rounded-lg font-medium shadow hover:shadow-md transition-all duration-200 text-sm flex items-center">
+                                                            <i
+                                                                class="fas fa-check mr-2 group-hover/validate:scale-110 transition-transform"></i>
+                                                            Valider
+                                                        </button>
+
+                                                        <button onclick="voirDetails(<?php echo $commande['id']; ?>)"
+                                                            class="group/view relative bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-4 py-2 rounded-lg font-medium shadow hover:shadow-md transition-all duration-200 text-sm flex items-center">
+                                                            <i
+                                                                class="fas fa-eye mr-2 group-hover/view:scale-110 transition-transform"></i>
+                                                            Détails
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- Actions en masse -->
+                            <div class="px-6 py-4 border-t border-gray-200 bg-gray-50">
+                                <div class="flex flex-col md:flex-row justify-between items-center gap-4">
+                                    <div class="text-sm text-gray-700">
+                                        <i class="fas fa-info-circle mr-2 text-blue-500"></i>
+                                        Sélectionnez les commandes à valider ou utilisez "Valider tous"
+                                    </div>
+                                    <div class="flex items-center space-x-3">
+                                        <button onclick="selectionnerToutesCommandes()"
+                                            class="group px-5 py-2 border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50 hover:shadow transition-all duration-200 font-medium">
+                                            <i class="fas fa-check-square mr-2 group-hover:scale-110 transition-transform"></i>
+                                            Tout sélectionner
+                                        </button>
+                                        <button onclick="validerPaiementsSelectionnes()"
+                                            class="group bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-6 py-2.5 rounded-xl font-medium shadow hover:shadow-md transition-all duration-200 flex items-center">
+                                            <i class="fas fa-check-double mr-2 group-hover:scale-110 transition-transform"></i>
+                                            Valider la sélection
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    <?php else: ?>
+                        <!-- Aucune commande en attente -->
+                        <div
+                            class="bg-gradient-to-br from-white to-emerald-50 rounded-2xl shadow-lg p-16 text-center border border-emerald-200">
+                            <div
+                                class="inline-flex items-center justify-center w-24 h-24 rounded-full bg-gradient-to-r from-emerald-100 to-emerald-200 mb-8 shadow-sm">
+                                <i class="fas fa-check-circle text-emerald-600 text-4xl"></i>
+                            </div>
+                            <h3 class="text-3xl font-bold text-gray-800 mb-4">Aucune commande en attente</h3>
+                            <p class="text-gray-600 text-lg mb-10 max-w-md mx-auto">
+                                Toutes les commandes sont traitées. Aucun paiement n'est en attente de validation.
+                            </p>
+                            <div class="flex flex-col sm:flex-row justify-center gap-6">
+                                <a href="?page=dashboard"
+                                    class="group bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-8 py-4 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5 text-lg">
+                                    <i class="fas fa-tachometer-alt mr-3 group-hover:scale-110 transition-transform"></i>
+                                    Tableau de bord
+                                </a>
+                                <a href="?page=transactions"
+                                    class="group bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-8 py-4 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5 text-lg">
+                                    <i class="fas fa-history mr-3 group-hover:scale-110 transition-transform"></i>
+                                    Voir l'historique
+                                </a>
+                            </div>
+                        </div>
+                    <?php endif; ?>
+                </div>
+
+                <!-- Scripts pour la gestion des commandes -->
+                <script>
+                    function validerPaiement(commandeId) {
+                        if (confirm('Valider le paiement de cette commande ?')) {
+                            // Soumettre le formulaire de validation
+                            const form = document.createElement('form');
+                            form.method = 'POST';
+                            form.action = '';
+
+                            const actionInput = document.createElement('input');
+                            actionInput.type = 'hidden';
+                            actionInput.name = 'action';
+                            actionInput.value = 'valider_paiement';
+
+                            const commandeInput = document.createElement('input');
+                            commandeInput.type = 'hidden';
+                            commandeInput.name = 'commande_id';
+                            commandeInput.value = commandeId;
+
+                            form.appendChild(actionInput);
+                            form.appendChild(commandeInput);
+                            document.body.appendChild(form);
+                            form.submit();
+                        }
+                    }
+
+                    function validerTousPaiements() {
+                        if (confirm('Valider tous les paiements en attente ? Cette action est irréversible.')) {
+                            // Sélectionner toutes les commandes
+                            const commandeIds = [];
+                            document.querySelectorAll('tr[class*="hover:bg-gradient-to-r"]').forEach(row => {
+                                const validateButton = row.querySelector('button[onclick*="validerPaiement"]');
+                                if (validateButton) {
+                                    const match = validateButton.getAttribute('onclick').match(/validerPaiement\((\d+)\)/);
+                                    if (match) {
+                                        commandeIds.push(match[1]);
+                                    }
+                                }
+                            });
+
+                            // Soumettre le formulaire groupé
+                            const form = document.createElement('form');
+                            form.method = 'POST';
+                            form.action = '';
+
+                            const actionInput = document.createElement('input');
+                            actionInput.type = 'hidden';
+                            actionInput.name = 'action';
+                            actionInput.value = 'valider_paiements_groupes';
+
+                            const commandesInput = document.createElement('input');
+                            commandesInput.type = 'hidden';
+                            commandesInput.name = 'commande_ids';
+                            commandesInput.value = commandeIds.join(',');
+
+                            form.appendChild(actionInput);
+                            form.appendChild(commandesInput);
+                            document.body.appendChild(form);
+                            form.submit();
+                        }
+                    }
+
+                    function voirDetails(commandeId) {
+                        // Rediriger vers la page de détails
+                        window.location.href = `?page=commande_details&id=${commandeId}`;
+                    }
+
+                    function selectionnerToutesCommandes() {
+                        // Implémenter la sélection multiple si nécessaire
+                        alert('Fonctionnalité de sélection à implémenter');
+                    }
+
+                    function validerPaiementsSelectionnes() {
+                        // Implémenter la validation groupée des sélections
+                        alert('Fonctionnalité de validation groupée à implémenter');
+                    }
+
+                    // Auto-refresh toutes les 30 secondes pour les commandes urgentes
+                    setTimeout(() => {
+                        const urgentRows = document.querySelectorAll('tr.bg-gradient-to-r.from-orange-50');
+                        if (urgentRows.length > 0) {
+                            window.location.reload();
+                        }
+                    }, 30000);
+                </script>
 
             <?php elseif ($current_page == 'gestion_prix'): ?>
                 <!-- ========== GESTION DES PRIX ========== -->
@@ -1210,85 +1522,168 @@ try {
                 <?php endif; ?>
 
             <?php elseif ($current_page == 'transactions'): ?>
-                <!-- ========== HISTORIQUE DES TRANSACTIONS ========== -->
-                <div class="mb-6">
-                    <h1 class="text-2xl font-bold text-gray-800">Historique des transactions</h1>
-                    <p class="text-gray-600">Vos transactions validées</p>
-                </div>
+                <!-- ========== SECTION HISTORIQUE DES TRANSACTIONS ========== -->
+                <div class="mb-8">
+                    <!-- En-tête de section -->
+                    <div class="mb-6">
+                        <h1 class="text-2xl font-bold text-gray-800 tracking-tight">Historique des transactions</h1>
+                        <p class="text-gray-600 mt-1">Vos transactions validées</p>
+                    </div>
 
-                <?php if (count($transactions_recentes) > 0): ?>
-                    <div class="bg-white rounded-lg shadow-md overflow-hidden">
-                        <div class="overflow-x-auto">
-                            <table class="min-w-full divide-y divide-gray-200">
-                                <thead class="bg-gray-50">
-                                    <tr>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Commande
-                                        </th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Client</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Montant</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Paiement
-                                        </th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Produits
-                                        </th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="bg-white divide-y divide-gray-200">
-                                    <?php foreach ($transactions_recentes as $transaction): ?>
+                    <!-- Contenu conditionnel -->
+                    <?php if (count($transactions_recentes) > 0): ?>
+                        <!-- Tableau des transactions -->
+                        <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full divide-y divide-gray-200">
+                                    <!-- En-têtes du tableau -->
+                                    <thead class="bg-gray-50/80 backdrop-blur-sm">
                                         <tr>
-                                            <td class="px-6 py-4">
-                                                <p class="font-bold text-gray-900">
-                                                    #<?php echo e($transaction['numero_commande']); ?></p>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <p class="font-semibold"><?php echo e($transaction['client_nom']); ?></p>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <p class="font-bold text-green-600">
-                                                    <?php echo formatMontant($transaction['montant_total']); ?>
-                                                </p>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <?php if ($transaction['mode_paiement'] == 'especes'): ?>
-                                                    <span class="badge badge-success">Espèces</span>
-                                                <?php elseif ($transaction['mode_paiement'] == 'carte'): ?>
-                                                    <span class="badge badge-info">Carte</span>
-                                                <?php else: ?>
-                                                    <span class="badge badge-purple">Mobile</span>
-                                                <?php endif; ?>
-                                            </td>
-                                            <td class="px-6 py-4 text-sm text-gray-500">
-                                                <?php echo date('d/m/Y H:i', strtotime($transaction['date_commande'])); ?>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm">
-                                                    <?php echo $transaction['nombre_produits']; ?> produits
-                                                </span>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <button onclick="voirDetails(<?php echo $transaction['id']; ?>)"
-                                                    class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm mr-2">
-                                                    <i class="fas fa-eye mr-1"></i>Détails
-                                                </button>
-                                                <button onclick="imprimerTicket(<?php echo $transaction['id']; ?>)"
-                                                    class="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded text-sm">
-                                                    <i class="fas fa-print mr-1"></i>Ticket
-                                                </button>
-                                            </td>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                Commande</th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                Client</th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                Montant</th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                Paiement</th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                Date</th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                Produits</th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                Actions</th>
                                         </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
+                                    </thead>
+
+                                    <!-- Corps du tableau -->
+                                    <tbody class="divide-y divide-gray-100">
+                                        <?php foreach ($transactions_recentes as $transaction): ?>
+                                            <tr class="hover:bg-gray-50/50 transition-colors duration-150">
+                                                <!-- Numéro de commande -->
+                                                <td class="px-6 py-4">
+                                                    <span
+                                                        class="font-bold text-gray-900 text-sm">#<?php echo e($transaction['numero_commande']); ?></span>
+                                                </td>
+
+                                                <!-- Nom du client -->
+                                                <td class="px-6 py-4">
+                                                    <p class="font-medium text-gray-800 text-sm">
+                                                        <?php echo e($transaction['client_nom']); ?></p>
+                                                </td>
+
+                                                <!-- Montant total -->
+                                                <td class="px-6 py-4">
+                                                    <span class="font-bold text-emerald-600 text-sm">
+                                                        <?php echo formatMontant($transaction['montant_total']); ?>
+                                                    </span>
+                                                </td>
+
+                                                <!-- Mode de paiement -->
+                                                <td class="px-6 py-4">
+                                                    <?php if ($transaction['mode_paiement'] == 'especes'): ?>
+                                                        <span
+                                                            class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
+                                                            <i class="fas fa-money-bill-wave mr-1.5"></i>Espèces
+                                                        </span>
+                                                    <?php elseif ($transaction['mode_paiement'] == 'carte'): ?>
+                                                        <span
+                                                            class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                                            <i class="fas fa-credit-card mr-1.5"></i>Carte
+                                                        </span>
+                                                    <?php else: ?>
+                                                        <span
+                                                            class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                                                            <i class="fas fa-mobile-alt mr-1.5"></i>Mobile
+                                                        </span>
+                                                    <?php endif; ?>
+                                                </td>
+
+                                                <!-- Date de la transaction -->
+                                                <td class="px-6 py-4">
+                                                    <span class="text-sm text-gray-600">
+                                                        <?php echo date('d/m/Y', strtotime($transaction['date_commande'])); ?>
+                                                    </span>
+                                                    <span class="block text-xs text-gray-400">
+                                                        <?php echo date('H:i', strtotime($transaction['date_commande'])); ?>
+                                                    </span>
+                                                </td>
+
+                                                <!-- Nombre de produits -->
+                                                <td class="px-6 py-4">
+                                                    <span
+                                                        class="inline-flex items-center px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">
+                                                        <i class="fas fa-boxes mr-1.5"></i>
+                                                        <?php echo $transaction['nombre_produits']; ?>
+                                                        produit<?php echo $transaction['nombre_produits'] > 1 ? 's' : ''; ?>
+                                                    </span>
+                                                </td>
+
+                                                <!-- Actions -->
+                                                <td class="px-6 py-4">
+                                                    <div class="flex items-center space-x-2">
+                                                        <!-- Bouton Détails -->
+                                                        <button onclick="voirDetails(<?php echo $transaction['id']; ?>)"
+                                                            class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-all duration-200 hover:shadow-md">
+                                                            <i class="fas fa-eye mr-2"></i>
+                                                            Détails
+                                                        </button>
+
+                                                        <!-- Bouton Ticket -->
+                                                        <button onclick="imprimerTicket(<?php echo $transaction['id']; ?>)"
+                                                            class="inline-flex items-center px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 text-sm font-medium rounded-lg transition-all duration-200 hover:shadow-md">
+                                                            <i class="fas fa-print mr-2"></i>
+                                                            Ticket
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- Pied de tableau optionnel pour pagination -->
+                            <div class="border-t border-gray-100 px-6 py-4 bg-gray-50/50">
+                                <div class="flex items-center justify-between text-sm text-gray-600">
+                                    <div>
+                                        <span class="font-medium"><?php echo count($transactions_recentes); ?></span>
+                                        transaction<?php echo count($transactions_recentes) > 1 ? 's' : ''; ?>
+                                        affichée<?php echo count($transactions_recentes) > 1 ? 's' : ''; ?>
+                                    </div>
+                                    <!-- Ici vous pouvez ajouter une pagination si nécessaire -->
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                <?php else: ?>
-                    <div class="bg-white rounded-lg shadow-md p-12 text-center">
-                        <i class="fas fa-history text-gray-400 text-5xl mb-4"></i>
-                        <h3 class="text-xl font-semibold text-gray-800 mb-2">Aucune transaction</h3>
-                        <p class="text-gray-600">Vous n'avez pas encore effectué de transactions.</p>
-                    </div>
-                <?php endif; ?>
+
+                    <?php else: ?>
+                        <!-- État vide -->
+                        <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-16 text-center">
+                            <div class="max-w-md mx-auto">
+                                <div class="w-24 h-24 mx-auto mb-6 bg-gray-50 rounded-full flex items-center justify-center">
+                                    <i class="fas fa-history text-gray-300 text-4xl"></i>
+                                </div>
+                                <h3 class="text-xl font-semibold text-gray-800 mb-3">Aucune transaction enregistrée</h3>
+                                <p class="text-gray-500 mb-8">Vous n'avez pas encore effectué de transactions. Elles
+                                    apparaîtront ici une fois validées.</p>
+
+                                <!-- Bouton d'action optionnel -->
+                                <button
+                                    class="inline-flex items-center px-5 py-3 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors duration-200">
+                                    <i class="fas fa-plus-circle mr-2"></i>
+                                    Créer une première transaction
+                                </button>
+                            </div>
+                        </div>
+                    <?php endif; ?>
+                </div>
 
             <?php elseif ($current_page == 'taux_conversion'): ?>
                 <!-- ========== TAUX DE CONVERSION ========== -->
@@ -1313,7 +1708,7 @@ try {
                         </div>
 
                         <div class="flex justify-end space-x-4">
-                            <button type="submit" class="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+                            <button type="submit" class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
                                 <i class="fas fa-sync-alt mr-2"></i>Mettre à jour
                             </button>
                         </div>

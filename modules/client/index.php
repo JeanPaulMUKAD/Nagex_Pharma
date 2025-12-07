@@ -524,7 +524,7 @@ switch ($current_page) {
                     AND (pr.date_fin IS NULL OR pr.date_fin >= CURDATE())
                     AND pr.date_debut <= CURDATE()
                 WHERE f.client_id = :client_id AND p.statut = 'actif'
-                ORDER BY f.created_at DESC
+                ORDER BY f.date_ajout ASC
             ");
             $stmt->execute([':client_id' => $user_id]);
             $produits_favoris = $stmt->fetchAll();
@@ -637,160 +637,390 @@ try {
     <title>NAGEX Pharma - Espace Client</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&display=swap"
+        rel="stylesheet">
+    <!-- Styles spécifiques au sidebar -->
     <style>
         .sidebar {
+            background: linear-gradient(165deg, #ffffff 0%, #f8fafc 100%);
+            border-right: 1px solid rgba(16, 185, 129, 0.1);
+            transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            backdrop-filter: blur(10px);
+        }
+
+        /* Style des éléments de menu */
+        .menu-item {
+            position: relative;
+            overflow: hidden;
             transition: all 0.3s ease;
+            border: 1px solid transparent;
         }
 
-        .active-menu {
-            background-color: #8b5cf6;
-            color: white;
+        .menu-item:hover {
+            border-color: rgba(16, 185, 129, 0.2);
+            transform: translateX(4px);
         }
 
-        .stat-card {
-            transition: transform 0.2s ease;
+        .menu-item.active-menu {
+            border-color: rgba(16, 185, 129, 0.3);
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.25),
+                inset 0 1px 0 rgba(255, 255, 255, 0.2);
         }
 
-        .stat-card:hover {
-            transform: translateY(-2px);
+        /* Indicateur visuel actif */
+        .menu-item::after {
+            content: '';
+            position: absolute;
+            left: -100%;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(16, 185, 129, 0.1), transparent);
+            transition: left 0.6s ease;
         }
 
-        .badge {
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 600;
+        .menu-item:hover::after {
+            left: 100%;
         }
 
-        .badge-success {
-            background-color: #10b981;
-            color: white;
-        }
-
-        .badge-warning {
-            background-color: #f59e0b;
-            color: white;
+        /* Badges améliorés */
+        .badge-danger,
+        .badge-warning,
+        .badge-info {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            min-width: 24px;
+            height: 22px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
         }
 
         .badge-danger {
-            background-color: #ef4444;
-            color: white;
+            box-shadow: 0 2px 10px rgba(239, 68, 68, 0.4);
+        }
+
+        .badge-warning {
+            box-shadow: 0 2px 10px rgba(245, 158, 11, 0.4);
         }
 
         .badge-info {
-            background-color: #3b82f6;
-            color: white;
+            box-shadow: 0 2px 10px rgba(59, 130, 246, 0.4);
         }
 
-        .badge-purple {
-            background-color: #8b5cf6;
-            color: white;
+        /* Animation des icônes */
+        .menu-item i {
+            transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
         }
 
-        .product-card {
-            transition: all 0.3s ease;
+        .menu-item:hover i {
+            transform: scale(1.2) rotate(5deg);
         }
 
-        .product-card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+        .menu-item.active-menu i {
+            transform: scale(1.15);
+            animation: iconBounce 0.5s ease;
+        }
+
+        @keyframes iconBounce {
+
+            0%,
+            100% {
+                transform: scale(1.15);
+            }
+
+            50% {
+                transform: scale(1.25);
+            }
+        }
+
+        /* Titres de section */
+        .section-title {
+            position: relative;
+            margin: 1.5rem 0 0.5rem;
+        }
+
+        .section-title div {
+            letter-spacing: 0.05em;
+            background: rgba(240, 253, 244, 0.7);
+            border-radius: 10px;
+            backdrop-filter: blur(5px);
+        }
+
+        /* Animation au chargement */
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .menu-item {
+            animation: slideIn 0.5s ease-out forwards;
+            opacity: 0;
+        }
+
+        .menu-item:nth-child(1) {
+            animation-delay: 0.1s;
+        }
+
+        .menu-item:nth-child(2) {
+            animation-delay: 0.15s;
+        }
+
+        .menu-item:nth-child(3) {
+            animation-delay: 0.2s;
+        }
+
+        .menu-item:nth-child(4) {
+            animation-delay: 0.25s;
+        }
+
+        .menu-item:nth-child(5) {
+            animation-delay: 0.3s;
+        }
+
+        .menu-item:nth-child(6) {
+            animation-delay: 0.35s;
+        }
+
+        .menu-item:nth-child(7) {
+            animation-delay: 0.4s;
+        }
+
+        .menu-item:nth-child(8) {
+            animation-delay: 0.45s;
+        }
+
+        /* Effet de brillance sur les éléments actifs */
+        .active-menu::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg,
+                    rgba(255, 255, 255, 0.3) 0%,
+                    rgba(255, 255, 255, 0.1) 50%,
+                    rgba(255, 255, 255, 0) 100%);
+            border-radius: inherit;
+            pointer-events: none;
+        }
+
+        /* Responsive design amélioré */
+        @media (max-width: 768px) {
+            .sidebar {
+                border-right: none;
+                border-bottom: 1px solid rgba(16, 185, 129, 0.1);
+                box-shadow: 0 4px 20px rgba(16, 185, 129, 0.1);
+            }
+
+            .menu-item {
+                padding: 0.875rem 1rem;
+                margin: 0.125rem 0;
+            }
+
+            .menu-item:hover {
+                transform: translateY(-2px);
+            }
+
+            .section-title div {
+                padding: 0.75rem 1rem;
+            }
+
+            .badge-danger,
+            .badge-warning,
+            .badge-info {
+                font-size: 0.65rem;
+                padding: 0.125rem 0.5rem;
+                min-width: 20px;
+                height: 18px;
+            }
+        }
+
+        /* Dark mode support (optionnel) */
+        @media (prefers-color-scheme: dark) {
+            .sidebar {
+                background: linear-gradient(165deg, #1a1a2e 0%, #16213e 100%);
+                border-right-color: rgba(16, 185, 129, 0.2);
+            }
+
+            .menu-item:not(.active-menu) {
+                color: #cbd5e1;
+            }
+
+            .menu-item:hover:not(.active-menu) {
+                background: linear-gradient(to right, rgba(16, 185, 129, 0.15), transparent);
+                color: #ffffff;
+            }
+
+            .section-title div {
+                background: rgba(16, 185, 129, 0.1);
+                color: #10b981;
+            }
         }
     </style>
 </head>
 
-<body class="bg-gray-100">
+<body class="bg-gray-100" style="font-family: 'Montserrat', sans-serif;">
 
-    <!-- Navigation principale -->
-    <nav class="bg-purple-600 text-white shadow-lg">
-        <div class="container mx-auto px-4">
-            <div class="flex justify-between items-center py-4">
-                <div class="flex items-center space-x-2">
-                    <i class="fas fa-user text-2xl"></i>
-                    <h1 class="text-xl font-bold">NAGEX Pharma - Espace Client</h1>
-                </div>
-                <div class="flex items-center space-x-4">
-                    <a href="?page=panier" class="relative">
-                        <i class="fas fa-shopping-cart text-xl"></i>
-                        <?php if (!empty($_SESSION['panier'])): ?>
-                            <span
-                                class="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                                <?php echo array_sum($_SESSION['panier']); ?>
-                            </span>
-                        <?php endif; ?>
-                    </a>
-                    <span class="text-sm">
-                        <i class="fas fa-user mr-1"></i>
-                        <?php echo e($user_info['nom'] ?? 'Client'); ?>
-                    </span>
-                    <a href="logout.php" class="bg-red-500 hover:bg-red-600 px-3 py-1 rounded text-sm">
-                        <i class="fas fa-sign-out-alt mr-1"></i>Déconnexion
-                    </a>
-                </div>
-            </div>
-        </div>
-    </nav>
 
     <div class="flex">
         <!-- Sidebar -->
         <div class="sidebar w-64 bg-white shadow-lg min-h-screen">
-            <div class="p-4 border-b">
-                <h2 class="font-bold text-lg text-gray-700">
-                    <i class="fas fa-tachometer-alt mr-2"></i>Mon Espace
-                </h2>
+            <!-- Logo Section avec fond dégradé -->
+            <div class="flex items-center justify-center p-6 border-b bg-gradient-to-r from-emerald-50 to-green-50">
+                <div class="flex items-center space-x-3">
+                    <div
+                        class="w-12 h-12 bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl flex items-center justify-center shadow-lg">
+                        <i class="fas fa-capsules text-white text-xl"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold text-gray-800">NAGEX Pharma</h1>
+                        <p class="text-xs text-green-600 font-medium">Client Dashboard</p>
+                    </div>
+                </div>
             </div>
-            <nav class="mt-4">
+            <!-- ========== NAVIGATION LATÉRALE ========== -->
+            <nav class="space-y-1">
+                <!-- Tableau de bord -->
                 <a href="?page=dashboard"
-                    class="block py-2 px-4 hover:bg-purple-50 <?php echo $current_page == 'dashboard' ? 'active-menu text-purple-600' : 'text-gray-700'; ?>">
-                    <i class="fas fa-home mr-2"></i>Tableau de bord
+                    class="menu-item group relative flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-300 ease-out <?php echo $current_page == 'dashboard' ? 'active-menu bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg' : 'text-gray-600 hover:bg-gradient-to-r hover:from-emerald-50 hover:to-teal-50 hover:text-emerald-700 hover:shadow-md'; ?>">
+                    <div class="relative">
+                        <i
+                            class="fas fa-home w-5 h-5 mr-3 <?php echo $current_page == 'dashboard' ? 'text-white' : 'text-gray-400 group-hover:text-emerald-500'; ?>"></i>
+                    </div>
+                    <span class="flex-1">Tableau de bord</span>
+                    <?php if ($current_page == 'dashboard'): ?>
+                        <div class="absolute -right-2 top-1/2 -translate-y-1/2 w-2 h-8 bg-emerald-500 rounded-l-lg"></div>
+                    <?php endif; ?>
                 </a>
 
-                <div class="px-4 py-2 text-gray-500 text-sm font-semibold mt-4">
-                    <i class="fas fa-shopping-bag mr-2"></i>Boutique
+                <!-- Section Boutique -->
+                <div class="section-title">
+                    <div
+                        class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-emerald-600 flex items-center">
+                        <div class="w-8 h-px bg-emerald-200 mr-3"></div>
+                        <i class="fas fa-shopping-bag text-emerald-500 mr-2"></i>
+                        <span>Boutique</span>
+                        <div class="flex-1 h-px bg-emerald-200 ml-3"></div>
+                    </div>
                 </div>
+
+                <!-- Catalogue produits -->
                 <a href="?page=catalogue"
-                    class="block py-2 px-4 hover:bg-purple-50 <?php echo $current_page == 'catalogue' ? 'active-menu text-purple-600' : 'text-gray-700'; ?>">
-                    <i class="fas fa-store mr-2"></i>Catalogue produits
+                    class="menu-item group relative flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-300 ease-out <?php echo $current_page == 'catalogue' ? 'active-menu bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg' : 'text-gray-600 hover:bg-gradient-to-r hover:from-emerald-50 hover:to-teal-50 hover:text-emerald-700 hover:shadow-md'; ?>">
+                    <div class="relative">
+                        <i
+                            class="fas fa-store w-5 h-5 mr-3 <?php echo $current_page == 'catalogue' ? 'text-white' : 'text-gray-400 group-hover:text-emerald-500'; ?>"></i>
+                    </div>
+                    <span class="flex-1">Catalogue produits</span>
+                    <?php if ($current_page == 'catalogue'): ?>
+                        <div class="absolute -right-2 top-1/2 -translate-y-1/2 w-2 h-8 bg-emerald-500 rounded-l-lg"></div>
+                    <?php endif; ?>
                 </a>
+
+                <!-- Favoris -->
                 <a href="?page=favoris"
-                    class="block py-2 px-4 hover:bg-purple-50 <?php echo $current_page == 'favoris' ? 'active-menu text-purple-600' : 'text-gray-700'; ?>">
-                    <i class="fas fa-heart mr-2"></i>Mes favoris
+                    class="menu-item group relative flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-300 ease-out <?php echo $current_page == 'favoris' ? 'active-menu bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg' : 'text-gray-600 hover:bg-gradient-to-r hover:from-emerald-50 hover:to-teal-50 hover:text-emerald-700 hover:shadow-md'; ?>">
+                    <div class="relative">
+                        <i
+                            class="fas fa-heart w-5 h-5 mr-3 <?php echo $current_page == 'favoris' ? 'text-white' : 'text-gray-400 group-hover:text-emerald-500'; ?>"></i>
+                    </div>
+                    <span class="flex-1">Mes favoris</span>
                     <?php if ($stats['produits_favoris'] > 0): ?>
-                        <span class="float-right bg-red-500 text-white text-xs rounded-full px-2">
+                        <span
+                            class="badge-danger ml-auto animate-pulse bg-gradient-to-r from-rose-500 to-pink-600 text-white text-xs font-bold py-1 px-2.5 rounded-full shadow-sm">
                             <?php echo $stats['produits_favoris']; ?>
                         </span>
                     <?php endif; ?>
+                    <?php if ($current_page == 'favoris'): ?>
+                        <div class="absolute -right-2 top-1/2 -translate-y-1/2 w-2 h-8 bg-emerald-500 rounded-l-lg"></div>
+                    <?php endif; ?>
                 </a>
 
-                <div class="px-4 py-2 text-gray-500 text-sm font-semibold mt-4">
-                    <i class="fas fa-shopping-cart mr-2"></i>Commandes
+                <!-- Section Commandes -->
+                <div class="section-title">
+                    <div
+                        class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-emerald-600 flex items-center">
+                        <div class="w-8 h-px bg-emerald-200 mr-3"></div>
+                        <i class="fas fa-shopping-cart text-emerald-500 mr-2"></i>
+                        <span>Commandes</span>
+                        <div class="flex-1 h-px bg-emerald-200 ml-3"></div>
+                    </div>
                 </div>
+
+                <!-- Panier -->
                 <a href="?page=panier"
-                    class="block py-2 px-4 hover:bg-purple-50 <?php echo $current_page == 'panier' ? 'active-menu text-purple-600' : 'text-gray-700'; ?>">
-                    <i class="fas fa-cart-shopping mr-2"></i>Mon panier
+                    class="menu-item group relative flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-300 ease-out <?php echo $current_page == 'panier' ? 'active-menu bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg' : 'text-gray-600 hover:bg-gradient-to-r hover:from-emerald-50 hover:to-teal-50 hover:text-emerald-700 hover:shadow-md'; ?>">
+                    <div class="relative">
+                        <i
+                            class="fas fa-cart-shopping w-5 h-5 mr-3 <?php echo $current_page == 'panier' ? 'text-white' : 'text-gray-400 group-hover:text-emerald-500'; ?>"></i>
+                    </div>
+                    <span class="flex-1">Mon panier</span>
                     <?php if (!empty($_SESSION['panier'])): ?>
-                        <span class="float-right bg-yellow-500 text-white text-xs rounded-full px-2">
+                        <span
+                            class="badge-warning ml-auto bg-gradient-to-r from-amber-400 to-orange-500 text-white text-xs font-bold py-1 px-2.5 rounded-full shadow-sm">
                             <?php echo array_sum($_SESSION['panier']); ?>
                         </span>
                     <?php endif; ?>
-                </a>
-                <a href="?page=commandes"
-                    class="block py-2 px-4 hover:bg-purple-50 <?php echo $current_page == 'commandes' ? 'active-menu text-purple-600' : 'text-gray-700'; ?>">
-                    <i class="fas fa-history mr-2"></i>Mes commandes
-                    <?php if ($stats['commandes_total'] > 0): ?>
-                        <span class="float-right bg-blue-500 text-white text-xs rounded-full px-2">
-                            <?php echo $stats['commandes_total']; ?>
-                        </span>
+                    <?php if ($current_page == 'panier'): ?>
+                        <div class="absolute -right-2 top-1/2 -translate-y-1/2 w-2 h-8 bg-emerald-500 rounded-l-lg"></div>
                     <?php endif; ?>
                 </a>
 
-                <div class="px-4 py-2 text-gray-500 text-sm font-semibold mt-4">
-                    <i class="fas fa-user-circle mr-2"></i>Mon compte
+                <!-- Historique commandes -->
+                <a href="?page=commandes"
+                    class="menu-item group relative flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-300 ease-out <?php echo $current_page == 'commandes' ? 'active-menu bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg' : 'text-gray-600 hover:bg-gradient-to-r hover:from-emerald-50 hover:to-teal-50 hover:text-emerald-700 hover:shadow-md'; ?>">
+                    <div class="relative">
+                        <i
+                            class="fas fa-history w-5 h-5 mr-3 <?php echo $current_page == 'commandes' ? 'text-white' : 'text-gray-400 group-hover:text-emerald-500'; ?>"></i>
+                    </div>
+                    <span class="flex-1">Mes commandes</span>
+                    <?php if ($stats['commandes_total'] > 0): ?>
+                        <span
+                            class="badge-info ml-auto bg-gradient-to-r from-blue-500 to-cyan-600 text-white text-xs font-bold py-1 px-2.5 rounded-full shadow-sm">
+                            <?php echo $stats['commandes_total']; ?>
+                        </span>
+                    <?php endif; ?>
+                    <?php if ($current_page == 'commandes'): ?>
+                        <div class="absolute -right-2 top-1/2 -translate-y-1/2 w-2 h-8 bg-emerald-500 rounded-l-lg"></div>
+                    <?php endif; ?>
+                </a>
+
+                <!-- Section Compte -->
+                <div class="section-title">
+                    <div
+                        class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-emerald-600 flex items-center">
+                        <div class="w-8 h-px bg-emerald-200 mr-3"></div>
+                        <i class="fas fa-user-circle text-emerald-500 mr-2"></i>
+                        <span>Mon compte</span>
+                        <div class="flex-1 h-px bg-emerald-200 ml-3"></div>
+                    </div>
                 </div>
+
+                <!-- Profil -->
                 <a href="?page=profil"
-                    class="block py-2 px-4 hover:bg-purple-50 <?php echo $current_page == 'profil' ? 'active-menu text-purple-600' : 'text-gray-700'; ?>">
-                    <i class="fas fa-user-edit mr-2"></i>Mon profil
+                    class="menu-item group relative flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-300 ease-out <?php echo $current_page == 'profil' ? 'active-menu bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg' : 'text-gray-600 hover:bg-gradient-to-r hover:from-emerald-50 hover:to-teal-50 hover:text-emerald-700 hover:shadow-md'; ?>">
+                    <div class="relative">
+                        <i
+                            class="fas fa-user-edit w-5 h-5 mr-3 <?php echo $current_page == 'profil' ? 'text-white' : 'text-gray-400 group-hover:text-emerald-500'; ?>"></i>
+                    </div>
+                    <span class="flex-1">Mon profil</span>
+                    <?php if ($current_page == 'profil'): ?>
+                        <div class="absolute -right-2 top-1/2 -translate-y-1/2 w-2 h-8 bg-emerald-500 rounded-l-lg"></div>
+                    <?php endif; ?>
                 </a>
             </nav>
+
+
         </div>
 
         <!-- Contenu principal -->
@@ -810,398 +1040,1044 @@ try {
 
             <!-- Contenu selon la page -->
             <?php if ($current_page == 'dashboard'): ?>
-                <!-- ========== DASHBOARD CLIENT ========== -->
-                <div class="mb-6">
-                    <h1 class="text-2xl font-bold text-gray-800">Tableau de bord</h1>
-                    <p class="text-gray-600">Bienvenue dans votre espace client NAGEX Pharma</p>
-                </div>
+                <!-- ========== TABLEAU DE BORD CLIENT ========== -->
+                <div class="mb-8">
+                    <!-- En-tête avec bienvenue -->
+                    <div class="mb-8 text-center lg:text-left">
+                        <div
+                            class="inline-flex items-center justify-center lg:justify-start px-4 py-2 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-2xl border border-emerald-100 mb-4">
+                            <i class="fas fa-leaf text-emerald-500 mr-2"></i>
+                            <span class="text-sm font-medium text-emerald-700">NAGEX Pharma - Espace Client</span>
+                        </div>
+                        <h1 class="text-3xl lg:text-4xl font-bold text-gray-900 tracking-tight mb-2">
+                            Tableau de bord
+                        </h1>
+                        <p class="text-gray-600 text-lg">
+                            Bonjour <span
+                                class="font-semibold text-emerald-600"><?php echo isset($_SESSION['user_nom']) ? $_SESSION['user_nom'] : 'Client'; ?></span>,
+                            bienvenue dans votre espace dédié
+                        </p>
+                    </div>
 
-                <!-- Cartes de statistiques -->
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                    <div class="stat-card bg-white p-6 rounded-lg shadow-md border border-gray-200">
-                        <div class="flex items-center">
-                            <div class="p-3 bg-purple-100 rounded-lg">
-                                <i class="fas fa-shopping-bag text-purple-600 text-xl"></i>
+                    <!-- Cartes de statistiques améliorées -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+                        <!-- Carte : Commandes totales -->
+                        <div
+                            class="stat-card group relative bg-gradient-to-br from-white to-gray-50 p-6 rounded-2xl shadow-lg border border-gray-100 hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
+                            <div
+                                class="absolute inset-0 bg-gradient-to-br from-purple-500/5 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                             </div>
-                            <div class="ml-4">
-                                <p class="text-gray-500 text-sm">Commandes totales</p>
-                                <p class="text-2xl font-bold"><?php echo $stats['commandes_total']; ?></p>
+                            <div class="relative flex items-center">
+                                <div class="p-4 bg-gradient-to-br from-purple-500 to-violet-600 rounded-xl shadow-lg">
+                                    <i class="fas fa-shopping-bag text-white text-2xl"></i>
+                                </div>
+                                <div class="ml-5">
+                                    <p class="text-gray-500 text-sm font-medium mb-1">Commandes totales</p>
+                                    <p class="text-3xl font-bold text-gray-900"><?php echo $stats['commandes_total']; ?></p>
+                                    <div class="mt-2 text-xs text-purple-600 font-semibold flex items-center">
+                                        <i class="fas fa-trend-up mr-1"></i>
+                                        <span>Suivi complet</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-4 pt-4 border-t border-gray-100">
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-gray-500">En attente :</span>
+                                    <span
+                                        class="font-semibold text-amber-600"><?php echo $stats['commandes_attente'] ?? 0; ?></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Carte : Commandes en cours -->
+                        <div
+                            class="stat-card group relative bg-gradient-to-br from-white to-gray-50 p-6 rounded-2xl shadow-lg border border-gray-100 hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
+                            <div
+                                class="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                            </div>
+                            <div class="relative flex items-center">
+                                <div class="p-4 bg-gradient-to-br from-blue-500 to-cyan-600 rounded-xl shadow-lg">
+                                    <i class="fas fa-clock text-white text-2xl"></i>
+                                </div>
+                                <div class="ml-5">
+                                    <p class="text-gray-500 text-sm font-medium mb-1">En cours</p>
+                                    <p class="text-3xl font-bold text-gray-900"><?php echo $stats['commandes_encours']; ?>
+                                    </p>
+                                    <div class="mt-2 text-xs text-blue-600 font-semibold flex items-center">
+                                        <i class="fas fa-spinner fa-spin mr-1"></i>
+                                        <span>Traitement actif</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-4 pt-4 border-t border-gray-100">
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-gray-500">Livraison :</span>
+                                    <span
+                                        class="font-semibold text-blue-600"><?php echo $stats['commandes_livraison'] ?? 0; ?></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Carte : Dépenses totales -->
+                        <div
+                            class="stat-card group relative bg-gradient-to-br from-white to-gray-50 p-6 rounded-2xl shadow-lg border border-gray-100 hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
+                            <div
+                                class="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                            </div>
+                            <div class="relative flex items-center">
+                                <div class="p-4 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl shadow-lg">
+                                    <i class="fas fa-chart-line text-white text-2xl"></i>
+                                </div>
+                                <div class="ml-5">
+                                    <p class="text-gray-500 text-sm font-medium mb-1">Dépenses totales</p>
+                                    <?php if (isset($commande) && !empty($commande)): ?>
+                                        <p class="text-3xl font-bold text-gray-900">
+                                            <?php echo formatMontant(floatval($commande['montant_total'] ?? 0)); ?>
+                                        </p>
+                                    <?php else: ?>
+                                        <p class="text-3xl font-bold text-gray-900"><?php echo formatMontant(0); ?></p>
+                                    <?php endif; ?>
+                                    <div class="mt-2 text-xs text-emerald-600 font-semibold flex items-center">
+                                        <i class="fas fa-wallet mr-1"></i>
+                                        <span>Solde actuel</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-4 pt-4 border-t border-gray-100">
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-gray-500">Moyenne :</span>
+                                    <?php
+                                    $avg = isset($stats['commandes_total']) && $stats['commandes_total'] > 0 && isset($commande['montant_total'])
+                                        ? floatval($commande['montant_total']) / $stats['commandes_total']
+                                        : 0;
+                                    ?>
+                                    <span class="font-semibold text-emerald-600"><?php echo formatMontant($avg); ?></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Carte : Favoris -->
+                        <div
+                            class="stat-card group relative bg-gradient-to-br from-white to-gray-50 p-6 rounded-2xl shadow-lg border border-gray-100 hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
+                            <div
+                                class="absolute inset-0 bg-gradient-to-br from-rose-500/5 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                            </div>
+                            <div class="relative flex items-center">
+                                <div class="p-4 bg-gradient-to-br from-rose-500 to-pink-600 rounded-xl shadow-lg">
+                                    <i class="fas fa-heart text-white text-2xl"></i>
+                                </div>
+                                <div class="ml-5">
+                                    <p class="text-gray-500 text-sm font-medium mb-1">Favoris</p>
+                                    <p class="text-3xl font-bold text-gray-900"><?php echo $stats['produits_favoris']; ?>
+                                    </p>
+                                    <div class="mt-2 text-xs text-rose-600 font-semibold flex items-center">
+                                        <i class="fas fa-star mr-1"></i>
+                                        <span>Produits aimés</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-4 pt-4 border-t border-gray-100">
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-gray-500">En stock :</span>
+                                    <span
+                                        class="font-semibold text-emerald-600"><?php echo $stats['favoris_stock'] ?? $stats['produits_favoris']; ?></span>
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    <div class="stat-card bg-white p-6 rounded-lg shadow-md border border-gray-200">
-                        <div class="flex items-center">
-                            <div class="p-3 bg-blue-100 rounded-lg">
-                                <i class="fas fa-clock text-blue-600 text-xl"></i>
+                    <!-- Grille principale : Dernières commandes + Actions rapides -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                        <!-- Dernières commandes -->
+                        <div
+                            class="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+                            <div class="p-6 border-b border-gray-100">
+                                <div class="flex items-center justify-between">
+                                    <div class="flex items-center">
+                                        <div class="p-3 bg-gradient-to-br from-blue-100 to-cyan-100 rounded-xl mr-4">
+                                            <i class="fas fa-history text-blue-600 text-xl"></i>
+                                        </div>
+                                        <div>
+                                            <h2 class="text-xl font-bold text-gray-900">Dernières commandes</h2>
+                                            <p class="text-sm text-gray-500">Vos 5 dernières transactions</p>
+                                        </div>
+                                    </div>
+                                    <div class="text-xs font-semibold text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
+                                        <?php echo count($dernieres_commandes); ?> commandes
+                                    </div>
+                                </div>
                             </div>
-                            <div class="ml-4">
-                                <p class="text-gray-500 text-sm">En cours</p>
-                                <p class="text-2xl font-bold"><?php echo $stats['commandes_encours']; ?></p>
-                            </div>
-                        </div>
-                    </div>
 
-                    <div class="stat-card bg-white p-6 rounded-lg shadow-md border border-gray-200">
-                        <div class="flex items-center">
-                            <div class="p-3 bg-green-100 rounded-lg">
-                                <i class="fas fa-chart-line text-green-600 text-xl"></i>
-                            </div>
-                            <div class="ml-4">
-                                <p class="text-gray-500 text-sm">Dépenses totales</p>
-                                <?php if (isset($commande) && !empty($commande)): ?>
-                                    <p class="font-bold text-purple-600">
-                                        <?php echo formatMontant(floatval($commande['montant_total'] ?? 0)); ?></p>
+                            <div class="p-6">
+                                <?php if (count($dernieres_commandes) > 0): ?>
+                                    <div class="space-y-4">
+                                        <?php foreach ($dernieres_commandes as $index => $commande): ?>
+                                            <div
+                                                class="group relative bg-white p-4 rounded-xl border border-gray-200 hover:border-blue-200 hover:shadow-md transition-all duration-200">
+                                                <div class="flex items-center justify-between">
+                                                    <div class="flex-1">
+                                                        <div class="flex items-center mb-2">
+                                                            <span
+                                                                class="font-bold text-gray-900 mr-3">#<?php echo e($commande['numero_commande']); ?></span>
+                                                            <span class="text-xs px-2.5 py-1 rounded-full font-semibold <?php
+                                                            echo $commande['statut'] == 'paye' ? 'bg-emerald-100 text-emerald-800' :
+                                                                ($commande['statut'] == 'en_attente' ? 'bg-amber-100 text-amber-800' :
+                                                                    ($commande['statut'] == 'expedie' ? 'bg-blue-100 text-blue-800' :
+                                                                        'bg-rose-100 text-rose-800'));
+                                                            ?>">
+                                                                <?php echo ucfirst(str_replace('_', ' ', $commande['statut'])); ?>
+                                                            </span>
+                                                        </div>
+                                                        <div class="flex items-center text-sm text-gray-600">
+                                                            <i class="fas fa-calendar-day mr-2 text-gray-400"></i>
+                                                            <span><?php echo date('d/m/Y', strtotime($commande['date_commande'])); ?></span>
+                                                            <span class="mx-2">•</span>
+                                                            <i class="fas fa-boxes mr-2 text-gray-400"></i>
+                                                            <span><?php echo $commande['nombre_produits']; ?> produit(s)</span>
+                                                        </div>
+                                                    </div>
+                                                    <div class="text-right">
+                                                        <p class="text-lg font-bold text-emerald-600 mb-1">
+                                                            <?php echo formatMontant($commande['montant_total']); ?>
+                                                        </p>
+                                                        <button onclick="voirDetails(<?php echo $commande['id']; ?>)"
+                                                            class="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center justify-end">
+                                                            Détails
+                                                            <i class="fas fa-chevron-right ml-1 text-xs"></i>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        <?php endforeach; ?>
+                                    </div>
+
+                                    <div class="mt-6 pt-6 border-t border-gray-100 text-center">
+                                        <a href="?page=commandes"
+                                            class="inline-flex items-center text-blue-600 hover:text-blue-800 font-semibold text-sm group">
+                                            <span>Voir l'historique complet</span>
+                                            <i
+                                                class="fas fa-arrow-right ml-2 transform group-hover:translate-x-1 transition-transform duration-200"></i>
+                                        </a>
+                                    </div>
+                                <?php else: ?>
+                                    <div class="text-center py-10">
+                                        <div
+                                            class="w-20 h-20 mx-auto mb-6 bg-gray-100 rounded-full flex items-center justify-center">
+                                            <i class="fas fa-shopping-bag text-gray-400 text-3xl"></i>
+                                        </div>
+                                        <h3 class="text-lg font-semibold text-gray-800 mb-2">Aucune commande</h3>
+                                        <p class="text-gray-600 mb-6 max-w-sm mx-auto">
+                                            Vous n'avez pas encore passé de commande. Découvrez notre catalogue pour commencer.
+                                        </p>
+                                        <a href="?page=catalogue"
+                                            class="inline-flex items-center bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-700 hover:to-cyan-700 text-white font-semibold px-6 py-3 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300">
+                                            <i class="fas fa-store mr-3"></i>
+                                            Explorer le catalogue
+                                        </a>
+                                    </div>
                                 <?php endif; ?>
                             </div>
                         </div>
-                    </div>
 
-                    <div class="stat-card bg-white p-6 rounded-lg shadow-md border border-gray-200">
-                        <div class="flex items-center">
-                            <div class="p-3 bg-red-100 rounded-lg">
-                                <i class="fas fa-heart text-red-600 text-xl"></i>
+                        <!-- Actions rapides -->
+                        <div
+                            class="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+                            <div class="p-6 border-b border-gray-100">
+                                <div class="flex items-center">
+                                    <div class="p-3 bg-gradient-to-br from-emerald-100 to-teal-100 rounded-xl mr-4">
+                                        <i class="fas fa-bolt text-emerald-600 text-xl"></i>
+                                    </div>
+                                    <div>
+                                        <h2 class="text-xl font-bold text-gray-900">Actions rapides</h2>
+                                        <p class="text-sm text-gray-500">Accédez rapidement aux fonctionnalités clés</p>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="ml-4">
-                                <p class="text-gray-500 text-sm">Favoris</p>
-                                <p class="text-2xl font-bold"><?php echo $stats['produits_favoris']; ?></p>
+
+                            <div class="p-6">
+                                <div class="space-y-5">
+                                    <!-- Action : Catalogue -->
+                                    <a href="?page=catalogue"
+                                        class="group relative flex items-center justify-between p-5 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-xl border border-blue-200 hover:border-blue-300 hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5">
+                                        <div class="flex items-center">
+                                            <div
+                                                class="p-3 bg-gradient-to-br from-blue-500 to-cyan-600 rounded-lg shadow-lg mr-4 group-hover:scale-110 transition-transform duration-300">
+                                                <i class="fas fa-store text-white text-xl"></i>
+                                            </div>
+                                            <div>
+                                                <p class="font-bold text-gray-900 text-lg mb-1">Parcourir le catalogue</p>
+                                                <p class="text-sm text-gray-600">Découvrez +500 produits pharmaceutiques</p>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center">
+                                            <span
+                                                class="text-blue-600 font-semibold text-sm mr-3 hidden md:inline">Accéder</span>
+                                            <i
+                                                class="fas fa-chevron-right text-blue-400 text-lg group-hover:translate-x-2 transition-transform duration-300"></i>
+                                        </div>
+                                    </a>
+
+                                    <!-- Action : Panier -->
+                                    <a href="?page=panier"
+                                        class="group relative flex items-center justify-between p-5 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl border border-amber-200 hover:border-amber-300 hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5">
+                                        <div class="flex items-center">
+                                            <div
+                                                class="p-3 bg-gradient-to-br from-amber-500 to-orange-600 rounded-lg shadow-lg mr-4 group-hover:scale-110 transition-transform duration-300">
+                                                <i class="fas fa-shopping-cart text-white text-xl"></i>
+                                            </div>
+                                            <div>
+                                                <p class="font-bold text-gray-900 text-lg mb-1">Voir mon panier</p>
+                                                <p class="text-sm text-gray-600">
+                                                    <?php
+                                                    $nb_articles = !empty($_SESSION['panier']) ? array_sum($_SESSION['panier']) : 0;
+                                                    $article_text = $nb_articles == 1 ? 'article' : 'articles';
+                                                    echo "$nb_articles $article_text en attente";
+                                                    ?>
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center">
+                                            <?php if ($nb_articles > 0): ?>
+                                                <span
+                                                    class="bg-gradient-to-r from-amber-500 to-orange-600 text-white text-xs font-bold py-1 px-2.5 rounded-full shadow-sm mr-3">
+                                                    <?php echo $nb_articles; ?>
+                                                </span>
+                                            <?php endif; ?>
+                                            <span
+                                                class="text-amber-600 font-semibold text-sm mr-3 hidden md:inline">Voir</span>
+                                            <i
+                                                class="fas fa-chevron-right text-amber-400 text-lg group-hover:translate-x-2 transition-transform duration-300"></i>
+                                        </div>
+                                    </a>
+
+                                    <!-- Action : Favoris -->
+                                    <a href="?page=favoris"
+                                        class="group relative flex items-center justify-between p-5 bg-gradient-to-r from-rose-50 to-pink-50 rounded-xl border border-rose-200 hover:border-rose-300 hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5">
+                                        <div class="flex items-center">
+                                            <div
+                                                class="p-3 bg-gradient-to-br from-rose-500 to-pink-600 rounded-lg shadow-lg mr-4 group-hover:scale-110 transition-transform duration-300">
+                                                <i class="fas fa-heart text-white text-xl"></i>
+                                            </div>
+                                            <div>
+                                                <p class="font-bold text-gray-900 text-lg mb-1">Mes favoris</p>
+                                                <p class="text-sm text-gray-600">
+                                                    <?php echo $stats['produits_favoris']; ?> produit(s) sauvegardé(s)
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center">
+                                            <?php if ($stats['produits_favoris'] > 0): ?>
+                                                <span
+                                                    class="bg-gradient-to-r from-rose-500 to-pink-600 text-white text-xs font-bold py-1 px-2.5 rounded-full shadow-sm mr-3">
+                                                    <?php echo $stats['produits_favoris']; ?>
+                                                </span>
+                                            <?php endif; ?>
+                                            <span
+                                                class="text-rose-600 font-semibold text-sm mr-3 hidden md:inline">Consulter</span>
+                                            <i
+                                                class="fas fa-chevron-right text-rose-400 text-lg group-hover:translate-x-2 transition-transform duration-300"></i>
+                                        </div>
+                                    </a>
+
+                                    <!-- Action supplémentaire : Mon profil -->
+                                    <a href="?page=profil"
+                                        class="group relative flex items-center justify-between p-5 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-xl border border-emerald-200 hover:border-emerald-300 hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5">
+                                        <div class="flex items-center">
+                                            <div
+                                                class="p-3 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-lg shadow-lg mr-4 group-hover:scale-110 transition-transform duration-300">
+                                                <i class="fas fa-user-edit text-white text-xl"></i>
+                                            </div>
+                                            <div>
+                                                <p class="font-bold text-gray-900 text-lg mb-1">Mon profil</p>
+                                                <p class="text-sm text-gray-600">Gérez vos informations personnelles</p>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center">
+                                            <span
+                                                class="text-emerald-600 font-semibold text-sm mr-3 hidden md:inline">Gérer</span>
+                                            <i
+                                                class="fas fa-chevron-right text-emerald-400 text-lg group-hover:translate-x-2 transition-transform duration-300"></i>
+                                        </div>
+                                    </a>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Dernières commandes et actions rapides -->
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                    <div class="bg-white rounded-lg shadow-md p-6">
-                        <h2 class="text-xl font-bold text-gray-800 mb-4">
-                            <i class="fas fa-history mr-2"></i>Dernières commandes
-                        </h2>
-                        <?php if (count($dernieres_commandes) > 0): ?>
-                            <div class="space-y-3">
-                                <?php foreach ($dernieres_commandes as $commande): ?>
-                                    <div class="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-                                        <div>
-                                            <p class="font-semibold">#<?php echo e($commande['numero_commande']); ?></p>
-                                            <p class="text-sm text-gray-600">
-                                                <?php echo date('d/m/Y', strtotime($commande['date_commande'])); ?>
-                                                • <?php echo $commande['nombre_produits']; ?> produit(s)
-                                            </p>
-                                        </div>
-                                        <div class="text-right">
-                                            <p class="font-bold text-purple-600">
-                                                <?php echo formatMontant($commande['montant_total']); ?></p>
-                                            <span class="text-xs px-2 py-1 rounded <?php
-                                            echo $commande['statut'] == 'paye' ? 'bg-green-100 text-green-800' :
-                                                ($commande['statut'] == 'en_attente' ? 'bg-yellow-100 text-yellow-800' :
-                                                    'bg-red-100 text-red-800');
-                                            ?>">
-                                                <?php echo ucfirst(str_replace('_', ' ', $commande['statut'])); ?>
-                                            </span>
-                                        </div>
-                                    </div>
-                                <?php endforeach; ?>
-                            </div>
-                            <div class="mt-4 text-center">
-                                <a href="?page=commandes" class="text-purple-600 hover:text-purple-800 text-sm font-semibold">
-                                    Voir toutes les commandes →
-                                </a>
-                            </div>
-                        <?php else: ?>
-                            <p class="text-gray-500 text-center py-4">Vous n'avez pas encore passé de commande</p>
-                            <div class="text-center">
-                                <a href="?page=catalogue"
-                                    class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg inline-block">
-                                    <i class="fas fa-store mr-2"></i>Découvrir le catalogue
-                                </a>
-                            </div>
-                        <?php endif; ?>
+                >
+            <?php elseif ($current_page == 'catalogue'): ?>
+                <!-- ========== CATALOGUE PRODUITS ========== -->
+                <div class="mb-8">
+                    <!-- En-tête du catalogue -->
+                    <div class="mb-8 text-center lg:text-left">
+                        <div
+                            class="inline-flex items-center justify-center lg:justify-start px-4 py-2 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-2xl border border-emerald-100 mb-4">
+                            <i class="fas fa-pills text-emerald-500 mr-2"></i>
+                            <span class="text-sm font-medium text-emerald-700">Pharmacie NAGEX</span>
+                        </div>
+                        <h1 class="text-3xl lg:text-4xl font-bold text-gray-900 tracking-tight mb-2">Catalogue des produits
+                        </h1>
+                        <p class="text-gray-600 text-lg">Découvrez notre sélection de
+                            <?php echo count($produits_catalogue); ?> produits pharmaceutiques de qualité
+                        </p>
                     </div>
 
-                    <div class="bg-white rounded-lg shadow-md p-6">
-                        <h2 class="text-xl font-bold text-gray-800 mb-4">
-                            <i class="fas fa-bolt mr-2"></i>Actions rapides
-                        </h2>
-                        <div class="space-y-4">
-                            <a href="?page=catalogue"
-                                class="flex items-center justify-between p-4 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200">
-                                <div class="flex items-center">
-                                    <i class="fas fa-store text-purple-600 text-xl mr-3"></i>
-                                    <div>
-                                        <p class="font-semibold text-purple-700">Parcourir le catalogue</p>
-                                        <p class="text-sm text-purple-600">Découvrez nos produits</p>
+                    <!-- Filtres et recherche - Carte améliorée -->
+                    <div
+                        class="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg border border-gray-100 p-6 mb-8">
+                        <div class="flex items-center mb-6">
+                            <div class="p-3 bg-gradient-to-br from-blue-100 to-cyan-100 rounded-xl mr-4">
+                                <i class="fas fa-sliders-h text-blue-600 text-xl"></i>
+                            </div>
+                            <div>
+                                <h2 class="text-xl font-bold text-gray-900">Filtrer & Rechercher</h2>
+                                <p class="text-sm text-gray-500">Affinez votre recherche parmi nos produits</p>
+                            </div>
+                        </div>
+
+                        <form method="GET" action="" class="space-y-6">
+                            <input type="hidden" name="page" value="catalogue">
+
+                            <!-- Grille de filtres -->
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                                <!-- Recherche -->
+                                <div class="relative">
+                                    <label class="block text-gray-700 text-sm font-semibold mb-2 pl-1">
+                                        <i class="fas fa-search mr-2 text-blue-500"></i>Recherche
+                                    </label>
+                                    <div class="relative">
+                                        <input type="text" id="recherche" name="recherche"
+                                            value="<?php echo e($_GET['recherche'] ?? ''); ?>"
+                                            class="w-full pl-11 pr-4 py-3 bg-white border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm hover:border-blue-300 transition-colors"
+                                            placeholder="Nom, description, code...">
+                                        <div class="absolute left-3 top-1/2 transform -translate-y-1/2">
+                                            <i class="fas fa-search text-gray-400"></i>
+                                        </div>
                                     </div>
                                 </div>
-                                <i class="fas fa-chevron-right text-purple-400"></i>
-                            </a>
 
-                            <a href="?page=panier"
-                                class="flex items-center justify-between p-4 bg-yellow-50 hover:bg-yellow-100 rounded-lg border border-yellow-200">
+                                <!-- Catégorie -->
+                                <div>
+                                    <label class="block text-gray-700 text-sm font-semibold mb-2 pl-1">
+                                        <i class="fas fa-tag mr-2 text-emerald-500"></i>Catégorie
+                                    </label>
+                                    <div class="relative">
+                                        <select id="categorie" name="categorie"
+                                            class="w-full pl-10 pr-4 py-3 bg-white border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent shadow-sm hover:border-emerald-300 transition-colors appearance-none">
+                                            <option value="">Toutes les catégories</option>
+                                            <?php foreach ($categories ?? [] as $categorie): ?>
+                                                <option value="<?php echo $categorie['id']; ?>" <?php echo (isset($_GET['categorie']) && $_GET['categorie'] == $categorie['id']) ? 'selected' : ''; ?>>
+                                                    <?php echo e($categorie['nom']); ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                        <div class="absolute left-3 top-1/2 transform -translate-y-1/2">
+                                            <i class="fas fa-tag text-gray-400"></i>
+                                        </div>
+                                        <div class="absolute right-3 top-1/2 transform -translate-y-1/2">
+                                            <i class="fas fa-chevron-down text-gray-400"></i>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Tri -->
+                                <div>
+                                    <label class="block text-gray-700 text-sm font-semibold mb-2 pl-1">
+                                        <i class="fas fa-sort-amount-down mr-2 text-purple-500"></i>Trier par
+                                    </label>
+                                    <div class="relative">
+                                        <select id="tri" name="tri"
+                                            class="w-full pl-10 pr-4 py-3 bg-white border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent shadow-sm hover:border-purple-300 transition-colors appearance-none">
+                                            <option value="nom" <?php echo ($_GET['tri'] ?? 'nom') == 'nom' ? 'selected' : ''; ?>>Nom A-Z</option>
+                                            <option value="prix_croissant" <?php echo ($_GET['tri'] ?? '') == 'prix_croissant' ? 'selected' : ''; ?>>Prix croissant</option>
+                                            <option value="prix_decroissant" <?php echo ($_GET['tri'] ?? '') == 'prix_decroissant' ? 'selected' : ''; ?>>Prix décroissant</option>
+                                            <option value="nouveautes" <?php echo ($_GET['tri'] ?? '') == 'nouveautes' ? 'selected' : ''; ?>>Nouveautés</option>
+                                            <option value="populaires" <?php echo ($_GET['tri'] ?? '') == 'populaires' ? 'selected' : ''; ?>>Plus populaires</option>
+                                        </select>
+                                        <div class="absolute left-3 top-1/2 transform -translate-y-1/2">
+                                            <i class="fas fa-sort text-gray-400"></i>
+                                        </div>
+                                        <div class="absolute right-3 top-1/2 transform -translate-y-1/2">
+                                            <i class="fas fa-chevron-down text-gray-400"></i>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Stock -->
+                                <div>
+                                    <label class="block text-gray-700 text-sm font-semibold mb-2 pl-1">
+                                        <i class="fas fa-boxes mr-2 text-amber-500"></i>Disponibilité
+                                    </label>
+                                    <div class="relative">
+                                        <select id="stock" name="stock"
+                                            class="w-full pl-10 pr-4 py-3 bg-white border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent shadow-sm hover:border-amber-300 transition-colors appearance-none">
+                                            <option value="">Tous les produits</option>
+                                            <option value="en_stock" <?php echo ($_GET['stock'] ?? '') == 'en_stock' ? 'selected' : ''; ?>>En stock seulement</option>
+                                            <option value="rupture" <?php echo ($_GET['stock'] ?? '') == 'rupture' ? 'selected' : ''; ?>>Rupture de stock</option>
+                                        </select>
+                                        <div class="absolute left-3 top-1/2 transform -translate-y-1/2">
+                                            <i class="fas fa-box text-gray-400"></i>
+                                        </div>
+                                        <div class="absolute right-3 top-1/2 transform -translate-y-1/2">
+                                            <i class="fas fa-chevron-down text-gray-400"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Boutons d'action -->
+                            <div
+                                class="flex flex-col sm:flex-row justify-between items-center pt-4 border-t border-gray-100">
+                                <div class="mb-4 sm:mb-0">
+                                    <span class="text-sm text-gray-500">
+                                        <span
+                                            class="font-semibold text-emerald-600"><?php echo count($produits_catalogue); ?></span>
+                                        produits trouvés
+                                    </span>
+                                </div>
+                                <div class="flex space-x-3">
+                                    <a href="?page=catalogue"
+                                        class="inline-flex items-center px-5 py-2.5 border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50 hover:border-gray-400 font-medium transition-colors shadow-sm">
+                                        <i class="fas fa-redo mr-2"></i>
+                                        Réinitialiser
+                                    </a>
+                                    <button type="submit"
+                                        class="inline-flex items-center px-6 py-2.5 bg-gradient-to-r from-green-600 to-green-600 hover:from-green-700 hover:to-green-700 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transition-all duration-300">
+                                        <i class="fas fa-filter mr-3"></i>
+                                        Appliquer les filtres
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- Liste des produits -->
+                    <?php if (count($produits_catalogue) > 0): ?>
+                        <!-- Barre d'info résultats -->
+                        <div
+                            class="flex flex-col sm:flex-row justify-between items-center mb-6 p-4 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-xl border border-blue-200">
+                            <div class="flex items-center mb-3 sm:mb-0">
+                                <i class="fas fa-cube text-blue-500 text-lg mr-3"></i>
+                                <div>
+                                    <span class="font-semibold text-gray-800"><?php echo count($produits_catalogue); ?>
+                                        produits</span>
+                                    <span class="text-gray-600 text-sm ml-2">correspondent à votre recherche</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center">
+                                <i class="fas fa-lightbulb text-amber-500 mr-2"></i>
+                                <span class="text-sm text-gray-600">
+                                    <span
+                                        class="font-semibold text-emerald-600"><?php echo $stats['en_promotion'] ?? 0; ?></span>
+                                    produits en promotion
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Grille des produits -->
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                            <?php foreach ($produits_catalogue as $produit): ?>
+                                <div
+                                    class="product-card group relative bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg border border-gray-200 hover:border-emerald-300 overflow-hidden transition-all duration-300 hover:-translate-y-2 hover:shadow-xl">
+                                    <!-- Badge promotion -->
+                                    <?php if ($produit['promo_valeur']): ?>
+                                        <div class="absolute top-4 left-4 z-10">
+                                            <span
+                                                class="inline-flex items-center px-3 py-1.5 bg-gradient-to-r from-rose-500 to-pink-600 text-white text-xs font-bold rounded-full shadow-lg">
+                                                <i class="fas fa-bolt mr-1.5"></i>
+                                                <?php echo $produit['type_promotion'] == 'pourcentage' ?
+                                                    '-' . $produit['promo_valeur'] . '%' :
+                                                    '-' . formatMontant($produit['promo_valeur']);
+                                                ?>
+                                            </span>
+                                        </div>
+                                    <?php endif; ?>
+
+                                    <!-- Badge favori -->
+                                    <div class="absolute top-4 right-4 z-10">
+                                        <button
+                                            onclick="toggleFavori(<?php echo $produit['id']; ?>, <?php echo $produit['est_favori'] ? 'true' : 'false'; ?>)"
+                                            class="p-2 bg-white/90 backdrop-blur-sm rounded-full shadow-md hover:shadow-lg transition-all hover:scale-110 <?php echo $produit['est_favori'] ? 'text-rose-500' : 'text-gray-400 hover:text-rose-400'; ?>">
+                                            <i
+                                                class="fas fa-heart <?php echo $produit['est_favori'] ? 'fas' : 'far'; ?> text-lg"></i>
+                                        </button>
+                                    </div>
+
+                                    <!-- Image produit (placeholder) -->
+                                    <div
+                                        class="h-48 bg-gradient-to-br from-blue-50 to-cyan-50 flex items-center justify-center overflow-hidden">
+                                        <div class="text-center p-6">
+                                            <i class="fas fa-pills text-4xl text-blue-400 mb-3"></i>
+                                            <p class="text-xs text-blue-600 font-semibold">NAGEX Pharma</p>
+                                        </div>
+                                    </div>
+
+                                    <!-- Corps de la carte -->
+                                    <div class="p-5">
+                                        <!-- Catégorie -->
+                                        <div class="mb-3">
+                                            <span
+                                                class="inline-flex items-center px-3 py-1 bg-emerald-100 text-emerald-800 text-xs font-semibold rounded-full">
+                                                <i class="fas fa-tag mr-1.5 text-xs"></i>
+                                                <?php echo e($produit['categorie_nom']); ?>
+                                            </span>
+                                        </div>
+
+                                        <!-- Nom produit -->
+                                        <h3
+                                            class="font-bold text-gray-900 text-lg mb-2 group-hover:text-emerald-700 transition-colors line-clamp-1">
+                                            <?php echo e($produit['nom']); ?>
+                                        </h3>
+
+                                        <!-- Description -->
+                                        <p class="text-gray-600 text-sm mb-4 line-clamp-2 leading-relaxed">
+                                            <?php echo e(substr($produit['description'] ?? 'Produit de qualité pharmaceutique', 0, 80)); ?>...
+                                        </p>
+
+                                        <!-- Prix -->
+                                        <div class="mb-5">
+                                            <div class="flex items-baseline space-x-2 mb-1">
+                                                <span class="font-bold text-2xl text-emerald-600">
+                                                    <?php echo formatMontant($produit['prix_final']); ?>
+                                                </span>
+                                                <?php if ($produit['promo_valeur']): ?>
+                                                    <span class="text-sm text-gray-400 line-through">
+                                                        <?php echo formatMontant($produit['prix_fc']); ?>
+                                                    </span>
+                                                <?php endif; ?>
+                                            </div>
+                                            <?php if ($produit['prix_usd']): ?>
+                                                <p class="text-xs text-gray-500 flex items-center">
+                                                    <i class="fas fa-dollar-sign mr-1.5"></i>
+                                                    $<?php echo number_format($produit['prix_usd'], 2); ?> USD
+                                                </p>
+                                            <?php endif; ?>
+                                        </div>
+
+                                        <!-- Stock -->
+                                        <div class="mb-5">
+                                            <div class="flex items-center justify-between">
+                                                <span class="text-sm font-medium text-gray-700">Disponibilité</span>
+                                                <?php if ($produit['stock_quantite'] > 10): ?>
+                                                    <span
+                                                        class="inline-flex items-center px-2.5 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-full">
+                                                        <i class="fas fa-check-circle mr-1.5"></i>
+                                                        En stock
+                                                    </span>
+                                                <?php elseif ($produit['stock_quantite'] > 0): ?>
+                                                    <span
+                                                        class="inline-flex items-center px-2.5 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded-full">
+                                                        <i class="fas fa-exclamation-circle mr-1.5"></i>
+                                                        Stock limité
+                                                    </span>
+                                                <?php else: ?>
+                                                    <span
+                                                        class="inline-flex items-center px-2.5 py-1 bg-rose-100 text-rose-800 text-xs font-bold rounded-full">
+                                                        <i class="fas fa-times-circle mr-1.5"></i>
+                                                        Rupture
+                                                    </span>
+                                                <?php endif; ?>
+                                            </div>
+                                            <?php if ($produit['stock_quantite'] > 0): ?>
+                                                <div class="mt-2">
+                                                    <div class="w-full bg-gray-200 rounded-full h-1.5">
+                                                        <?php
+                                                        $pourcentage = min(100, ($produit['stock_quantite'] / ($produit['stock_quantite'] + 10)) * 100);
+                                                        $couleur = $produit['stock_quantite'] > 10 ? 'bg-emerald-500' : 'bg-amber-500';
+                                                        ?>
+                                                        <div class="<?php echo $couleur; ?> h-1.5 rounded-full"
+                                                            style="width: <?php echo $pourcentage; ?>%"></div>
+                                                    </div>
+                                                    <p class="text-xs text-gray-500 mt-1 text-right">
+                                                        <?php echo $produit['stock_quantite']; ?> unités disponibles
+                                                    </p>
+                                                </div>
+                                            <?php endif; ?>
+                                        </div>
+
+                                        <!-- Actions -->
+                                        <div class="flex space-x-3">
+                                            <!-- Bouton Détails -->
+                                            <button onclick="voirDetailsProduit(<?php echo $produit['id']; ?>)"
+                                                class="flex-1 inline-flex items-center justify-center px-4 py-2.5 bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-200 text-blue-700 font-semibold rounded-xl hover:bg-gradient-to-r hover:from-blue-100 hover:to-cyan-100 hover:border-blue-300 hover:text-blue-800 transition-all group">
+                                                <i class="fas fa-eye mr-2 group-hover:scale-110 transition-transform"></i>
+                                                Détails
+                                            </button>
+
+                                            <!-- Bouton Ajouter au panier -->
+                                            <form method="POST" action="" class="flex-1">
+                                                <input type="hidden" name="action" value="ajouter_panier">
+                                                <input type="hidden" name="produit_id" value="<?php echo $produit['id']; ?>">
+                                                <input type="hidden" name="quantite" value="1">
+                                                <button type="submit"
+                                                    class="w-full inline-flex items-center justify-center px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold rounded-xl hover:from-emerald-600 hover:to-teal-700 shadow-md hover:shadow-lg transition-all group"
+                                                    <?php echo $produit['stock_quantite'] <= 0 ? 'disabled' : ''; ?>>
+                                                    <i class="fas fa-cart-plus mr-2 group-hover:scale-110 transition-transform"></i>
+                                                    Ajouter
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php else: ?>
+                        <!-- État vide amélioré -->
+                        <div
+                            class="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg border border-gray-100 p-16 text-center">
+                            <div class="max-w-md mx-auto">
+                                <div
+                                    class="w-24 h-24 mx-auto mb-8 bg-gradient-to-br from-blue-100 to-cyan-100 rounded-full flex items-center justify-center">
+                                    <i class="fas fa-search text-blue-400 text-4xl"></i>
+                                </div>
+                                <h3 class="text-2xl font-bold text-gray-900 mb-3">Aucun produit trouvé</h3>
+                                <p class="text-gray-600 mb-8">
+                                    Aucun produit ne correspond à vos critères de recherche. Essayez de modifier vos filtres ou
+                                    utilisez des termes de recherche différents.
+                                </p>
+                                <div class="space-y-4">
+                                    <a href="?page=catalogue"
+                                        class="inline-flex items-center px-6 py-3 bg-gradient-to-r from-green-600 to-green-600 text-white font-semibold rounded-xl hover:from-green-700 hover:to-green-700 shadow-lg hover:shadow-xl transition-all">
+                                        <i class="fas fa-redo mr-3"></i>
+                                        Réinitialiser la recherche
+                                    </a>
+
+                                </div>
+                            </div>
+                        </div>
+                    <?php endif; ?>
+                </div>
+
+            <?php elseif ($current_page == 'favoris'): ?>
+                <!-- ========== PAGE MES FAVORIS ========== -->
+                <div class="mb-8">
+                    <!-- En-tête avec compteur -->
+                    <div class="mb-8 text-center lg:text-left">
+                        <div
+                            class="inline-flex items-center justify-center lg:justify-start px-4 py-2 bg-gradient-to-r from-green-50 to-pink-50 rounded-2xl border border-green-100 mb-4">
+                            <i class="fas fa-heart text-green-500 mr-2"></i>
+                            <span class="text-sm font-medium text-green-700">Vos préférences</span>
+                        </div>
+                        <div class="flex flex-col lg:flex-row lg:items-center justify-between">
+                            <div>
+                                <h1 class="text-3xl lg:text-4xl font-bold text-gray-900 tracking-tight mb-2">Mes produits
+                                    favoris</h1>
+                                <p class="text-gray-600 text-lg">Vos produits préférés sauvegardés pour un accès rapide</p>
+                            </div>
+                            <?php if (count($produits_favoris) > 0): ?>
+                                <div class="mt-4 lg:mt-0">
+                                    <span
+                                        class="inline-flex items-center px-4 py-2 bg-gradient-to-r from-rose-500 to-pink-600 text-white font-bold rounded-full shadow-lg">
+                                        <i class="fas fa-star mr-2"></i>
+                                        <?php echo count($produits_favoris); ?>
+                                        produit<?php echo count($produits_favoris) > 1 ? 's' : ''; ?>
+                                    </span>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+
+                    <?php if (count($produits_favoris) > 0): ?>
+                        <!-- Statistiques des favoris -->
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                            <div class="bg-gradient-to-br from-rose-50 to-pink-50 rounded-2xl border border-rose-200 p-6">
                                 <div class="flex items-center">
-                                    <i class="fas fa-shopping-cart text-yellow-600 text-xl mr-3"></i>
+                                    <div class="p-3 bg-white rounded-xl shadow-sm mr-4">
+                                        <i class="fas fa-tags text-rose-500 text-xl"></i>
+                                    </div>
                                     <div>
-                                        <p class="font-semibold text-yellow-700">Voir mon panier</p>
-                                        <p class="text-sm text-yellow-600">
+                                        <p class="text-sm text-gray-600 mb-1">Catégories</p>
+                                        <p class="text-2xl font-bold text-gray-900">
                                             <?php
-                                            $nb_articles = !empty($_SESSION['panier']) ? array_sum($_SESSION['panier']) : 0;
-                                            echo "$nb_articles article(s)";
+                                            $categories_uniques = array_unique(array_column($produits_favoris, 'categorie_nom'));
+                                            echo count($categories_uniques);
                                             ?>
                                         </p>
                                     </div>
                                 </div>
-                                <i class="fas fa-chevron-right text-yellow-400"></i>
-                            </a>
+                            </div>
 
-                            <a href="?page=favoris"
-                                class="flex items-center justify-between p-4 bg-red-50 hover:bg-red-100 rounded-lg border border-red-200">
+                            <div class="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-2xl border border-emerald-200 p-6">
                                 <div class="flex items-center">
-                                    <i class="fas fa-heart text-red-600 text-xl mr-3"></i>
+                                    <div class="p-3 bg-white rounded-xl shadow-sm mr-4">
+                                        <i class="fas fa-percent text-emerald-500 text-xl"></i>
+                                    </div>
                                     <div>
-                                        <p class="font-semibold text-red-700">Mes favoris</p>
-                                        <p class="text-sm text-red-600"><?php echo $stats['produits_favoris']; ?> produit(s)
+                                        <p class="text-sm text-gray-600 mb-1">En promotion</p>
+                                        <p class="text-2xl font-bold text-gray-900">
+                                            <?php
+                                            $en_promotion = array_filter($produits_favoris, function ($p) {
+                                                return $p['promo_valeur'] > 0;
+                                            });
+                                            echo count($en_promotion);
+                                            ?>
                                         </p>
                                     </div>
                                 </div>
-                                <i class="fas fa-chevron-right text-red-400"></i>
-                            </a>
-                        </div>
-                    </div>
-                </div>
-
-            <?php elseif ($current_page == 'catalogue'): ?>
-                <!-- ========== CATALOGUE PRODUITS ========== -->
-                <div class="mb-6">
-                    <h1 class="text-2xl font-bold text-gray-800">Catalogue des produits</h1>
-                    <p class="text-gray-600">Découvrez tous nos produits disponibles</p>
-                </div>
-
-                <!-- Filtres et recherche -->
-                <div class="bg-white rounded-lg shadow-md p-6 mb-6">
-                    <form method="GET" action="" class="space-y-4">
-                        <input type="hidden" name="page" value="catalogue">
-
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <!-- Recherche -->
-                            <div>
-                                <label class="block text-gray-700 text-sm font-bold mb-2" for="recherche">
-                                    <i class="fas fa-search mr-1"></i>Rechercher
-                                </label>
-                                <input type="text" id="recherche" name="recherche"
-                                    value="<?php echo e($_GET['recherche'] ?? ''); ?>"
-                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                    placeholder="Nom, description, code barre...">
                             </div>
 
-                            <!-- Catégorie -->
-                            <div>
-                                <label class="block text-gray-700 text-sm font-bold mb-2" for="categorie">
-                                    <i class="fas fa-tag mr-1"></i>Catégorie
-                                </label>
-                                <select id="categorie" name="categorie"
-                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
-                                    <option value="">Toutes les catégories</option>
-                                    <?php foreach ($categories ?? [] as $categorie): ?>
-                                        <option value="<?php echo $categorie['id']; ?>" <?php echo (isset($_GET['categorie']) && $_GET['categorie'] == $categorie['id']) ? 'selected' : ''; ?>>
-                                            <?php echo e($categorie['nom']); ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-
-                            <!-- Tri -->
-                            <div>
-                                <label class="block text-gray-700 text-sm font-bold mb-2" for="tri">
-                                    <i class="fas fa-sort mr-1"></i>Trier par
-                                </label>
-                                <select id="tri" name="tri"
-                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
-                                    <option value="nom" <?php echo ($_GET['tri'] ?? 'nom') == 'nom' ? 'selected' : ''; ?>>Nom
-                                        A-Z</option>
-                                    <option value="prix_croissant" <?php echo ($_GET['tri'] ?? '') == 'prix_croissant' ? 'selected' : ''; ?>>Prix croissant</option>
-                                    <option value="prix_decroissant" <?php echo ($_GET['tri'] ?? '') == 'prix_decroissant' ? 'selected' : ''; ?>>Prix décroissant</option>
-                                    <option value="nouveautes" <?php echo ($_GET['tri'] ?? '') == 'nouveautes' ? 'selected' : ''; ?>>Nouveautés</option>
-                                </select>
-                            </div>
-                        </div>
-
-                        <div class="flex justify-end space-x-4">
-                            <a href="?page=catalogue"
-                                class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
-                                Réinitialiser
-                            </a>
-                            <button type="submit" class="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
-                                <i class="fas fa-filter mr-2"></i>Appliquer les filtres
-                            </button>
-                        </div>
-                    </form>
-                </div>
-
-                <!-- Liste des produits -->
-                <?php if (count($produits_catalogue) > 0): ?>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                        <?php foreach ($produits_catalogue as $produit): ?>
-                            <div class="product-card bg-white rounded-lg shadow-md overflow-hidden border border-gray-200">
-                                <!-- En-tête avec badge promotion -->
-                                <?php if ($produit['promo_valeur']): ?>
-                                    <div class="bg-red-500 text-white px-3 py-1 text-sm font-bold">
-                                        <i class="fas fa-percent mr-1"></i>
-                                        <?php echo $produit['type_promotion'] == 'pourcentage' ?
-                                            '-' . $produit['promo_valeur'] . '%' :
-                                            '-' . formatMontant($produit['promo_valeur']);
-                                        ?>
+                            <div class="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-2xl border border-blue-200 p-6">
+                                <div class="flex items-center">
+                                    <div class="p-3 bg-white rounded-xl shadow-sm mr-4">
+                                        <i class="fas fa-sack-dollar text-blue-500 text-xl"></i>
                                     </div>
-                                <?php endif; ?>
-
-                                <!-- Corps de la carte -->
-                                <div class="p-4">
-                                    <div class="flex justify-between items-start mb-3">
-                                        <div>
-                                            <h3 class="font-bold text-gray-800 text-lg"><?php echo e($produit['nom']); ?></h3>
-                                            <p class="text-sm text-gray-500"><?php echo e($produit['categorie_nom']); ?></p>
-                                        </div>
-                                        <button
-                                            onclick="toggleFavori(<?php echo $produit['id']; ?>, <?php echo $produit['est_favori'] ? 'true' : 'false'; ?>)"
-                                            class="text-<?php echo $produit['est_favori'] ? 'red' : 'gray'; ?>-500 hover:text-red-600">
-                                            <i class="fas fa-heart <?php echo $produit['est_favori'] ? 'fas' : 'far'; ?>"></i>
-                                        </button>
-                                    </div>
-
-                                    <p class="text-gray-600 text-sm mb-4 line-clamp-2">
-                                        <?php echo e(substr($produit['description'] ?? 'Aucune description', 0, 100)); ?>...
-                                    </p>
-
-                                    <!-- Prix -->
-                                    <div class="mb-4">
-                                        <div class="flex items-center space-x-2">
-                                            <span class="font-bold text-xl text-purple-600">
-                                                <?php echo formatMontant($produit['prix_final']); ?>
-                                            </span>
-                                            <?php if ($produit['promo_valeur']): ?>
-                                                <span class="text-sm text-gray-400 line-through">
-                                                    <?php echo formatMontant($produit['prix_fc']); ?>
-                                                </span>
-                                            <?php endif; ?>
-                                        </div>
-                                        <?php if ($produit['prix_usd']): ?>
-                                            <p class="text-sm text-gray-500">
-                                                $<?php echo number_format($produit['prix_usd'], 2); ?> USD
-                                            </p>
-                                        <?php endif; ?>
-                                    </div>
-
-                                    <!-- Actions -->
-                                    <div class="flex space-x-2">
-                                        <button onclick="voirDetailsProduit(<?php echo $produit['id']; ?>)"
-                                            class="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded text-sm">
-                                            <i class="fas fa-eye mr-1"></i>Détails
-                                        </button>
-                                        <form method="POST" action="" class="flex-1">
-                                            <input type="hidden" name="action" value="ajouter_panier">
-                                            <input type="hidden" name="produit_id" value="<?php echo $produit['id']; ?>">
-                                            <input type="hidden" name="quantite" value="1">
-                                            <button type="submit"
-                                                class="w-full bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded text-sm">
-                                                <i class="fas fa-cart-plus mr-1"></i>Ajouter
-                                            </button>
-                                        </form>
+                                    <div>
+                                        <p class="text-sm text-gray-600 mb-1">Valeur totale</p>
+                                        <p class="text-2xl font-bold text-gray-900">
+                                            <?php
+                                            $total = array_sum(array_column($produits_favoris, 'prix_final'));
+                                            echo formatMontant($total);
+                                            ?>
+                                        </p>
                                     </div>
                                 </div>
                             </div>
-                        <?php endforeach; ?>
-                    </div>
-                <?php else: ?>
-                    <div class="bg-white rounded-lg shadow-md p-12 text-center">
-                        <i class="fas fa-search text-gray-400 text-5xl mb-4"></i>
-                        <h3 class="text-xl font-semibold text-gray-800 mb-2">Aucun produit trouvé</h3>
-                        <p class="text-gray-600">Aucun produit ne correspond à vos critères de recherche.</p>
-                    </div>
-                <?php endif; ?>
+                        </div>
 
-            <?php elseif ($current_page == 'favoris'): ?>
-                <!-- ========== MES FAVORIS ========== -->
-                <div class="mb-6">
-                    <h1 class="text-2xl font-bold text-gray-800">Mes produits favoris</h1>
-                    <p class="text-gray-600">Vos produits préférés</p>
-                </div>
+                        <!-- Actions groupées -->
+                        <div
+                            class="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-sm border border-gray-200 p-4 mb-8">
+                            <div class="flex flex-col sm:flex-row justify-between items-center">
+                                <div class="mb-4 sm:mb-0">
+                                    <h3 class="font-semibold text-gray-900 text-lg mb-1">Gérer vos favoris</h3>
+                                    <p class="text-sm text-gray-600">Actions rapides sur votre sélection</p>
+                                </div>
+                                <div class="flex space-x-3">
+                                    <form method="POST" action="" class="flex-1">
+                                        <input type="hidden" name="action" value="vider_favoris">
+                                        <button type="submit"
+                                            onclick="return confirm('Êtes-vous sûr de vouloir vider tous vos favoris ?')"
+                                            class="inline-flex items-center px-4 py-2.5 border border-gray-300 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition-colors">
+                                            <i class="fas fa-trash-alt mr-2"></i>
+                                            Tout vider
+                                        </button>
+                                    </form>
+                                    <a href="?page=catalogue"
+                                        class="inline-flex items-center px-5 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 text-white font-semibold rounded-xl hover:from-blue-700 hover:to-cyan-700 shadow-md hover:shadow-lg transition-all">
+                                        <i class="fas fa-plus-circle mr-2"></i>
+                                        Ajouter plus
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
 
-                <?php if (count($produits_favoris) > 0): ?>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                        <?php foreach ($produits_favoris as $produit): ?>
-                            <div class="product-card bg-white rounded-lg shadow-md overflow-hidden border border-gray-200">
-                                <!-- En-tête avec badge promotion -->
-                                <?php if ($produit['promo_valeur']): ?>
-                                    <div class="bg-red-500 text-white px-3 py-1 text-sm font-bold">
-                                        <i class="fas fa-percent mr-1"></i>
-                                        <?php echo $produit['type_promotion'] == 'pourcentage' ?
-                                            '-' . $produit['promo_valeur'] . '%' :
-                                            '-' . formatMontant($produit['promo_valeur']);
-                                        ?>
-                                    </div>
-                                <?php endif; ?>
-
-                                <!-- Corps de la carte -->
-                                <div class="p-4">
-                                    <div class="flex justify-between items-start mb-3">
-                                        <div>
-                                            <h3 class="font-bold text-gray-800 text-lg"><?php echo e($produit['nom']); ?></h3>
-                                            <p class="text-sm text-gray-500"><?php echo e($produit['categorie_nom']); ?></p>
-                                        </div>
-                                        <form method="POST" action="">
-                                            <input type="hidden" name="action" value="retirer_favori">
-                                            <input type="hidden" name="produit_id" value="<?php echo $produit['id']; ?>">
-                                            <button type="submit" class="text-red-500 hover:text-red-600">
-                                                <i class="fas fa-heart"></i>
-                                            </button>
-                                        </form>
-                                    </div>
-
-                                    <p class="text-gray-600 text-sm mb-4 line-clamp-2">
-                                        <?php echo e(substr($produit['description'] ?? 'Aucune description', 0, 100)); ?>...
-                                    </p>
-
-                                    <!-- Prix -->
-                                    <div class="mb-4">
-                                        <div class="flex items-center space-x-2">
-                                            <span class="font-bold text-xl text-purple-600">
-                                                <?php echo formatMontant($produit['prix_final']); ?>
+                        <!-- Grille des produits favoris -->
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                            <?php foreach ($produits_favoris as $index => $produit): ?>
+                                <div
+                                    class="product-card group relative bg-gradient-to-br from-white to-rose-50/30 rounded-2xl shadow-lg border border-rose-100 hover:border-rose-300 overflow-hidden transition-all duration-300 hover:-translate-y-2 hover:shadow-xl">
+                                    <!-- Badge promotion -->
+                                    <?php if ($produit['promo_valeur']): ?>
+                                        <div class="absolute top-4 left-4 z-10">
+                                            <span
+                                                class="inline-flex items-center px-3 py-1.5 bg-gradient-to-r from-rose-500 to-pink-600 text-white text-xs font-bold rounded-full shadow-lg">
+                                                <i class="fas fa-bolt mr-1.5"></i>
+                                                <?php echo $produit['type_promotion'] == 'pourcentage' ?
+                                                    '-' . $produit['promo_valeur'] . '%' :
+                                                    '-' . formatMontant($produit['promo_valeur']);
+                                                ?>
                                             </span>
-                                            <?php if ($produit['promo_valeur']): ?>
-                                                <span class="text-sm text-gray-400 line-through">
-                                                    <?php echo formatMontant($produit['prix_fc']); ?>
+                                        </div>
+                                    <?php endif; ?>
+
+                                    <!-- Numéro d'ordre (optionnel) -->
+                                    <div class="absolute top-4 right-4 z-10">
+                                        <span
+                                            class="inline-flex items-center justify-center w-8 h-8 bg-rose-500 text-white text-xs font-bold rounded-full shadow-md">
+                                            <?php echo $index + 1; ?>
+                                        </span>
+                                    </div>
+
+                                    <!-- Image produit -->
+                                    <div
+                                        class="h-48 bg-gradient-to-br from-rose-50 to-pink-50 flex items-center justify-center overflow-hidden">
+                                        <div class="text-center p-6">
+                                            <i class="fas fa-heart text-4xl text-rose-300 mb-3"></i>
+                                            <p class="text-xs text-rose-600 font-semibold">Votre favori</p>
+                                        </div>
+                                    </div>
+
+                                    <!-- Corps de la carte -->
+                                    <div class="p-5">
+                                        <!-- Catégorie -->
+                                        <div class="mb-3">
+                                            <span
+                                                class="inline-flex items-center px-3 py-1 bg-rose-100 text-rose-800 text-xs font-semibold rounded-full">
+                                                <i class="fas fa-tag mr-1.5 text-xs"></i>
+                                                <?php echo e($produit['categorie_nom']); ?>
+                                            </span>
+                                        </div>
+
+                                        <!-- Nom produit -->
+                                        <h3
+                                            class="font-bold text-gray-900 text-lg mb-2 group-hover:text-rose-700 transition-colors line-clamp-1">
+                                            <?php echo e($produit['nom']); ?>
+                                        </h3>
+
+                                        <!-- Description -->
+                                        <p class="text-gray-600 text-sm mb-4 line-clamp-2 leading-relaxed">
+                                            <?php echo e(substr($produit['description'] ?? 'Produit ajouté à vos favoris', 0, 80)); ?>...
+                                        </p>
+
+                                        <!-- Prix -->
+                                        <div class="mb-5">
+                                            <div class="flex items-baseline space-x-2 mb-1">
+                                                <span class="font-bold text-2xl text-rose-600">
+                                                    <?php echo formatMontant($produit['prix_final']); ?>
                                                 </span>
+                                                <?php if ($produit['promo_valeur']): ?>
+                                                    <span class="text-sm text-gray-400 line-through">
+                                                        <?php echo formatMontant($produit['prix_fc']); ?>
+                                                    </span>
+                                                <?php endif; ?>
+                                            </div>
+                                            <?php if ($produit['prix_usd']): ?>
+                                                <p class="text-xs text-gray-500 flex items-center">
+                                                    <i class="fas fa-dollar-sign mr-1.5"></i>
+                                                    $<?php echo number_format($produit['prix_usd'], 2); ?> USD
+                                                </p>
                                             <?php endif; ?>
                                         </div>
+
+                                        <!-- Stock -->
+                                        <div class="mb-5">
+                                            <div class="flex items-center justify-between">
+                                                <span class="text-sm font-medium text-gray-700">Disponibilité</span>
+                                                <?php if ($produit['stock_quantite'] > 10): ?>
+                                                    <span
+                                                        class="inline-flex items-center px-2.5 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-full">
+                                                        <i class="fas fa-check-circle mr-1.5"></i>
+                                                        En stock
+                                                    </span>
+                                                <?php elseif ($produit['stock_quantite'] > 0): ?>
+                                                    <span
+                                                        class="inline-flex items-center px-2.5 py-1 bg-amber-100 text-amber-800 text-xs font-bold rounded-full">
+                                                        <i class="fas fa-exclamation-circle mr-1.5"></i>
+                                                        Stock limité
+                                                    </span>
+                                                <?php else: ?>
+                                                    <span
+                                                        class="inline-flex items-center px-2.5 py-1 bg-rose-100 text-rose-800 text-xs font-bold rounded-full">
+                                                        <i class="fas fa-times-circle mr-1.5"></i>
+                                                        Rupture
+                                                    </span>
+                                                <?php endif; ?>
+                                            </div>
+                                        </div>
+
+                                        <!-- Actions -->
+                                        <div class="flex space-x-3">
+                                            <!-- Bouton Retirer -->
+                                            <form method="POST" action="" class="flex-1">
+                                                <input type="hidden" name="action" value="retirer_favori">
+                                                <input type="hidden" name="produit_id" value="<?php echo $produit['id']; ?>">
+                                                <button type="submit"
+                                                    class="w-full inline-flex items-center justify-center px-4 py-2.5 bg-gradient-to-r from-gray-100 to-gray-200 border border-gray-300 text-gray-700 font-semibold rounded-xl hover:from-gray-200 hover:to-gray-300 hover:border-gray-400 hover:text-gray-800 transition-all group">
+                                                    <i
+                                                        class="fas fa-heart-broken mr-2 group-hover:scale-110 transition-transform"></i>
+                                                    Retirer
+                                                </button>
+                                            </form>
+
+                                            <!-- Bouton Ajouter au panier -->
+                                            <form method="POST" action="" class="flex-1">
+                                                <input type="hidden" name="action" value="ajouter_panier">
+                                                <input type="hidden" name="produit_id" value="<?php echo $produit['id']; ?>">
+                                                <input type="hidden" name="quantite" value="1">
+                                                <button type="submit"
+                                                    class="w-full inline-flex items-center justify-center px-4 py-2.5 bg-gradient-to-r from-rose-500 to-pink-600 text-white font-semibold rounded-xl hover:from-rose-600 hover:to-pink-700 shadow-md hover:shadow-lg transition-all group"
+                                                    <?php echo $produit['stock_quantite'] <= 0 ? 'disabled' : ''; ?>>
+                                                    <i class="fas fa-cart-plus mr-2 group-hover:scale-110 transition-transform"></i>
+                                                    Acheter
+                                                </button>
+                                            </form>
+                                        </div>
                                     </div>
 
-                                    <!-- Actions -->
-                                    <div class="flex space-x-2">
-                                        <button onclick="voirDetailsProduit(<?php echo $produit['id']; ?>)"
-                                            class="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded text-sm">
-                                            <i class="fas fa-eye mr-1"></i>Détails
-                                        </button>
-                                        <form method="POST" action="" class="flex-1">
-                                            <input type="hidden" name="action" value="ajouter_panier">
-                                            <input type="hidden" name="produit_id" value="<?php echo $produit['id']; ?>">
-                                            <input type="hidden" name="quantite" value="1">
-                                            <button type="submit"
-                                                class="w-full bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded text-sm">
-                                                <i class="fas fa-cart-plus mr-1"></i>Ajouter
-                                            </button>
-                                        </form>
+                                    <!-- Indicateur favori en bas -->
+                                    <div
+                                        class="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-rose-400 to-pink-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+
+                        <!-- Pied de page avec résumé -->
+                        <div class="mt-10 pt-8 border-t border-gray-200">
+                            <div class="bg-gradient-to-br from-rose-50 to-pink-50 rounded-2xl border border-rose-200 p-6">
+                                <div class="flex flex-col md:flex-row justify-between items-center">
+                                    <div class="mb-6 md:mb-0">
+                                        <h3 class="text-lg font-bold text-gray-900 mb-2">Résumé de vos favoris</h3>
+                                        <div class="grid grid-cols-2 gap-4">
+                                            <div class="text-center">
+                                                <p class="text-sm text-gray-600">Produits en stock</p>
+                                                <p class="text-2xl font-bold text-emerald-600">
+                                                    <?php
+                                                    $en_stock = array_filter($produits_favoris, function ($p) {
+                                                        return $p['stock_quantite'] > 0;
+                                                    });
+                                                    echo count($en_stock);
+                                                    ?>
+                                                </p>
+                                            </div>
+                                            <div class="text-center">
+                                                <p class="text-sm text-gray-600">Économie totale</p>
+                                                <p class="text-2xl font-bold text-rose-600">
+                                                    <?php
+                                                    $economie = array_sum(array_map(function ($p) {
+                                                        return $p['promo_valeur'] ? ($p['prix_fc'] - $p['prix_final']) : 0;
+                                                    }, $produits_favoris));
+                                                    echo formatMontant($economie);
+                                                    ?>
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="text-center md:text-right">
+                                        <p class="text-sm text-gray-600 mb-2">Suggestion</p>
+                                        <a href="?page=catalogue&categorie=<?php echo $produits_favoris[0]['categorie_id'] ?? ''; ?>"
+                                            class="inline-flex items-center px-5 py-3 bg-gradient-to-r from-blue-600 to-cyan-600 text-white font-semibold rounded-xl hover:from-blue-700 hover:to-cyan-700 shadow-lg hover:shadow-xl transition-all">
+                                            <i class="fas fa-arrow-right mr-2"></i>
+                                            Explorer cette catégorie
+                                        </a>
                                     </div>
                                 </div>
                             </div>
-                        <?php endforeach; ?>
-                    </div>
-                <?php else: ?>
-                    <div class="bg-white rounded-lg shadow-md p-12 text-center">
-                        <i class="fas fa-heart text-gray-400 text-5xl mb-4"></i>
-                        <h3 class="text-xl font-semibold text-gray-800 mb-2">Aucun favori</h3>
-                        <p class="text-gray-600 mb-6">Vous n'avez pas encore ajouté de produit à vos favoris.</p>
-                        <a href="?page=catalogue" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg">
-                            <i class="fas fa-store mr-2"></i>Parcourir le catalogue
-                        </a>
-                    </div>
-                <?php endif; ?>
+                        </div>
+
+                    <?php else: ?>
+                        <!-- État vide amélioré -->
+                        <div
+                            class="bg-gradient-to-br from-white to-green-50/30 rounded-2xl shadow-lg border border-green-100 p-16 text-center">
+                            <div class="max-w-md mx-auto">
+                                <div
+                                    class="w-28 h-28 mx-auto mb-8 bg-gradient-to-br from-green-100 to-green-100 rounded-full flex items-center justify-center">
+                                    <i class="fas fa-heart text-green-300 text-5xl"></i>
+                                </div>
+                                <h3 class="text-2xl font-bold text-gray-900 mb-3">Vos favoris sont vides</h3>
+                                <p class="text-gray-600 mb-8 leading-relaxed">
+                                    Vous n'avez pas encore ajouté de produit à vos favoris. Les favoris vous permettent de
+                                    sauvegarder vos produits préférés pour y accéder rapidement plus tard.
+                                </p>
+                                <div class="space-y-4">
+                                    <a href="?page=catalogue"
+                                        class="inline-flex items-center px-6 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white font-semibold rounded-xl hover:from-green-600 hover:to-green-700 shadow-lg hover:shadow-xl transition-all">
+                                        <i class="fas fa-store mr-3"></i>
+                                        Découvrir le catalogue
+                                    </a>
+                                    <div class="pt-4 border-t border-green-100">
+                                        <p class="text-sm text-gray-500">
+                                            <i class="fas fa-lightbulb text-amber-500 mr-2"></i>
+                                            Astuce : Cliquez sur <i class="fas fa-heart text-green-400 mx-1"></i> pour ajouter
+                                            des produits à vos favoris
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endif; ?>
+                </div>
 
             <?php elseif ($current_page == 'panier'): ?>
                 <!-- ========== MON PANIER ========== -->
@@ -1252,18 +2128,22 @@ try {
                                                         <div class="flex items-center">
                                                             <div class="ml-4">
                                                                 <p class="font-semibold text-gray-900">
-                                                                    <?php echo e($item['produit']['nom']); ?></p>
+                                                                    <?php echo e($item['produit']['nom']); ?>
+                                                                </p>
                                                                 <p class="text-sm text-gray-500">
-                                                                    <?php echo e($item['produit']['categorie_nom']); ?></p>
+                                                                    <?php echo e($item['produit']['categorie_nom']); ?>
+                                                                </p>
                                                             </div>
                                                         </div>
                                                     </td>
                                                     <td class="px-6 py-4">
                                                         <p class="font-bold text-purple-600">
-                                                            <?php echo formatMontant($item['produit']['prix_final']); ?></p>
+                                                            <?php echo formatMontant($item['produit']['prix_final']); ?>
+                                                        </p>
                                                         <?php if ($item['produit']['promo_valeur']): ?>
                                                             <p class="text-sm text-gray-400 line-through">
-                                                                <?php echo formatMontant($item['produit']['prix_fc']); ?></p>
+                                                                <?php echo formatMontant($item['produit']['prix_fc']); ?>
+                                                            </p>
                                                         <?php endif; ?>
                                                     </td>
                                                     <td class="px-6 py-4">
@@ -1281,7 +2161,8 @@ try {
                                                     </td>
                                                     <td class="px-6 py-4">
                                                         <p class="font-bold text-green-600">
-                                                            <?php echo formatMontant($item['sous_total']); ?></p>
+                                                            <?php echo formatMontant($item['sous_total']); ?>
+                                                        </p>
                                                     </td>
                                                     <td class="px-6 py-4">
                                                         <form method="POST" action="">
@@ -1392,7 +2273,8 @@ try {
                                             </td>
                                             <td class="px-6 py-4">
                                                 <p class="font-bold text-purple-600">
-                                                    <?php echo formatMontant($commande['montant_total']); ?></p>
+                                                    <?php echo formatMontant($commande['montant_total']); ?>
+                                                </p>
                                             </td>
                                             <td class="px-6 py-4">
                                                 <?php if ($commande['statut'] == 'paye'): ?>
