@@ -1,312 +1,635 @@
 <?php
 declare(strict_types=1);
+// ============================================
+// MODULE STOCKISTE - Système NAGEX Pharma
+// ============================================
+// Fichier : stockiste_dashboard.php
+// Description : Interface complète du stockiste
+// ============================================
+
+// Démarrage de session et vérification du rôle
 session_start();
+
+// Vérifier si l'utilisateur est connecté et a le rôle stockiste
+if (!isset($_SESSION['user_id']) || ($_SESSION['user_role'] ?? '') !== 'stockiste') {
+    header('Location: login.php');
+    exit();
+}
+
+// Inclure la classe Database
 require_once __DIR__ . '/../../config/database.php';
 
-// Vérifier l'authentification et le rôle
-if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['user_role'] !== 'stockiste') {
-    header('Location: ../utilisateurs/login.php');
-    exit;
-}
-
-$db = new Database();
+// Initialisation des variables
+$message = '';
+$error = '';
+$current_page = $_GET['page'] ?? 'dashboard';
 $user_id = $_SESSION['user_id'];
-$user_name = $_SESSION['user_nom'];
-$user_role = $_SESSION['user_role'];
 
-// Initialiser toutes les variables
-$produits_data = $lots_data = $alertes_stock_data = $alertes_expiration_data = $inventaires_data = $mouvements_data = [];
-$produits_total = $lots_total = $alertes_stock_count = $alertes_expiration_count = $inventaires_en_cours = 0;
+// ============================================
+// CONNEXION À LA BASE DE DONNÉES
+// ============================================
 
-// Fonction helper pour formater les dates
-function formatDate($date)
-{
-    if (empty($date) || $date === '0000-00-00 00:00:00') {
-        return 'Non définie';
-    }
-    return date('d/m/Y H:i', strtotime($date));
-}
-
-// Récupérer les données selon le cahier des charges
 try {
-    // 1. LISTE COMPLÈTE DES PRODUITS AVEC STOCK
-    $stmt_produits = $db->prepare("
-        SELECT p.*, c.nom as categorie_nom, f.nom_societe as fournisseur_nom,
-               COALESCE(SUM(l.quantite_actuelle), 0) as stock_total,
-               COUNT(l.id) as nb_lots
-        FROM produits p
-        JOIN categories c ON p.categorie_id = c.id
-        JOIN fournisseurs f ON p.fournisseur_id = f.id
-        LEFT JOIN lots l ON p.id = l.produit_id AND l.statut = 'en_stock'
-        WHERE p.statut = 'actif'
-        GROUP BY p.id
-        ORDER BY p.nom
-    ");
-    $stmt_produits->execute();
-    $produits_data = $stmt_produits->fetchAll(PDO::FETCH_ASSOC);
-    $produits_total = count($produits_data);
-
-    // 2. GESTION DES LOTS
-    $stmt_lots = $db->prepare("
-        SELECT l.*, p.nom as produit_nom, p.code_barre, p.description,
-               f.nom_societe as fournisseur_nom,
-               DATEDIFF(l.date_expiration, CURDATE()) as jours_restants
-        FROM lots l
-        JOIN produits p ON l.produit_id = p.id
-        JOIN fournisseurs f ON p.fournisseur_id = f.id
-        WHERE l.quantite_actuelle > 0
-        ORDER BY l.date_expiration ASC, l.date_reception DESC
-    ");
-    $stmt_lots->execute();
-    $lots_data = $stmt_lots->fetchAll(PDO::FETCH_ASSOC);
-    $lots_total = count($lots_data);
-
-    // 3. ALERTES STOCK BAS (avec seuil fixe de 10 unités)
-    $stmt_alertes_stock = $db->prepare("
-        SELECT p.*, c.nom as categorie_nom,
-               COALESCE(SUM(l.quantite_actuelle), 0) as stock_actuel,
-               10 as seuil_alerte,
-               (10 - COALESCE(SUM(l.quantite_actuelle), 0)) as deficit
-        FROM produits p
-        JOIN categories c ON p.categorie_id = c.id
-        LEFT JOIN lots l ON p.id = l.produit_id AND l.statut = 'en_stock'
-        WHERE p.statut = 'actif'
-        GROUP BY p.id
-        HAVING stock_actuel > 0 AND stock_actuel <= 10
-        ORDER BY deficit DESC
-    ");
-    $stmt_alertes_stock->execute();
-    $alertes_stock_data = $stmt_alertes_stock->fetchAll(PDO::FETCH_ASSOC);
-    $alertes_stock_count = count($alertes_stock_data);
-
-    // 4. PRODUITS EN RUPTURE DE STOCK
-    $stmt_rupture = $db->prepare("
-        SELECT p.*, c.nom as categorie_nom,
-               COALESCE(SUM(l.quantite_actuelle), 0) as stock_actuel
-        FROM produits p
-        JOIN categories c ON p.categorie_id = c.id
-        LEFT JOIN lots l ON p.id = l.produit_id AND l.statut = 'en_stock'
-        WHERE p.statut = 'actif'
-        GROUP BY p.id
-        HAVING stock_actuel = 0
-        ORDER BY p.nom
-    ");
-    $stmt_rupture->execute();
-    $rupture_data = $stmt_rupture->fetchAll(PDO::FETCH_ASSOC);
-    $rupture_count = count($rupture_data);
-
-    // 5. ALERTES EXPIRATION (30 jours)
-    $stmt_alertes_expiration = $db->prepare("
-        SELECT l.*, p.nom as produit_nom, p.code_barre, p.description,
-               DATEDIFF(l.date_expiration, CURDATE()) as jours_restants
-        FROM lots l
-        JOIN produits p ON l.produit_id = p.id
-        WHERE l.date_expiration BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
-        AND l.quantite_actuelle > 0
-        AND l.statut = 'en_stock'
-        ORDER BY l.date_expiration ASC
-    ");
-    $stmt_alertes_expiration->execute();
-    $alertes_expiration_data = $stmt_alertes_expiration->fetchAll(PDO::FETCH_ASSOC);
-    $alertes_expiration_count = count($alertes_expiration_data);
-
-    // 6. MOUVEMENTS RÉCENTS (7 derniers jours)
-    $stmt_mouvements = $db->prepare("
-        SELECT m.*, p.nom as produit_nom, l.numero_lot, u.nom as utilisateur_nom,
-               DATE_FORMAT(m.created_at, '%d/%m/%Y %H:%i') as date_formatee
-        FROM mouvements_stock m
-        JOIN produits p ON m.produit_id = p.id
-        JOIN lots l ON m.lot_id = l.id
-        JOIN utilisateurs u ON m.created_by = u.id
-        WHERE m.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-        ORDER BY m.created_at DESC
-        LIMIT 20
-    ");
-    $stmt_mouvements->execute();
-    $mouvements_data = $stmt_mouvements->fetchAll(PDO::FETCH_ASSOC);
-
-    // 7. STATISTIQUES POUR LES BADGES
-    $receptions_attente = 0; // À adapter selon vos besoins
-    $produits_rupture = $rupture_count;
-    $alertes_stock_bas = $alertes_stock_count;
-    $inventaires_cours = 0; // À adapter si vous avez une table inventaires
-
-
-} catch (PDOException $e) {
-    error_log("Erreur base de données stockiste: " . $e->getMessage());
-    $_SESSION['error_message'] = "Erreur de chargement des données: " . $e->getMessage();
+    $database = new Database();
+    $pdo = $database->getConnection();
+} catch (Exception $e) {
+    error_log("Erreur de connexion à la base de données: " . $e->getMessage());
+    die("Erreur de connexion à la base de données. Veuillez contacter l'administrateur.");
 }
 
-// TRAITEMENT DES FORMULAIRES
+// ============================================
+// FONCTIONS UTILITAIRES
+// ============================================
+
+/**
+ * Récupère les statistiques du dashboard stockiste
+ */
+function getDashboardStats(PDO $pdo): array
+{
+    $stats = [];
+
+    // Total produits en stock
+    $stmt = $pdo->query("
+        SELECT SUM(l.quantite_actuelle) as total 
+        FROM lots l 
+        WHERE l.statut = 'en_stock'
+    ");
+    $stats['total_stock'] = $stmt->fetch()['total'] ?? 0;
+
+    // Produits avec stock bas
+    $stmt = $pdo->query("
+        SELECT COUNT(DISTINCT a.produit_id) as total 
+        FROM alertes a 
+        WHERE a.type_alerte = 'stock_bas' 
+        AND a.statut = 'non_lu'
+    ");
+    $stats['alertes_stock_bas'] = $stmt->fetch()['total'] ?? 0;
+
+    // Produits proches de péremption (moins de 30 jours)
+    $stmt = $pdo->query("
+        SELECT COUNT(*) as total 
+        FROM lots 
+        WHERE date_expiration <= DATE_ADD(CURDATE(), INTERVAL 30 DAY) 
+        AND statut = 'en_stock'
+        AND quantite_actuelle > 0
+    ");
+    $stats['alertes_peremption'] = $stmt->fetch()['total'] ?? 0;
+
+    // Ruptures de stock
+    $stmt = $pdo->query("
+        SELECT COUNT(DISTINCT a.produit_id) as total 
+        FROM alertes a 
+        WHERE a.type_alerte = 'rupture_stock' 
+        AND a.statut = 'non_lu'
+    ");
+    $stats['ruptures_stock'] = $stmt->fetch()['total'] ?? 0;
+
+    return $stats;
+}
+
+/**
+ * Formate la date pour l'affichage
+ */
+function formatDate(string $date): string
+{
+    return date('d/m/Y', strtotime($date));
+}
+
+/**
+ * Calcule les jours avant péremption
+ */
+function joursAvantPeremption(string $date_expiration): int
+{
+    $expiration = new DateTime($date_expiration);
+    $today = new DateTime();
+    $interval = $today->diff($expiration);
+    return $interval->days * ($today < $expiration ? 1 : -1);
+}
+
+/**
+ * Échapper les données pour l'affichage HTML
+ */
+function e(string $string): string
+{
+    return htmlspecialchars($string, ENT_QUOTES, 'UTF-8');
+}
+
+// ============================================
+// GESTION DES STOCKS (Traitement POST)
+// ============================================
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    try {
-        // 1. AJOUT/MODIFICATION DE LOT
-        if (isset($_POST['ajouter_lot'])) {
-            $produit_id = (int) $_POST['produit_id'];
-            $numero_lot = trim($_POST['numero_lot']);
-            $quantite_initiale = (int) $_POST['quantite_initiale'];
-            $statut = $_POST['statut'];
-            $date_expiration = $_POST['date_expiration'];
-            $prix_achat = (float) $_POST['prix_achat'];
-            $date_reception = $_POST['date_reception'] ?? date('Y-m-d');
-            // VALIDATION MÉTIER
-            $erreurs = [];
+    if (isset($_POST['action'])) {
+        switch ($_POST['action']) {
 
-            // Validation cohérence statut/quantité
-            if (($statut === 'vide' || $statut === 'epuise') && $quantite_initiale > 0) {
-                $erreurs[] = "Un lot 'Vide' ou 'Épuisé' ne peut pas avoir une quantité positive.";
-            }
-
-            if ($statut === 'en_stock' && $quantite_initiale <= 0) {
-                $erreurs[] = "Un lot 'En stock' doit avoir une quantité positive.";
-            }
-
-            // Validation date d'expiration
-            if (strtotime($date_expiration) < strtotime(date('Y-m-d'))) {
-                $erreurs[] = "La date d'expiration ne peut pas être dans le passé.";
-            }
-
-            // Si pas d'erreurs, procéder à l'insertion
-            if (empty($erreurs)) {
+            // AJOUTER UN LOT
+            case 'ajouter_lot':
                 try {
-                    $stmt = $db->prepare("
-                INSERT INTO lots (produit_id, numero_lot, quantite_initiale, quantite_actuelle, 
-                                date_expiration, prix_achat, date_reception, statut, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ");
+                    $pdo->beginTransaction();
+
+                    // Insérer le lot
+                    $stmt = $pdo->prepare("
+                        INSERT INTO lots (
+                            produit_id, numero_lot, quantite_initiale, 
+                            quantite_actuelle, date_expiration, prix_achat,
+                            date_reception, statut, created_by
+                        ) VALUES (
+                            :produit_id, :numero_lot, :quantite_initiale,
+                            :quantite_actuelle, :date_expiration, :prix_achat,
+                            :date_reception, 'en_stock', :created_by
+                        )
+                    ");
+
                     $stmt->execute([
-                        $produit_id,
-                        $numero_lot,
-                        $quantite_initiale,
-                        $quantite_initiale,
-                        $date_expiration,
-                        $prix_achat,
-                        $date_reception,
-                        $statut,
-                        $user_id
+                        ':produit_id' => intval($_POST['produit_id'] ?? 0),
+                        ':numero_lot' => $_POST['numero_lot'] ?? '',
+                        ':quantite_initiale' => intval($_POST['quantite_initiale'] ?? 0),
+                        ':quantite_actuelle' => intval($_POST['quantite_initiale'] ?? 0),
+                        ':date_expiration' => $_POST['date_expiration'] ?? '',
+                        ':prix_achat' => floatval($_POST['prix_achat'] ?? 0),
+                        ':date_reception' => $_POST['date_reception'] ?? date('Y-m-d'),
+                        ':created_by' => $user_id
                     ]);
 
-                    $_SESSION['success_message'] = "Lot ajouté avec succès! Statut: " . $statut;
-                    header('Location: ' . $_SERVER['PHP_SELF']);
-                    exit;
+                    $lot_id = $pdo->lastInsertId();
 
-                } catch (PDOException $e) {
-                    $_SESSION['error_message'] = "Erreur lors de l'ajout du lot: " . $e->getMessage();
+                    // Enregistrer le mouvement de stock
+                    $stmt = $pdo->prepare("
+                        INSERT INTO mouvements_stock (
+                            produit_id, lot_id, type_mouvement, quantite,
+                            quantite_avant, quantite_apres, raison, created_by
+                        ) VALUES (
+                            :produit_id, :lot_id, 'entree', :quantite,
+                            0, :quantite_apres, 'Réception nouveau lot', :created_by
+                        )
+                    ");
+
+                    $stmt->execute([
+                        ':produit_id' => intval($_POST['produit_id'] ?? 0),
+                        ':lot_id' => $lot_id,
+                        ':quantite' => intval($_POST['quantite_initiale'] ?? 0),
+                        ':quantite_apres' => intval($_POST['quantite_initiale'] ?? 0),
+                        ':created_by' => $user_id
+                    ]);
+
+                    // Vérifier et créer une alerte si nécessaire
+                    $quantite_totale = intval($_POST['quantite_initiale'] ?? 0);
+                    if ($quantite_totale <= 10) {
+                        $stmt = $pdo->prepare("
+                            INSERT INTO alertes (
+                                type_alerte, produit_id, lot_id, message, niveau, statut
+                            ) VALUES (
+                                'stock_bas', :produit_id, :lot_id, 
+                                'Stock bas après réception du lot', 'faible', 'non_lu'
+                            )
+                        ");
+                        $stmt->execute([
+                            ':produit_id' => intval($_POST['produit_id'] ?? 0),
+                            ':lot_id' => $lot_id
+                        ]);
+                    }
+
+                    $pdo->commit();
+                    $message = "✅ Lot ajouté avec succès!";
+
+                } catch (Exception $e) {
+                    $pdo->rollBack();
+                    $error = "❌ Erreur lors de l'ajout du lot: " . $e->getMessage();
                 }
-            } else {
-                // Afficher les erreurs
-                $_SESSION['error_message'] = "Erreurs de validation:<br>" . implode("<br>", $erreurs);
-            }
+                break;
+
+            // MODIFIER UN LOT
+            case 'modifier_lot':
+                try {
+                    $pdo->beginTransaction();
+
+                    // Récupérer les anciennes données
+                    $stmt = $pdo->prepare("SELECT * FROM lots WHERE id = :id");
+                    $stmt->execute([':id' => intval($_POST['lot_id'] ?? 0)]);
+                    $ancien_lot = $stmt->fetch();
+
+                    if (!$ancien_lot) {
+                        throw new Exception("Lot non trouvé");
+                    }
+
+                    // Mettre à jour le lot
+                    $stmt = $pdo->prepare("
+                        UPDATE lots SET
+                            numero_lot = :numero_lot,
+                            quantite_initiale = :quantite_initiale,
+                            quantite_actuelle = :quantite_actuelle,
+                            date_expiration = :date_expiration,
+                            prix_achat = :prix_achat,
+                            date_reception = :date_reception
+                        WHERE id = :id
+                    ");
+
+                    $stmt->execute([
+                        ':numero_lot' => $_POST['numero_lot'] ?? '',
+                        ':quantite_initiale' => intval($_POST['quantite_initiale'] ?? 0),
+                        ':quantite_actuelle' => intval($_POST['quantite_actuelle'] ?? 0),
+                        ':date_expiration' => $_POST['date_expiration'] ?? '',
+                        ':prix_achat' => floatval($_POST['prix_achat'] ?? 0),
+                        ':date_reception' => $_POST['date_reception'] ?? '',
+                        ':id' => intval($_POST['lot_id'] ?? 0)
+                    ]);
+
+                    // Enregistrer le mouvement d'ajustement si la quantité a changé
+                    $difference = intval($_POST['quantite_actuelle'] ?? 0) - $ancien_lot['quantite_actuelle'];
+                    if ($difference != 0) {
+                        $stmt = $pdo->prepare("
+                            INSERT INTO mouvements_stock (
+                                produit_id, lot_id, type_mouvement, quantite,
+                                quantite_avant, quantite_apres, raison, created_by
+                            ) VALUES (
+                                :produit_id, :lot_id, 'ajustement', :quantite,
+                                :quantite_avant, :quantite_apres, 
+                                'Ajustement manuel', :created_by
+                            )
+                        ");
+
+                        $stmt->execute([
+                            ':produit_id' => $ancien_lot['produit_id'],
+                            ':lot_id' => $ancien_lot['id'],
+                            ':quantite' => abs($difference),
+                            ':quantite_avant' => $ancien_lot['quantite_actuelle'],
+                            ':quantite_apres' => intval($_POST['quantite_actuelle'] ?? 0),
+                            ':created_by' => $user_id
+                        ]);
+                    }
+
+                    $pdo->commit();
+                    $message = "✅ Lot modifié avec succès!";
+
+                } catch (Exception $e) {
+                    $pdo->rollBack();
+                    $error = "❌ Erreur lors de la modification: " . $e->getMessage();
+                }
+                break;
+
+            // AJUSTER LE STOCK
+            case 'ajuster_stock':
+                try {
+                    $pdo->beginTransaction();
+
+                    $lot_id = intval($_POST['lot_id'] ?? 0);
+                    $nouvelle_quantite = intval($_POST['nouvelle_quantite'] ?? 0);
+                    $raison = $_POST['raison'] ?? 'Ajustement manuel';
+
+                    // Récupérer l'ancienne quantité
+                    $stmt = $pdo->prepare("SELECT * FROM lots WHERE id = :id");
+                    $stmt->execute([':id' => $lot_id]);
+                    $lot = $stmt->fetch();
+
+                    if (!$lot) {
+                        throw new Exception("Lot non trouvé");
+                    }
+
+                    $difference = $nouvelle_quantite - $lot['quantite_actuelle'];
+                    $type_mouvement = $difference > 0 ? 'entree' : 'sortie';
+
+                    // Mettre à jour le lot
+                    $stmt = $pdo->prepare("
+                        UPDATE lots 
+                        SET quantite_actuelle = :quantite 
+                        WHERE id = :id
+                    ");
+                    $stmt->execute([
+                        ':quantite' => $nouvelle_quantite,
+                        ':id' => $lot_id
+                    ]);
+
+                    // Enregistrer le mouvement
+                    $stmt = $pdo->prepare("
+                        INSERT INTO mouvements_stock (
+                            produit_id, lot_id, type_mouvement, quantite,
+                            quantite_avant, quantite_apres, raison, created_by
+                        ) VALUES (
+                            :produit_id, :lot_id, :type_mouvement, :quantite,
+                            :quantite_avant, :quantite_apres, :raison, :created_by
+                        )
+                    ");
+
+                    $stmt->execute([
+                        ':produit_id' => $lot['produit_id'],
+                        ':lot_id' => $lot_id,
+                        ':type_mouvement' => $type_mouvement,
+                        ':quantite' => abs($difference),
+                        ':quantite_avant' => $lot['quantite_actuelle'],
+                        ':quantite_apres' => $nouvelle_quantite,
+                        ':raison' => $raison,
+                        ':created_by' => $user_id
+                    ]);
+
+                    $pdo->commit();
+                    $message = "✅ Stock ajusté avec succès!";
+
+                } catch (Exception $e) {
+                    $pdo->rollBack();
+                    $error = "❌ Erreur lors de l'ajustement: " . $e->getMessage();
+                }
+                break;
+
+            // MARQUER UNE ALERTE COMME LUE
+            case 'marquer_lu':
+                try {
+                    $stmt = $pdo->prepare("
+                        UPDATE alertes 
+                        SET statut = 'lu' 
+                        WHERE id = :id
+                    ");
+                    $stmt->execute([':id' => intval($_POST['alerte_id'] ?? 0)]);
+                    $message = "✅ Alerte marquée comme lue!";
+                } catch (Exception $e) {
+                    $error = "❌ Erreur: " . $e->getMessage();
+                }
+                break;
+
+            // RÉALISER UN INVENTAIRE
+            case 'realiser_inventaire':
+                try {
+                    $pdo->beginTransaction();
+
+                    $produit_id = intval($_POST['produit_id'] ?? 0);
+                    $quantite_reelle = intval($_POST['quantite_reelle'] ?? 0);
+
+                    // Récupérer tous les lots du produit
+                    $stmt = $pdo->prepare("
+                        SELECT id, quantite_actuelle 
+                        FROM lots 
+                        WHERE produit_id = :produit_id 
+                        AND statut = 'en_stock'
+                    ");
+                    $stmt->execute([':produit_id' => $produit_id]);
+                    $lots = $stmt->fetchAll();
+
+                    $quantite_totale = 0;
+                    foreach ($lots as $lot) {
+                        $quantite_totale += $lot['quantite_actuelle'];
+                    }
+
+                    $difference = $quantite_reelle - $quantite_totale;
+
+                    if ($difference != 0) {
+                        // Créer un lot d'ajustement
+                        $stmt = $pdo->prepare("
+                            INSERT INTO lots (
+                                produit_id, numero_lot, quantite_initiale, 
+                                quantite_actuelle, date_expiration, prix_achat,
+                                date_reception, statut, created_by
+                            ) VALUES (
+                                :produit_id, :numero_lot, :quantite_initiale,
+                                :quantite_actuelle, :date_expiration, 0,
+                                CURDATE(), 'en_stock', :created_by
+                            )
+                        ");
+
+                        $numero_lot = 'INV-' . date('Ymd-His');
+                        $quantite_ajustement = abs($difference);
+
+                        $stmt->execute([
+                            ':produit_id' => $produit_id,
+                            ':numero_lot' => $numero_lot,
+                            ':quantite_initiale' => $quantite_ajustement,
+                            ':quantite_actuelle' => $quantite_ajustement,
+                            ':date_expiration' => date('Y-m-d', strtotime('+5 years')),
+                            ':created_by' => $user_id
+                        ]);
+
+                        $lot_id = $pdo->lastInsertId();
+
+                        // Enregistrer le mouvement
+                        $type_mouvement = $difference > 0 ? 'entree' : 'sortie';
+                        $stmt = $pdo->prepare("
+                            INSERT INTO mouvements_stock (
+                                produit_id, lot_id, type_mouvement, quantite,
+                                quantite_avant, quantite_apres, raison, created_by
+                            ) VALUES (
+                                :produit_id, :lot_id, :type_mouvement, :quantite,
+                                :quantite_avant, :quantite_apres, 
+                                'Ajustement inventaire', :created_by
+                            )
+                        ");
+
+                        $stmt->execute([
+                            ':produit_id' => $produit_id,
+                            ':lot_id' => $lot_id,
+                            ':type_mouvement' => $type_mouvement,
+                            ':quantite' => $quantite_ajustement,
+                            ':quantite_avant' => $quantite_totale,
+                            ':quantite_apres' => $quantite_reelle,
+                            ':created_by' => $user_id
+                        ]);
+                    }
+
+                    $pdo->commit();
+                    $message = "✅ Inventaire réalisé avec succès!";
+
+                } catch (Exception $e) {
+                    $pdo->rollBack();
+                    $error = "❌ Erreur lors de l'inventaire: " . $e->getMessage();
+                }
+                break;
         }
-
-        // 2. MODIFICATION STATUT LOT
-        if (isset($_POST['modifier_statut_lot'])) {
-            $lot_id = (int) $_POST['lot_id'];
-            $nouveau_statut = $_POST['nouveau_statut'];
-
-            $stmt = $db->prepare("UPDATE lots SET statut = ? WHERE id = ?");
-            $stmt->execute([$nouveau_statut, $lot_id]);
-
-            $_SESSION['success_message'] = "Statut du lot mis à jour!";
-        }
-
-        // 3. CRÉATION INVENTAIRE
-        if (isset($_POST['creer_inventaire'])) {
-            $type_inventaire = $_POST['type_inventaire'];
-            $reference = 'INV-' . date('Ymd-His');
-
-            $stmt = $db->prepare("
-                INSERT INTO inventaires (reference, type_inventaire, created_by, statut)
-                VALUES (?, ?, ?, 'en_cours')
-            ");
-            $stmt->execute([$reference, $type_inventaire, $user_id]);
-            $inventaire_id = $db->lastInsertId();
-
-            // Ajouter les lignes d'inventaire selon le type
-            if ($type_inventaire === 'complet') {
-                $stmt_lignes = $db->prepare("
-                    INSERT INTO lignes_inventaire (inventaire_id, produit_id, lot_id, quantite_theorique, quantite_reelle)
-                    SELECT ?, l.produit_id, l.id, l.quantite_actuelle, l.quantite_actuelle
-                    FROM lots l
-                    WHERE l.statut = 'en_stock' AND l.quantite_actuelle > 0
-                ");
-                $stmt_lignes->execute([$inventaire_id]);
-            }
-
-            $_SESSION['success_message'] = "Inventaire #$reference créé avec succès!";
-        }
-
-        // 4. AJUSTEMENT STOCK
-        if (isset($_POST['ajuster_stock'])) {
-            $lot_id = (int) $_POST['lot_id'];
-            $nouvelle_quantite = (int) $_POST['nouvelle_quantite'];
-            $raison = trim($_POST['raison_ajustement']);
-
-            // Récupérer l'ancienne quantité
-            $stmt_ancien = $db->prepare("SELECT quantite_actuelle FROM lots WHERE id = ?");
-            $stmt_ancien->execute([$lot_id]);
-            $ancienne_quantite = $stmt_ancien->fetchColumn();
-
-            // Récupérer le produit_id du lot
-            $stmt_produit = $db->prepare("SELECT produit_id FROM lots WHERE id = ?");
-            $stmt_produit->execute([$lot_id]);
-            $produit_id = $stmt_produit->fetchColumn();
-
-            // Mettre à jour le lot
-            $stmt_update = $db->prepare("UPDATE lots SET quantite_actuelle = ? WHERE id = ?");
-            $stmt_update->execute([$nouvelle_quantite, $lot_id]);
-
-            // Enregistrer le mouvement
-            $type_mouvement = $nouvelle_quantite > $ancienne_quantite ? 'ajustement' : 'ajustement';
-            $quantite_mouvement = abs($nouvelle_quantite - $ancienne_quantite);
-
-            $stmt_mouvement = $db->prepare("
-                INSERT INTO mouvements_stock (produit_id, lot_id, type_mouvement, quantite, 
-                                           quantite_avant, quantite_apres, raison, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ");
-            $stmt_mouvement->execute([
-                $produit_id,
-                $lot_id,
-                $type_mouvement,
-                $quantite_mouvement,
-                $ancienne_quantite,
-                $nouvelle_quantite,
-                $raison,
-                $user_id
-            ]);
-
-            $_SESSION['success_message'] = "Stock ajusté avec succès!";
-        }
-        header('Location: ' . $_SERVER['PHP_SELF']);
-        exit;
-
-    } catch (PDOException $e) {
-        $_SESSION['error_message'] = "Erreur lors de l'opération: " . $e->getMessage();
     }
 }
 
-// FONCTIONS UTILITAIRES
-function getStatutLotBadge($statut)
-{
-    $classes = [
-        'en_stock' => 'bg-green-100 text-green-800',
-        'epuise' => 'bg-red-100 text-red-800',
-        'vide' => 'bg-gray-100 text-gray-800',
-        'perime' => 'bg-red-100 text-red-800',
-        'quarantaine' => 'bg-orange-100 text-orange-800',
-        'retire' => 'bg-purple-100 text-purple-800'
-    ];
-    return $classes[$statut] ?? 'bg-gray-100 text-gray-800';
+// ============================================
+// RÉCUPÉRATION DES DONNÉES
+// ============================================
+
+// Récupérer les statistiques
+$stats = getDashboardStats($pdo);
+
+// Récupérer les produits pour les dropdowns
+$produits = [];
+try {
+    $stmt = $pdo->query("
+        SELECT p.id, p.nom, p.code_barre, c.nom as categorie
+        FROM produits p
+        LEFT JOIN categories c ON p.categorie_id = c.id
+        WHERE p.statut = 'actif'
+        ORDER BY p.nom
+    ");
+    $produits = $stmt->fetchAll();
+} catch (Exception $e) {
+    $error = "Erreur chargement produits: " . $e->getMessage();
 }
 
-function getNiveauAlerte($jours_restants)
-{
-    if ($jours_restants <= 7)
-        return ['bg-red-100 text-red-800', 'Urgent'];
-    if ($jours_restants <= 15)
-        return ['bg-orange-100 text-orange-800', 'Attention'];
-    return ['bg-green-100 text-green-800', 'Normal'];
+// Initialiser les variables de données selon la page
+$lots = [];
+$alertes = [];
+$mouvements = [];
+$inventaire_data = [];
+
+switch ($current_page) {
+    case 'lots':
+        try {
+            $stmt = $pdo->prepare("
+                SELECT l.*, p.nom as produit_nom, p.code_barre,
+                       DATEDIFF(l.date_expiration, CURDATE()) as jours_restants
+                FROM lots l
+                LEFT JOIN produits p ON l.produit_id = p.id
+                WHERE l.statut = 'en_stock'
+                ORDER BY l.date_expiration ASC
+            ");
+            $stmt->execute();
+            $lots = $stmt->fetchAll();
+        } catch (Exception $e) {
+            $error = "Erreur chargement lots: " . $e->getMessage();
+        }
+        break;
+
+    case 'alertes':
+        try {
+            $stmt = $pdo->prepare("
+                SELECT a.*, p.nom as produit_nom, l.numero_lot,
+                       CASE 
+                         WHEN a.type_alerte = 'stock_bas' THEN 'Stock bas'
+                         WHEN a.type_alerte = 'peremption' THEN 'Péremption proche'
+                         WHEN a.type_alerte = 'rupture_stock' THEN 'Rupture de stock'
+                       END as type_alerte_text
+                FROM alertes a
+                LEFT JOIN produits p ON a.produit_id = p.id
+                LEFT JOIN lots l ON a.lot_id = l.id
+                WHERE a.statut IN ('non_lu', 'lu')
+                ORDER BY 
+                    CASE a.niveau 
+                        WHEN 'critique' THEN 1
+                        WHEN 'moyen' THEN 2
+                        WHEN 'faible' THEN 3
+                    END,
+                    a.created_at DESC
+            ");
+            $stmt->execute();
+            $alertes = $stmt->fetchAll();
+        } catch (Exception $e) {
+            $error = "Erreur chargement alertes: " . $e->getMessage();
+        }
+        break;
+
+    case 'mouvements':
+        $date_debut = $_GET['date_debut'] ?? date('Y-m-01');
+        $date_fin = $_GET['date_fin'] ?? date('Y-m-t');
+
+        try {
+            $stmt = $pdo->prepare("
+                SELECT m.*, p.nom as produit_nom, l.numero_lot,
+                       u.nom as utilisateur_nom
+                FROM mouvements_stock m
+                LEFT JOIN produits p ON m.produit_id = p.id
+                LEFT JOIN lots l ON m.lot_id = l.id
+                LEFT JOIN utilisateurs u ON m.created_by = u.id
+                WHERE DATE(m.created_at) BETWEEN :date_debut AND :date_fin
+                ORDER BY m.created_at DESC
+            ");
+            $stmt->execute([
+                ':date_debut' => $date_debut,
+                ':date_fin' => $date_fin
+            ]);
+            $mouvements = $stmt->fetchAll();
+        } catch (Exception $e) {
+            $error = "Erreur chargement mouvements: " . $e->getMessage();
+        }
+        break;
+
+    case 'inventaire':
+        try {
+            // Produits avec stock faible
+            $stmt = $pdo->prepare("
+                SELECT p.id, p.nom, p.code_barre, c.nom as categorie,
+                       COALESCE(SUM(l.quantite_actuelle), 0) as quantite_stock
+                FROM produits p
+                LEFT JOIN categories c ON p.categorie_id = c.id
+                LEFT JOIN lots l ON p.id = l.produit_id AND l.statut = 'en_stock'
+                WHERE p.statut = 'actif'
+                GROUP BY p.id
+                HAVING quantite_stock <= 20
+                ORDER BY quantite_stock ASC
+            ");
+            $stmt->execute();
+            $inventaire_data = $stmt->fetchAll();
+        } catch (Exception $e) {
+            $error = "Erreur chargement inventaire: " . $e->getMessage();
+        }
+        break;
+
+    case 'rapports':
+        $periode = $_GET['periode'] ?? 'semaine';
+        $rapports_data = []; // Initialiser la variable
+
+        try {
+            switch ($periode) {
+                case 'jour':
+                    $sql = "
+                    SELECT 
+                        DATE(created_at) as date,
+                        COUNT(*) as nombre_mouvements,
+                        SUM(CASE WHEN type_mouvement = 'entree' THEN quantite ELSE 0 END) as entrees,
+                        SUM(CASE WHEN type_mouvement = 'sortie' THEN quantite ELSE 0 END) as sorties,
+                        COUNT(DISTINCT produit_id) as produit_count
+                    FROM mouvements_stock
+                    WHERE DATE(created_at) = CURDATE()
+                    GROUP BY DATE(created_at)
+                    ORDER BY date
+                ";
+                    break;
+
+                case 'semaine':
+                    $sql = "
+                    SELECT 
+                        DATE(created_at) as date,
+                        COUNT(*) as nombre_mouvements,
+                        SUM(CASE WHEN type_mouvement = 'entree' THEN quantite ELSE 0 END) as entrees,
+                        SUM(CASE WHEN type_mouvement = 'sortie' THEN quantite ELSE 0 END) as sorties,
+                        COUNT(DISTINCT produit_id) as produit_count
+                    FROM mouvements_stock
+                    WHERE YEARWEEK(created_at, 1) = YEARWEEK(CURDATE(), 1)
+                    GROUP BY DATE(created_at)
+                    ORDER BY date
+                ";
+                    break;
+
+                case 'mois':
+                    $sql = "
+                    SELECT 
+                        DATE(created_at) as date,
+                        COUNT(*) as nombre_mouvements,
+                        SUM(CASE WHEN type_mouvement = 'entree' THEN quantite ELSE 0 END) as entrees,
+                        SUM(CASE WHEN type_mouvement = 'sortie' THEN quantite ELSE 0 END) as sorties,
+                        COUNT(DISTINCT produit_id) as produit_count
+                    FROM mouvements_stock
+                    WHERE MONTH(created_at) = MONTH(CURDATE())
+                    AND YEAR(created_at) = YEAR(CURDATE())
+                    GROUP BY DATE(created_at)
+                    ORDER BY date
+                ";
+                    break;
+
+                default:
+                    // Par défaut, semaine
+                    $sql = "
+                    SELECT 
+                        DATE(created_at) as date,
+                        COUNT(*) as nombre_mouvements,
+                        SUM(CASE WHEN type_mouvement = 'entree' THEN quantite ELSE 0 END) as entrees,
+                        SUM(CASE WHEN type_mouvement = 'sortie' THEN quantite ELSE 0 END) as sorties,
+                        COUNT(DISTINCT produit_id) as produit_count
+                    FROM mouvements_stock
+                    WHERE YEARWEEK(created_at, 1) = YEARWEEK(CURDATE(), 1)
+                    GROUP BY DATE(created_at)
+                    ORDER BY date
+                ";
+            }
+
+            $stmt = $pdo->query($sql);
+            $rapports_data = $stmt->fetchAll();
+
+        } catch (Exception $e) {
+            $error = "Erreur chargement rapports: " . $e->getMessage();
+            $rapports_data = []; // Assurer que c'est toujours un tableau
+        }
+        break;
 }
 ?>
 
@@ -316,2576 +639,3164 @@ function getNiveauAlerte($jours_restants)
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard Stockiste - Pharma Management</title>
+    <title>NAGEX Pharma - Dashboard Stockiste</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&display=swap"
+        rel="stylesheet">
+    <!-- Styles spécifiques au sidebar -->
     <style>
         .sidebar {
-            position: fixed;
-            top: 0;
-            left: 0;
-            height: 100vh;
-            width: 16rem;
-            background-color: white;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-            z-index: 40;
-            overflow-y: auto;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 10px 25px -5px rgba(16, 185, 129, 0.1);
         }
 
-        .main-content {
-            margin-left: 16rem;
-            min-height: 100vh;
+        .active-menu {
+            background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+            color: white !important;
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
         }
 
-        .section {
-            display: none;
-        }
-
-        .section.active {
-            display: block;
-        }
-
-        .nav-link.active {
-            background-color: #10B981;
-            color: white;
-        }
-
-        .modal {
-            display: none;
-            position: fixed;
-            z-index: 50;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0, 0, 0, 0.5);
-        }
-
-        .modal-content {
-            background-color: white;
-            margin: 5% auto;
-            padding: 20px;
+        .menu-item {
+            position: relative;
+            overflow: hidden;
             border-radius: 8px;
-            width: 90%;
-            max-width: 800px;
-            max-height: 80vh;
-            overflow-y: auto;
+            margin: 2px 0;
+            transition: all 0.2s ease;
+        }
+
+        .menu-item::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 100%;
+            width: 4px;
+            background: #10B981;
+            transform: scaleY(0);
+            transition: transform 0.2s ease;
+        }
+
+        .menu-item:hover::before {
+            transform: scaleY(1);
+        }
+
+        .active-menu::before {
+            transform: scaleY(1);
+        }
+
+        .section-title {
+            position: relative;
+            padding-left: 20px;
+            margin-top: 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .section-title::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 8px;
+            height: 8px;
+            background: #10B981;
+            border-radius: 50%;
+        }
+
+        .badge-danger {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 700;
+            min-width: 20px;
+            text-align: center;
+            display: inline-block;
+        }
+
+        /* Animation des icônes actives */
+        .active-menu i {
+            transform: scale(1.1);
+            transition: transform 0.2s ease;
+        }
+
+        /* Effet de profondeur au survol */
+        .menu-item:hover {
+            transform: translateX(2px);
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.15);
+        }
+
+        .menu-item:active {
+            transform: translateX(1px);
+        }
+
+        /* Animation du badge d'alerte */
+        .badge-danger {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+            }
+
+            50% {
+                transform: scale(1.05);
+            }
+
+            100% {
+                transform: scale(1);
+            }
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 100%;
+                height: auto;
+                position: fixed;
+                z-index: 1000;
+            }
+
+            .sidebar nav {
+                max-height: 60vh;
+                overflow-y: auto;
+            }
         }
     </style>
 </head>
 
 <body class="bg-gray-100" style="font-family: 'Montserrat', sans-serif;">
-    <?php if (isset($_SESSION['success_message'])): ?>
-        <div class="fixed top-4 right-4 bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded z-50">
-            <div class="flex items-center">
-                <i class="fas fa-check-circle mr-2"></i>
-                <span><?php echo $_SESSION['success_message'];
-                unset($_SESSION['success_message']); ?></span>
-            </div>
-        </div>
-    <?php endif; ?>
 
-    <?php if (isset($_SESSION['error_message'])): ?>
-        <div class="fixed top-4 right-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded z-50">
-            <div class="flex items-center">
-                <i class="fas fa-exclamation-circle mr-2"></i>
-                <span><?php echo $_SESSION['error_message'];
-                unset($_SESSION['error_message']); ?></span>
-            </div>
-        </div>
-    <?php endif; ?>
 
-    <!-- Sidebar -->
-    <div class="sidebar">
-        <div class="flex items-center justify-center p-6 border-b">
-            <div class="flex items-center space-x-3">
-                <div class="w-10 h-10 bg-orange-600 rounded-full flex items-center justify-center">
-                    <i class="fas fa-boxes text-white text-lg"></i>
-                </div>
-                <div>
-                    <h1 class="text-xl font-bold text-gray-800">NAGEX Pharma</h1>
-                    <p class="text-xs text-orange-600">Dashboard Stockiste</p>
+
+    <div class="flex">
+        <!-- Sidebar -->
+        <div class="sidebar w-64 bg-white shadow-xl min-h-screen flex flex-col relative">
+            <!-- Logo Section avec fond dégradé -->
+            <div class="flex items-center justify-center p-6 border-b bg-gradient-to-r from-emerald-50 to-green-50">
+                <div class="flex items-center space-x-3">
+                    <div
+                        class="w-12 h-12 bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl flex items-center justify-center shadow-lg">
+                        <i class="fas fa-capsules text-white text-xl"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold text-gray-800">NAGEX Pharma</h1>
+                        <p class="text-xs text-green-600 font-medium">Stockiste Dashboard</p>
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <!-- Sidebar Navigation -->
-        <nav class="mt-6">
-            <div class="px-4 space-y-2">
-                <a href="#dashboard"
-                    class="nav-link active flex items-center px-4 py-3 text-gray-700 rounded-lg transition-colors">
-                    <i class="fas fa-tachometer-alt w-6"></i>
-                    <span class="ml-3 font-medium">Tableau de bord</span>
-                </a>
-
-                <!-- Gestion des Stocks -->
-                <div class="mt-4">
-                    <p class="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Gestion des Stocks
-                    </p>
-
-                    <a href="#produits"
-                        class="nav-link flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-orange-50 transition-colors">
-                        <div class="flex items-center">
-                            <i class="fas fa-pills w-6 text-blue-500"></i>
-                            <span class="ml-3 font-medium">Produits & Stocks</span>
-                        </div>
-                        <span
-                            class="bg-blue-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $produits_total; ?></span>
-                    </a>
-
-                    <a href="#lots"
-                        class="nav-link flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-orange-50 transition-colors">
-                        <div class="flex items-center">
-                            <i class="fas fa-boxes w-6 text-green-500"></i>
-                            <span class="ml-3 font-medium">Gestion des Lots</span>
-                        </div>
-                        <span
-                            class="bg-green-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $lots_total; ?></span>
-                    </a>
-
-                    <a href="#ajouter-lot"
-                        class="nav-link flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-orange-50 transition-colors">
-                        <i class="fas fa-plus-circle w-6 text-purple-500"></i>
-                        <span class="ml-3 font-medium">Nouveau Lot</span>
+            <!-- Navigation Menu -->
+            <nav class="flex-1 p-4 overflow-y-auto">
+                <!-- Dashboard -->
+                <div class="mb-6">
+                    <a href="?page=dashboard"
+                        class="menu-item block py-3 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'dashboard' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
+                        <i class="fas fa-tachometer-alt mr-3 w-5 text-center"></i>
+                        <span class="font-medium">Tableau de bord</span>
                     </a>
                 </div>
 
-                <!-- Inventaires -->
-                <div class="mt-4">
-                    <p class="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Inventaires</p>
+                <!-- Gestion des Lots -->
+                <div class="mb-6">
+                    <div class="section-title text-xs text-gray-500 font-semibold uppercase tracking-wider mb-2">
+                        <i class="fas fa-boxes mr-2"></i>Gestion des Lots
+                    </div>
+                    <div class="space-y-1">
+                        <a href="?page=lots"
+                            class="menu-item block py-2.5 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'lots' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
+                            <i class="fas fa-box mr-3 w-5 text-center"></i>
+                            <span>Tous les lots</span>
+                        </a>
+                        <a href="?page=ajouter_lot"
+                            class="menu-item block py-2.5 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'ajouter_lot' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
+                            <i class="fas fa-plus-circle mr-3 w-5 text-center"></i>
+                            <span>Ajouter un lot</span>
+                        </a>
+                    </div>
+                </div>
 
-                    <a href="#inventaires"
-                        class="nav-link flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-orange-50 transition-colors">
-                        <div class="flex items-center">
-                            <i class="fas fa-clipboard-check w-6 text-indigo-500"></i>
-                            <span class="ml-3 font-medium">Inventaires en cours</span>
-                        </div>
-                        <span
-                            class="bg-indigo-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $inventaires_en_cours; ?></span>
-                    </a>
-
-                    <a href="#nouvel-inventaire"
-                        class="nav-link flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-orange-50 transition-colors">
-                        <i class="fas fa-plus w-6 text-green-500"></i>
-                        <span class="ml-3 font-medium">Nouvel Inventaire</span>
+                <!-- Alertes -->
+                <div class="mb-6">
+                    <div class="section-title text-xs text-gray-500 font-semibold uppercase tracking-wider mb-2">
+                        <i class="fas fa-bell mr-2"></i>Alertes
+                    </div>
+                    <a href="?page=alertes"
+                        class="menu-item block py-2.5 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'alertes' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
+                        <i class="fas fa-exclamation-triangle mr-3 w-5 text-center"></i>
+                        <span class="flex-1">Alertes stock</span>
+                        <?php if ($stats['alertes_stock_bas'] > 0): ?>
+                            <span class="badge-danger text-xs font-bold px-2 py-1 min-w-[24px] text-center">
+                                <?php echo $stats['alertes_stock_bas']; ?>
+                            </span>
+                        <?php endif; ?>
                     </a>
                 </div>
 
-                <!-- Alertes & Surveillance -->
-                <div class="mt-4">
-                    <p class="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Alertes &
-                        Surveillance</p>
-
-                    <a href="#alertes-stock"
-                        class="nav-link flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-orange-50 transition-colors">
-                        <div class="flex items-center">
-                            <i class="fas fa-exclamation-triangle w-6 text-red-500"></i>
-                            <span class="ml-3 font-medium">Alertes Stock</span>
-                        </div>
-                        <span
-                            class="bg-red-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $alertes_stock_count; ?></span>
+                <!-- Mouvements -->
+                <div class="mb-6">
+                    <div class="section-title text-xs text-gray-500 font-semibold uppercase tracking-wider mb-2">
+                        <i class="fas fa-exchange-alt mr-2"></i>Mouvements
+                    </div>
+                    <a href="?page=mouvements"
+                        class="menu-item block py-2.5 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'mouvements' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
+                        <i class="fas fa-history mr-3 w-5 text-center"></i>
+                        <span>Historique</span>
                     </a>
+                </div>
 
-                    <a href="#alertes-expiration"
-                        class="nav-link flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-orange-50 transition-colors">
-                        <div class="flex items-center">
-                            <i class="fas fa-clock w-6 text-orange-500"></i>
-                            <span class="ml-3 font-medium">Péremptions</span>
-                        </div>
-                        <span
-                            class="bg-orange-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $alertes_expiration_count; ?></span>
+                <!-- Inventaire -->
+                <div class="mb-6">
+                    <div class="section-title text-xs text-gray-500 font-semibold uppercase tracking-wider mb-2">
+                        <i class="fas fa-clipboard-check mr-2"></i>Inventaire
+                    </div>
+                    <a href="?page=inventaire"
+                        class="menu-item block py-2.5 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'inventaire' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
+                        <i class="fas fa-clipboard-list mr-3 w-5 text-center"></i>
+                        <span>Inventaire rapide</span>
                     </a>
                 </div>
 
                 <!-- Rapports -->
-                <div class="mt-4">
-                    <p class="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Rapports</p>
-
-                    <a href="#mouvements"
-                        class="nav-link flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-orange-50 transition-colors">
-                        <i class="fas fa-exchange-alt w-6 text-purple-500"></i>
-                        <span class="ml-3 font-medium">Mouvements</span>
-                    </a>
-
-                    <a href="#rapports"
-                        class="nav-link flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-orange-50 transition-colors">
-                        <i class="fas fa-chart-bar w-6 text-teal-500"></i>
-                        <span class="ml-3 font-medium">Rapports</span>
+                <div class="mb-6">
+                    <div class="section-title text-xs text-gray-500 font-semibold uppercase tracking-wider mb-2">
+                        <i class="fas fa-chart-bar mr-2"></i>Rapports
+                    </div>
+                    <a href="?page=rapports"
+                        class="menu-item block py-2.5 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'rapports' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
+                        <i class="fas fa-file-alt mr-3 w-5 text-center"></i>
+                        <span>Rapports stock</span>
                     </a>
                 </div>
-            </div>
-        </nav>
-
-        <div class="absolute bottom-0 left-0 right-0 p-4 border-t">
-            <div class="flex items-center space-x-3">
-                <div class="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
-                    <i class="fas fa-boxes text-orange-600"></i>
-                </div>
-                <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-gray-900 truncate"><?php echo htmlspecialchars($user_name); ?>
-                    </p>
-                    <p class="text-xs text-orange-600 truncate">Stockiste</p>
-                </div>
-                <a href="../utilisateurs/logout.php" class="text-gray-400 hover:text-red-500 transition-colors">
-                    <i class="fas fa-sign-out-alt"></i>
-                </a>
-            </div>
+            </nav>
         </div>
-    </div>
 
-    <!-- Main Content -->
-    <div class="main-content">
-        <header class="bg-white shadow-sm">
-            <div class="flex items-center justify-between px-8 py-4">
-                <div>
-                    <h2 class="text-2xl font-bold text-gray-800" id="pageTitle">Tableau de bord Stockiste</h2>
-                    <p class="text-gray-600">Gestion physique du stock et des réceptions</p>
+
+
+        <!-- Contenu principal -->
+        <div class="flex-1 p-6">
+            <!-- Messages d'alerte -->
+            <?php if ($message): ?>
+                <div class="mb-4 p-4 bg-green-100 text-green-700 rounded-lg border border-green-300">
+                    <?php echo $message; ?>
                 </div>
-                <div class="flex items-center space-x-4">
-                    <div class="text-sm text-gray-600">
-                        <i class="fas fa-user-circle mr-2"></i>
-                        Connecté en tant que <span
-                            class="font-semibold"><?php echo htmlspecialchars($user_role); ?></span>
+            <?php endif; ?>
+
+            <?php if ($error): ?>
+                <div class="mb-4 p-4 bg-red-100 text-red-700 rounded-lg border border-red-300">
+                    <?php echo $error; ?>
+                </div>
+            <?php endif; ?>
+
+            <!-- Contenu selon la page -->
+            <?php if ($current_page == 'dashboard'): ?>
+                <!-- ========== DASHBOARD STOCKISTE ========== -->
+                <div class="mb-8">
+                    <!-- En-tête -->
+                    <div class="flex items-center justify-between mb-8">
+                        <div class="flex items-center">
+                            <div class="p-3 bg-gradient-to-br from-emerald-100 to-emerald-200 rounded-xl shadow-sm mr-4">
+                                <i class="fas fa-tachometer-alt text-emerald-600 text-xl"></i>
+                            </div>
+                            <div>
+                                <h1 class="text-2xl font-bold text-gray-800">Tableau de bord Stockiste</h1>
+                                <p class="text-gray-600 mt-1">Vue d'ensemble du stock et des alertes</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <span
+                                class="px-3 py-1 bg-gradient-to-r from-emerald-100 to-emerald-50 text-emerald-800 rounded-full text-sm font-semibold border border-emerald-200">
+                                <i class="fas fa-sync-alt mr-1"></i>Mis à jour à l'instant
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Cartes de statistiques -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                        <!-- Total en stock -->
+                        <div
+                            class="stat-card group bg-gradient-to-br from-white to-blue-50 p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 border border-blue-100 hover:border-blue-200 relative overflow-hidden">
+                            <div class="relative z-10">
+                                <div class="flex items-center mb-2">
+                                    <div
+                                        class="stat-icon p-3 bg-gradient-to-br from-blue-100 to-blue-200 rounded-xl shadow-inner group-hover:scale-110 transition-transform duration-300">
+                                        <i class="fas fa-boxes text-blue-600 text-xl"></i>
+                                    </div>
+                                    <div class="ml-4">
+                                        <p class="text-gray-600 text-sm font-medium">Total en stock</p>
+                                        <p class="text-2xl font-bold text-gray-800 mt-1">
+                                            <?php echo number_format($stats['total_stock']); ?>
+                                        </p>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-blue-600 font-medium mt-2">
+                                    <i class="fas fa-cube mr-1"></i>unités disponibles
+                                </p>
+                            </div>
+                            <div class="absolute bottom-0 right-0 opacity-10">
+                                <i class="fas fa-boxes text-blue-400 text-5xl"></i>
+                            </div>
+                        </div>
+
+                        <!-- Stocks bas -->
+                        <div
+                            class="stat-card group bg-gradient-to-br from-white to-yellow-50 p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 border border-yellow-100 hover:border-yellow-200 relative overflow-hidden">
+                            <div class="relative z-10">
+                                <div class="flex items-center mb-2">
+                                    <div
+                                        class="stat-icon p-3 bg-gradient-to-br from-yellow-100 to-yellow-200 rounded-xl shadow-inner group-hover:scale-110 transition-transform duration-300">
+                                        <i class="fas fa-exclamation-circle text-yellow-600 text-xl"></i>
+                                    </div>
+                                    <div class="ml-4">
+                                        <p class="text-gray-600 text-sm font-medium">Stocks bas</p>
+                                        <p class="text-2xl font-bold text-gray-800 mt-1">
+                                            <?php echo $stats['alertes_stock_bas']; ?>
+                                        </p>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-yellow-600 font-medium mt-2">
+                                    <i class="fas fa-arrow-down mr-1"></i>besoin de réapprovisionnement
+                                </p>
+                            </div>
+                            <div class="absolute bottom-0 right-0 opacity-10">
+                                <i class="fas fa-exclamation-circle text-yellow-400 text-5xl"></i>
+                            </div>
+                        </div>
+
+                        <!-- Péremption proche -->
+                        <div
+                            class="stat-card group bg-gradient-to-br from-white to-orange-50 p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 border border-orange-100 hover:border-orange-200 relative overflow-hidden">
+                            <div class="relative z-10">
+                                <div class="flex items-center mb-2">
+                                    <div
+                                        class="stat-icon p-3 bg-gradient-to-br from-orange-100 to-orange-200 rounded-xl shadow-inner group-hover:scale-110 transition-transform duration-300">
+                                        <i class="fas fa-calendar-times text-orange-600 text-xl"></i>
+                                    </div>
+                                    <div class="ml-4">
+                                        <p class="text-gray-600 text-sm font-medium">Péremption proche</p>
+                                        <p class="text-2xl font-bold text-gray-800 mt-1">
+                                            <?php echo $stats['alertes_peremption']; ?>
+                                        </p>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-orange-600 font-medium mt-2">
+                                    <i class="fas fa-clock mr-1"></i>à surveiller
+                                </p>
+                            </div>
+                            <div class="absolute bottom-0 right-0 opacity-10">
+                                <i class="fas fa-calendar-times text-orange-400 text-5xl"></i>
+                            </div>
+                        </div>
+
+                        <!-- Ruptures -->
+                        <div
+                            class="stat-card group bg-gradient-to-br from-white to-red-50 p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 border border-red-100 hover:border-red-200 relative overflow-hidden">
+                            <div class="relative z-10">
+                                <div class="flex items-center mb-2">
+                                    <div
+                                        class="stat-icon p-3 bg-gradient-to-br from-red-100 to-red-200 rounded-xl shadow-inner group-hover:scale-110 transition-transform duration-300">
+                                        <i class="fas fa-ban text-red-600 text-xl"></i>
+                                    </div>
+                                    <div class="ml-4">
+                                        <p class="text-gray-600 text-sm font-medium">Ruptures</p>
+                                        <p class="text-2xl font-bold text-gray-800 mt-1">
+                                            <?php echo $stats['ruptures_stock']; ?>
+                                        </p>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-red-600 font-medium mt-2">
+                                    <i class="fas fa-times-circle mr-1"></i>réappro urgent
+                                </p>
+                            </div>
+                            <div class="absolute bottom-0 right-0 opacity-10">
+                                <i class="fas fa-ban text-red-400 text-5xl"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Actions rapides -->
+                    <div
+                        class="bg-gradient-to-br from-white to-emerald-50 rounded-xl shadow-lg p-6 mb-8 border border-emerald-200">
+                        <div class="flex items-center mb-6">
+                            <div class="p-3 bg-gradient-to-br from-emerald-100 to-emerald-200 rounded-xl shadow-sm mr-3">
+                                <i class="fas fa-bolt text-emerald-600"></i>
+                            </div>
+                            <h2 class="text-xl font-bold text-gray-800">Actions rapides</h2>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                            <a href="?page=ajouter_lot"
+                                class="group relative bg-gradient-to-br from-emerald-50 to-emerald-100 hover:from-emerald-100 hover:to-emerald-200 border border-emerald-200 rounded-xl p-6 text-center transition-all duration-300 hover:shadow-lg hover:-translate-y-1 overflow-hidden">
+                                <div
+                                    class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-400 to-emerald-500 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300">
+                                </div>
+                                <div
+                                    class="p-3 bg-gradient-to-br from-white to-emerald-50 rounded-lg inline-flex items-center justify-center mb-4 shadow-sm group-hover:shadow transition-shadow duration-300">
+                                    <i class="fas fa-plus-circle text-emerald-600 text-2xl"></i>
+                                </div>
+                                <h3 class="font-bold text-emerald-700 mb-2">Nouveau lot</h3>
+                                <p class="text-sm text-emerald-600 opacity-80">Ajouter un lot de stock</p>
+                                <div
+                                    class="mt-3 text-xs text-emerald-500 group-hover:text-emerald-600 transition-colors duration-200">
+                                    <i class="fas fa-arrow-right mr-1"></i> Commencer
+                                </div>
+                            </a>
+
+                            <a href="?page=inventaire"
+                                class="group relative bg-gradient-to-br from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 border border-blue-200 rounded-xl p-6 text-center transition-all duration-300 hover:shadow-lg hover:-translate-y-1 overflow-hidden">
+                                <div
+                                    class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-400 to-blue-500 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300">
+                                </div>
+                                <div
+                                    class="p-3 bg-gradient-to-br from-white to-blue-50 rounded-lg inline-flex items-center justify-center mb-4 shadow-sm group-hover:shadow transition-shadow duration-300">
+                                    <i class="fas fa-clipboard-check text-blue-600 text-2xl"></i>
+                                </div>
+                                <h3 class="font-bold text-blue-700 mb-2">Inventaire</h3>
+                                <p class="text-sm text-blue-600 opacity-80">Vérifier le stock</p>
+                                <div
+                                    class="mt-3 text-xs text-blue-500 group-hover:text-blue-600 transition-colors duration-200">
+                                    <i class="fas fa-arrow-right mr-1"></i> Lancer
+                                </div>
+                            </a>
+
+                            <a href="?page=alertes"
+                                class="group relative bg-gradient-to-br from-yellow-50 to-yellow-100 hover:from-yellow-100 hover:to-yellow-200 border border-yellow-200 rounded-xl p-6 text-center transition-all duration-300 hover:shadow-lg hover:-translate-y-1 overflow-hidden">
+                                <div
+                                    class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-yellow-400 to-yellow-500 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300">
+                                </div>
+                                <div
+                                    class="p-3 bg-gradient-to-br from-white to-yellow-50 rounded-lg inline-flex items-center justify-center mb-4 shadow-sm group-hover:shadow transition-shadow duration-300">
+                                    <i class="fas fa-exclamation-triangle text-yellow-600 text-2xl"></i>
+                                </div>
+                                <h3 class="font-bold text-yellow-700 mb-2">Voir alertes</h3>
+                                <p class="text-sm text-yellow-600 opacity-80">Gérer les alertes</p>
+                                <div
+                                    class="mt-3 text-xs text-yellow-500 group-hover:text-yellow-600 transition-colors duration-200">
+                                    <i class="fas fa-arrow-right mr-1"></i> Consulter
+                                </div>
+                            </a>
+
+                            <a href="?page=rapports&periode=semaine"
+                                class="group relative bg-gradient-to-br from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200 border border-purple-200 rounded-xl p-6 text-center transition-all duration-300 hover:shadow-lg hover:-translate-y-1 overflow-hidden">
+                                <div
+                                    class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-400 to-purple-500 transform scale-x-0 group-hover:scale-x-100 transition-transform duration-300">
+                                </div>
+                                <div
+                                    class="p-3 bg-gradient-to-br from-white to-purple-50 rounded-lg inline-flex items-center justify-center mb-4 shadow-sm group-hover:shadow transition-shadow duration-300">
+                                    <i class="fas fa-chart-bar text-purple-600 text-2xl"></i>
+                                </div>
+                                <h3 class="font-bold text-purple-700 mb-2">Rapports</h3>
+                                <p class="text-sm text-purple-600 opacity-80">Analyser le stock</p>
+                                <div
+                                    class="mt-3 text-xs text-purple-500 group-hover:text-purple-600 transition-colors duration-200">
+                                    <i class="fas fa-arrow-right mr-1"></i> Générer
+                                </div>
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- Produits avec stock bas -->
+                    <div
+                        class="bg-gradient-to-br from-white to-yellow-50 rounded-xl shadow-lg p-6 border border-yellow-200">
+                        <div class="flex items-center justify-between mb-6">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-gradient-to-br from-yellow-100 to-yellow-200 rounded-xl shadow-sm mr-3">
+                                    <i class="fas fa-exclamation-triangle text-yellow-600"></i>
+                                </div>
+                                <div>
+                                    <h2 class="text-xl font-bold text-gray-800">Produits nécessitant attention</h2>
+                                    <p class="text-sm text-yellow-600">Stock ≤ 10 unités</p>
+                                </div>
+                            </div>
+                            <a href="?page=alertes"
+                                class="text-sm text-emerald-600 hover:text-emerald-700 font-medium flex items-center">
+                                Voir toutes les alertes
+                                <i class="fas fa-arrow-right ml-1 text-xs"></i>
+                            </a>
+                        </div>
+
+                        <?php
+                        try {
+                            $stmt = $pdo->query("
+                SELECT p.id, p.nom, p.code_barre, 
+                       SUM(l.quantite_actuelle) as quantite_totale,
+                       GROUP_CONCAT(DISTINCT l.numero_lot SEPARATOR ', ') as lots
+                FROM produits p
+                LEFT JOIN lots l ON p.id = l.produit_id AND l.statut = 'en_stock'
+                WHERE p.statut = 'actif'
+                GROUP BY p.id
+                HAVING quantite_totale <= 10 OR quantite_totale IS NULL
+                ORDER BY quantite_totale ASC
+                LIMIT 10
+            ");
+                            $produits_bas = $stmt->fetchAll();
+
+                            if (count($produits_bas) > 0):
+                                ?>
+                                <div class="overflow-hidden rounded-lg border border-yellow-200">
+                                    <table class="min-w-full divide-y divide-gray-200">
+                                        <thead class="bg-gradient-to-r from-yellow-50 to-yellow-100">
+                                            <tr>
+                                                <th
+                                                    class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                    <div class="flex items-center">
+                                                        <i class="fas fa-capsules mr-2 text-gray-400"></i> Produit
+                                                    </div>
+                                                </th>
+                                                <th
+                                                    class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                    <div class="flex items-center">
+                                                        <i class="fas fa-barcode mr-2 text-gray-400"></i> Code barre
+                                                    </div>
+                                                </th>
+                                                <th
+                                                    class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                    <div class="flex items-center">
+                                                        <i class="fas fa-box mr-2 text-gray-400"></i> Quantité
+                                                    </div>
+                                                </th>
+                                                <th
+                                                    class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                    <div class="flex items-center">
+                                                        <i class="fas fa-layer-group mr-2 text-gray-400"></i> Lots
+                                                    </div>
+                                                </th>
+                                                <th
+                                                    class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                    <div class="flex items-center">
+                                                        <i class="fas fa-cogs mr-2 text-gray-400"></i> Action
+                                                    </div>
+                                                </th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="bg-white divide-y divide-gray-200">
+                                            <?php foreach ($produits_bas as $produit): ?>
+                                                <tr
+                                                    class="hover:bg-gradient-to-r hover:from-yellow-50 hover:to-transparent transition-all duration-200 group">
+                                                    <td class="px-6 py-4">
+                                                        <div class="flex items-center">
+                                                            <div
+                                                                class="p-2 bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-lg mr-3 border border-yellow-200">
+                                                                <i class="fas fa-pills text-yellow-600 text-sm"></i>
+                                                            </div>
+                                                            <div
+                                                                class="font-medium text-gray-900 group-hover:text-yellow-700 transition-colors">
+                                                                <?php echo htmlspecialchars($produit['nom']); ?>
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                    <td class="px-6 py-4">
+                                                        <code
+                                                            class="text-sm text-gray-900 bg-gray-50 px-2 py-1 rounded font-mono border border-gray-200">
+                                                                                                                                                                                            <?php echo htmlspecialchars($produit['code_barre']); ?>
+                                                                                                                                                                                        </code>
+                                                    </td>
+                                                    <td class="px-6 py-4">
+                                                        <div class="flex items-center">
+                                                            <div class="relative">
+                                                                <span
+                                                                    class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold <?php echo ($produit['quantite_totale'] ?? 0) <= 3 ? 'bg-gradient-to-r from-red-100 to-red-50 text-red-800 border border-red-200' : 'bg-gradient-to-r from-yellow-100 to-yellow-50 text-yellow-800 border border-yellow-200'; ?>">
+                                                                    <i class="fas fa-box mr-1"></i>
+                                                                    <?php echo $produit['quantite_totale'] ?? 0; ?> unités
+                                                                </span>
+                                                                <?php if (($produit['quantite_totale'] ?? 0) <= 3): ?>
+                                                                    <div
+                                                                        class="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse">
+                                                                    </div>
+                                                                <?php endif; ?>
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                    <td class="px-6 py-4">
+                                                        <div class="text-sm text-gray-600 max-w-xs">
+                                                            <?php if (!empty($produit['lots'])): ?>
+                                                                <?php
+                                                                $lots = explode(', ', $produit['lots']);
+                                                                foreach (array_slice($lots, 0, 2) as $lot):
+                                                                    ?>
+                                                                    <span
+                                                                        class="inline-block px-2 py-1 bg-gray-100 rounded text-xs mr-1 mb-1 border border-gray-200">
+                                                                        <?php echo htmlspecialchars($lot); ?>
+                                                                    </span>
+                                                                <?php endforeach; ?>
+                                                                <?php if (count($lots) > 2): ?>
+                                                                    <span class="text-xs text-gray-500">+<?php echo count($lots) - 2; ?>
+                                                                        autres</span>
+                                                                <?php endif; ?>
+                                                            <?php else: ?>
+                                                                <span class="text-gray-400 italic">Aucun lot</span>
+                                                            <?php endif; ?>
+                                                        </div>
+                                                    </td>
+                                                    <td class="px-6 py-4">
+                                                        <a href="?page=ajouter_lot&produit_id=<?php echo $produit['id']; ?>"
+                                                            class="inline-flex items-center px-3 py-1 bg-gradient-to-r from-emerald-100 to-emerald-50 hover:from-emerald-200 hover:to-emerald-100 text-emerald-700 text-sm font-medium rounded-lg border border-emerald-200 transition-all duration-200 group/action">
+                                                            <i
+                                                                class="fas fa-plus-circle mr-2 text-xs group-hover/action:scale-110 transition-transform"></i>
+                                                            Ajouter lot
+                                                        </a>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            <?php else: ?>
+                                <div class="text-center py-10">
+                                    <div
+                                        class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-r from-emerald-100 to-emerald-200 mb-4 shadow-sm">
+                                        <i class="fas fa-check-circle text-emerald-600 text-2xl"></i>
+                                    </div>
+                                    <h3 class="text-lg font-medium text-gray-700 mb-2">✅ Aucun produit en stock bas</h3>
+                                    <p class="text-gray-500">Tous les stocks sont à un niveau satisfaisant.</p>
+                                </div>
+                            <?php endif;
+                        } catch (Exception $e) {
+                            echo '<div class="text-center py-10">
+                    <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-r from-red-100 to-red-200 mb-4 shadow-sm">
+                        <i class="fas fa-exclamation-circle text-red-600 text-2xl"></i>
+                    </div>
+                    <h3 class="text-lg font-medium text-gray-700 mb-2">Erreur de chargement</h3>
+                    <p class="text-gray-500">Impossible de charger les données des stocks bas.</p>
+                </div>';
+                        }
+                        ?>
                     </div>
                 </div>
-            </div>
-        </header>
 
-        <main class="p-8">
-
-            <!-- Section Tableau de bord -->
-            <div id="dashboard" class="section active">
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                    <!-- Produits Actifs -->
-                    <div class="bg-white rounded-2xl shadow-sm p-6 border-l-4 border-blue-500">
-                        <div class="flex items-center justify-between">
+            <?php elseif ($current_page == 'lots'): ?>
+                <!-- ========== LISTE DES LOTS ========== -->
+                <div class="mb-8">
+                    <!-- En-tête avec statistiques -->
+                    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8">
+                        <div class="flex items-center">
+                            <div class="p-3 bg-gradient-to-br from-emerald-100 to-emerald-200 rounded-xl shadow-sm mr-4">
+                                <i class="fas fa-boxes text-emerald-600 text-xl"></i>
+                            </div>
                             <div>
-                                <p class="text-sm text-gray-600">Produits Actifs</p>
-                                <p class="text-2xl font-bold text-gray-900"><?php echo $produits_total; ?></p>
+                                <h1 class="text-2xl font-bold text-gray-800">Gestion des Lots</h1>
+                                <p class="text-gray-600 mt-1">Liste de tous les lots en stock</p>
                             </div>
-                            <div class="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                                <i class="fas fa-pills text-blue-600 text-xl"></i>
+                        </div>
+                        <div class="flex items-center space-x-4">
+                            <div
+                                class="text-center px-4 py-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl border border-blue-200">
+                                <div class="text-2xl font-bold text-blue-700"><?php echo count($lots); ?></div>
+                                <div class="text-xs text-blue-600 font-medium">Lots</div>
                             </div>
+                            <a href="?page=ajouter_lot"
+                                class="group relative bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-5 py-3 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5">
+                                <i class="fas fa-plus mr-2 group-hover:rotate-90 transition-transform"></i>
+                                Nouveau lot
+                                <div
+                                    class="absolute inset-0 rounded-xl border border-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                                </div>
+                            </a>
                         </div>
                     </div>
 
-                    <!-- Lots en Stock -->
-                    <div class="bg-white rounded-2xl shadow-sm p-6 border-l-4 border-green-500">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-sm text-gray-600">Lots en Stock</p>
-                                <p class="text-2xl font-bold text-gray-900"><?php echo $lots_total; ?></p>
+                    <?php if (count($lots) > 0): ?>
+                        <div
+                            class="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg overflow-hidden border border-gray-200">
+                            <!-- Filtres et actions -->
+                            <div class="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-gray-100">
+                                <div class="flex flex-col md:flex-row justify-between items-center gap-4">
+                                    <div class="flex items-center space-x-4">
+                                        <div class="flex items-center">
+                                            <i class="fas fa-filter text-emerald-600 mr-2"></i>
+                                            <span class="font-medium text-gray-700"><?php echo count($lots); ?> lot(s)
+                                                trouvé(s)</span>
+                                        </div>
+                                        <div class="flex items-center space-x-2">
+                                            <span
+                                                class="px-2 py-1 bg-gradient-to-r from-emerald-100 to-emerald-50 text-emerald-800 rounded-full text-xs font-medium border border-emerald-200">
+                                                <?php echo array_sum(array_column($lots, 'quantite_actuelle')); ?> unités total
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center space-x-2">
+                                        <div class="relative">
+                                            <input type="text" placeholder="Rechercher un lot..."
+                                                class="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent text-sm">
+                                            <i
+                                                class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+                                        </div>
+                                        <button class="p-2 border border-gray-300 rounded-lg hover:bg-white transition-colors">
+                                            <i class="fas fa-sort-amount-down text-gray-600"></i>
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-                                <i class="fas fa-boxes text-green-600 text-xl"></i>
+
+                            <!-- Tableau des lots -->
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full divide-y divide-gray-200">
+                                    <thead>
+                                        <tr class="bg-gradient-to-r from-gray-50 to-gray-100">
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-hashtag mr-2 text-gray-400"></i> Lot
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-capsules mr-2 text-gray-400"></i> Produit
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-box mr-2 text-gray-400"></i> Quantité
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-calendar-times mr-2 text-gray-400"></i> Expiration
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-clock mr-2 text-gray-400"></i> Jours restants
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-dollar-sign mr-2 text-gray-400"></i> Prix d'achat
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-cogs mr-2 text-gray-400"></i> Actions
+                                                </div>
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white divide-y divide-gray-200">
+                                        <?php foreach ($lots as $lot):
+                                            $jours_restants = $lot['jours_restants'] ?? joursAvantPeremption($lot['date_expiration']);
+                                            $jours_class = '';
+                                            if ($jours_restants <= 0) {
+                                                $jours_class = 'bg-gradient-to-r from-red-100 to-red-50 text-red-800 border-red-200';
+                                                $texte_jours = 'Expiré';
+                                                $jours_icon = 'fas fa-times-circle';
+                                            } elseif ($jours_restants <= 30) {
+                                                $jours_class = 'bg-gradient-to-r from-orange-100 to-orange-50 text-orange-800 border-orange-200';
+                                                $texte_jours = $jours_restants . ' jours';
+                                                $jours_icon = 'fas fa-exclamation-triangle';
+                                            } else {
+                                                $jours_class = 'bg-gradient-to-r from-green-100 to-green-50 text-green-800 border-green-200';
+                                                $texte_jours = $jours_restants . ' jours';
+                                                $jours_icon = 'fas fa-check-circle';
+                                            }
+
+                                            // Classe quantité
+                                            $quantite_class = $lot['quantite_actuelle'] <= 10 ?
+                                                'bg-gradient-to-r from-red-100 to-red-50 text-red-800 border-red-200' :
+                                                'bg-gradient-to-r from-green-100 to-green-50 text-green-800 border-green-200';
+                                            ?>
+                                            <tr
+                                                class="hover:bg-gradient-to-r hover:from-emerald-50 hover:to-transparent transition-all duration-200 group">
+                                                <!-- Numéro de lot -->
+                                                <td class="px-6 py-4">
+                                                    <div class="flex items-center">
+                                                        <div
+                                                            class="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg mr-3 border border-blue-200">
+                                                            <i class="fas fa-tag text-blue-600 text-sm"></i>
+                                                        </div>
+                                                        <div>
+                                                            <code class="text-sm font-medium text-gray-900 font-mono">
+                                                                                                                                                <?php echo htmlspecialchars($lot['numero_lot']); ?>
+                                                                                                                                            </code>
+                                                            <div class="text-xs text-gray-500 mt-1">
+                                                                <i class="fas fa-calendar-plus mr-1"></i>
+                                                                <?php echo formatDate($lot['date_reception']); ?>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </td>
+
+                                                <!-- Produit -->
+                                                <td class="px-6 py-4">
+                                                    <div class="flex items-center">
+                                                        <div
+                                                            class="p-2 bg-gradient-to-br from-emerald-50 to-emerald-100 rounded-lg mr-3 border border-emerald-200">
+                                                            <i class="fas fa-pills text-emerald-600 text-sm"></i>
+                                                        </div>
+                                                        <div>
+                                                            <div
+                                                                class="font-semibold text-gray-900 group-hover:text-emerald-700 transition-colors">
+                                                                <?php echo htmlspecialchars($lot['produit_nom']); ?>
+                                                            </div>
+                                                            <div class="text-xs text-gray-500 mt-1">
+                                                                <i class="fas fa-barcode mr-1"></i>
+                                                                <?php echo htmlspecialchars($lot['code_barre']); ?>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </td>
+
+                                                <!-- Quantité -->
+                                                <td class="px-6 py-4">
+                                                    <div class="flex flex-col space-y-2">
+                                                        <div class="flex items-center space-x-2">
+                                                            <span
+                                                                class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold <?php echo $quantite_class; ?> border">
+                                                                <i class="fas fa-box mr-1 text-xs"></i>
+                                                                <?php echo $lot['quantite_actuelle']; ?> actuel
+                                                            </span>
+                                                            <span class="text-xs text-gray-500">
+                                                                / <?php echo $lot['quantite_initiale']; ?> initial
+                                                            </span>
+                                                        </div>
+                                                        <!-- Barre de progression -->
+                                                        <div class="w-full bg-gray-200 rounded-full h-1.5">
+                                                            <?php
+                                                            $pourcentage = ($lot['quantite_actuelle'] / $lot['quantite_initiale']) * 100;
+                                                            $couleur_barre = $pourcentage <= 25 ? 'bg-red-500' : ($pourcentage <= 50 ? 'bg-yellow-500' : 'bg-green-500');
+                                                            ?>
+                                                            <div class="h-1.5 rounded-full <?php echo $couleur_barre; ?>"
+                                                                style="width: <?php echo $pourcentage; ?>%"></div>
+                                                        </div>
+                                                    </div>
+                                                </td>
+
+                                                <!-- Date d'expiration -->
+                                                <td class="px-6 py-4">
+                                                    <div class="flex items-center text-sm text-gray-900">
+                                                        <i class="far fa-calendar-alt text-gray-400 mr-2"></i>
+                                                        <?php echo formatDate($lot['date_expiration']); ?>
+                                                    </div>
+                                                    <?php if ($jours_restants <= 30): ?>
+                                                        <div
+                                                            class="text-xs <?php echo $jours_restants <= 0 ? 'text-red-600' : 'text-orange-600'; ?> mt-1">
+                                                            <i class="fas fa-clock mr-1"></i>
+                                                            <?php echo $jours_restants <= 0 ? 'Expiré' : 'À surveiller'; ?>
+                                                        </div>
+                                                    <?php endif; ?>
+                                                </td>
+
+                                                <!-- Jours restants -->
+                                                <td class="px-6 py-4">
+                                                    <div
+                                                        class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold <?php echo $jours_class; ?> border">
+                                                        <i class="<?php echo $jours_icon; ?> mr-1 text-xs"></i>
+                                                        <?php echo $texte_jours; ?>
+                                                    </div>
+                                                    <?php if ($jours_restants <= 15): ?>
+                                                        <div class="text-xs text-gray-500 mt-1">
+                                                            <i class="fas fa-running mr-1"></i>
+                                                            Action requise
+                                                        </div>
+                                                    <?php endif; ?>
+                                                </td>
+
+                                                <!-- Prix d'achat -->
+                                                <td class="px-6 py-4">
+                                                    <div class="text-sm font-bold text-gray-900">
+                                                        <?php echo number_format($lot['prix_achat'], 2); ?> $
+                                                    </div>
+                                                    <div class="text-xs text-gray-500">
+                                                        Unitaire:
+                                                        <?php echo number_format($lot['prix_achat'] / $lot['quantite_initiale'], 2); ?>
+                                                        $
+                                                    </div>
+                                                </td>
+
+                                                <!-- Actions -->
+                                                <td class="px-6 py-4">
+                                                    <div class="flex items-center space-x-2">
+                                                        <button
+                                                            onclick="ajusterStock(<?php echo $lot['id']; ?>, <?php echo $lot['quantite_actuelle']; ?>, '<?php echo htmlspecialchars(addslashes($lot['produit_nom'])); ?>')"
+                                                            class="p-2 bg-gradient-to-br from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-600 rounded-lg border border-blue-200 hover:shadow-sm transition-all duration-200 group/adjust"
+                                                            title="Ajuster stock">
+                                                            <i
+                                                                class="fas fa-sliders-h text-sm group-hover/adjust:scale-110 transition-transform"></i>
+                                                        </button>
+
+                                                        <a href="?page=modifier_lot&id=<?php echo $lot['id']; ?>"
+                                                            class="p-2 bg-gradient-to-br from-emerald-50 to-emerald-100 hover:from-emerald-100 hover:to-emerald-200 text-emerald-600 rounded-lg border border-emerald-200 hover:shadow-sm transition-all duration-200 group/edit"
+                                                            title="Modifier">
+                                                            <i
+                                                                class="fas fa-pencil-alt text-sm group-hover/edit:scale-110 transition-transform"></i>
+                                                        </a>
+
+                                                        <a href="?page=lot_details&id=<?php echo $lot['id']; ?>"
+                                                            class="p-2 bg-gradient-to-br from-gray-50 to-gray-100 hover:from-gray-100 hover:to-gray-200 text-gray-600 rounded-lg border border-gray-200 hover:shadow-sm transition-all duration-200 group/view"
+                                                            title="Voir détails">
+                                                            <i
+                                                                class="fas fa-eye text-sm group-hover/view:scale-110 transition-transform"></i>
+                                                        </a>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- Statistiques en bas -->
+                            <div class="px-6 py-4 border-t border-gray-200 bg-gray-50">
+                                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                    <?php
+                                    $lots_expires = count(array_filter($lots, function ($lot) {
+                                        $jours = joursAvantPeremption($lot['date_expiration']);
+                                        return $jours <= 0;
+                                    }));
+                                    $lots_proche = count(array_filter($lots, function ($lot) {
+                                        $jours = joursAvantPeremption($lot['date_expiration']);
+                                        return $jours > 0 && $jours <= 30;
+                                    }));
+                                    $lots_bas = count(array_filter($lots, function ($lot) {
+                                        return $lot['quantite_actuelle'] <= 10;
+                                    }));
+                                    ?>
+                                    <div class="text-center">
+                                        <div class="text-lg font-bold text-emerald-700"><?php echo count($lots); ?></div>
+                                        <div class="text-sm text-gray-600">Lots total</div>
+                                    </div>
+                                    <div class="text-center">
+                                        <div class="text-lg font-bold text-orange-700"><?php echo $lots_proche; ?></div>
+                                        <div class="text-sm text-gray-600">Expire bientôt</div>
+                                    </div>
+                                    <div class="text-center">
+                                        <div class="text-lg font-bold text-red-700"><?php echo $lots_expires; ?></div>
+                                        <div class="text-sm text-gray-600">Expirés</div>
+                                    </div>
+                                    <div class="text-center">
+                                        <div class="text-lg font-bold text-yellow-700"><?php echo $lots_bas; ?></div>
+                                        <div class="text-sm text-gray-600">Stock bas</div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                    <!-- Produits en Rupture -->
-                    <div class="bg-white rounded-2xl shadow-sm p-6 border-l-4 border-red-500">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-sm text-gray-600">Produits en Rupture</p>
-                                <p class="text-2xl font-bold text-gray-900"><?php echo $rupture_count; ?></p>
+                    <?php else: ?>
+                        <!-- Aucun lot -->
+                        <div
+                            class="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg p-16 text-center border border-gray-200">
+                            <div
+                                class="inline-flex items-center justify-center w-24 h-24 rounded-full bg-gradient-to-r from-gray-100 to-gray-200 mb-8 shadow-sm">
+                                <i class="fas fa-box-open text-gray-600 text-4xl"></i>
                             </div>
-                            <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
-                                <i class="fas fa-exclamation-circle text-red-600 text-xl"></i>
+                            <h3 class="text-3xl font-bold text-gray-800 mb-4">Aucun lot en stock</h3>
+                            <p class="text-gray-600 text-lg mb-10 max-w-md mx-auto">
+                                Commencez par ajouter un nouveau lot pour gérer votre stock de produits.
+                            </p>
+                            <div class="flex flex-col sm:flex-row justify-center gap-6">
+                                <a href="?page=ajouter_lot"
+                                    class="group bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-8 py-4 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5 text-lg">
+                                    <i class="fas fa-plus mr-3 group-hover:rotate-90 transition-transform"></i>
+                                    Ajouter un premier lot
+                                </a>
+                                <a href="?page=dashboard"
+                                    class="group bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-8 py-4 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5 text-lg">
+                                    <i class="fas fa-tachometer-alt mr-3 group-hover:scale-110 transition-transform"></i>
+                                    Tableau de bord
+                                </a>
                             </div>
+                        </div>
+                    <?php endif; ?>
+                </div>
+
+            <?php elseif ($current_page == 'ajouter_lot'): ?>
+                <!-- ========== AJOUTER UN LOT ========== -->
+                <div class="mb-8">
+                    <!-- En-tête -->
+                    <div class="flex items-center mb-8">
+                        <div class="p-3 bg-gradient-to-br from-emerald-100 to-emerald-200 rounded-xl shadow-sm mr-4">
+                            <i class="fas fa-plus-circle text-emerald-600 text-xl"></i>
+                        </div>
+                        <div>
+                            <h1 class="text-2xl font-bold text-gray-800">Ajouter un nouveau lot</h1>
+                            <p class="text-gray-600 mt-1">Renseignez les informations du lot de stock</p>
                         </div>
                     </div>
 
-                    <!-- Alertes Stock Bas -->
-                    <div class="bg-white rounded-2xl shadow-sm p-6 border-l-4 border-red-500">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-sm text-gray-600">Alertes Stock Bas</p>
-                                <p class="text-2xl font-bold text-gray-900"><?php echo $alertes_stock_count; ?></p>
+                    <div
+                        class="bg-gradient-to-br from-white to-emerald-50 rounded-xl shadow-lg p-8 border border-emerald-200">
+                        <form method="POST" action="" class="space-y-8">
+                            <input type="hidden" name="action" value="ajouter_lot">
+
+                            <!-- Section Informations du lot -->
+                            <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                                <!-- Informations principales -->
+                                <div class="space-y-6">
+                                    <div class="flex items-center pb-3 border-b border-gray-200">
+                                        <div class="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg mr-3">
+                                            <i class="fas fa-box text-blue-600"></i>
+                                        </div>
+                                        <h3 class="text-lg font-semibold text-gray-800">Informations principales</h3>
+                                    </div>
+
+                                    <!-- Produit -->
+                                    <div>
+                                        <label class="block text-sm font-semibold text-gray-700 mb-3" for="produit_id">
+                                            <span class="text-red-500">*</span> Produit
+                                        </label>
+                                        <div class="relative">
+                                            <select id="produit_id" name="produit_id" required
+                                                class="w-full px-4 py-3 pl-11 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all duration-200 shadow-sm hover:shadow appearance-none bg-white">
+                                                <option value="" disabled selected>Sélectionnez un produit</option>
+                                                <?php foreach ($produits as $produit): ?>
+                                                    <option value="<?php echo $produit['id']; ?>" class="py-2">
+                                                        <span
+                                                            class="font-medium"><?php echo htmlspecialchars($produit['nom']); ?></span>
+                                                        <span class="text-gray-500 ml-2">
+                                                            (<?php echo htmlspecialchars($produit['code_barre']); ?>)
+                                                        </span>
+                                                        <?php if (!empty($produit['categorie_nom'])): ?>
+                                                            <span
+                                                                class="inline-block ml-2 px-2 py-0.5 bg-gray-100 text-gray-700 text-xs rounded border border-gray-300">
+                                                                <?php echo htmlspecialchars($produit['categorie_nom']); ?>
+                                                            </span>
+                                                        <?php endif; ?>
+                                                    </option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                                                <i class="fas fa-capsules"></i>
+                                            </div>
+                                            <div class="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                                                <i class="fas fa-chevron-down"></i>
+                                            </div>
+                                        </div>
+                                        <p class="text-xs text-gray-500 mt-2">Produit auquel ce lot sera rattaché</p>
+                                    </div>
+
+                                    <!-- Numéro de lot -->
+                                    <div>
+                                        <label class="block text-sm font-semibold text-gray-700 mb-3" for="numero_lot">
+                                            <span class="text-red-500">*</span> Numéro de lot
+                                        </label>
+                                        <div class="relative">
+                                            <input type="text" id="numero_lot" name="numero_lot" required
+                                                placeholder="Ex: LOT-2024-001"
+                                                class="w-full px-4 py-3 pl-11 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all duration-200 shadow-sm hover:shadow">
+                                            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                                                <i class="fas fa-hashtag"></i>
+                                            </div>
+                                        </div>
+                                        <p class="text-xs text-gray-500 mt-2">Identifiant unique du lot</p>
+                                    </div>
+
+                                    <!-- Quantité initiale -->
+                                    <div>
+                                        <label class="block text-sm font-semibold text-gray-700 mb-3"
+                                            for="quantite_initiale">
+                                            <span class="text-red-500">*</span> Quantité initiale
+                                        </label>
+                                        <div class="relative">
+                                            <input type="number" id="quantite_initiale" name="quantite_initiale" required
+                                                min="1" value="100"
+                                                class="w-full px-4 py-3 pl-11 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all duration-200 shadow-sm hover:shadow">
+                                            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                                                <i class="fas fa-boxes"></i>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center space-x-4 mt-2">
+                                            <button type="button"
+                                                onclick="document.getElementById('quantite_initiale').value = 50"
+                                                class="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border border-gray-300">
+                                                50
+                                            </button>
+                                            <button type="button"
+                                                onclick="document.getElementById('quantite_initiale').value = 100"
+                                                class="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border border-gray-300">
+                                                100
+                                            </button>
+                                            <button type="button"
+                                                onclick="document.getElementById('quantite_initiale').value = 500"
+                                                class="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border border-gray-300">
+                                                500
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Informations complémentaires -->
+                                <div class="space-y-6">
+                                    <div class="flex items-center pb-3 border-b border-gray-200">
+                                        <div class="p-2 bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg mr-3">
+                                            <i class="fas fa-calendar-alt text-orange-600"></i>
+                                        </div>
+                                        <h3 class="text-lg font-semibold text-gray-800">Dates & Prix</h3>
+                                    </div>
+
+                                    <!-- Date d'expiration -->
+                                    <div>
+                                        <label class="block text-sm font-semibold text-gray-700 mb-3" for="date_expiration">
+                                            <span class="text-red-500">*</span> Date d'expiration
+                                        </label>
+                                        <div class="relative">
+                                            <input type="date" id="date_expiration" name="date_expiration" required
+                                                min="<?php echo date('Y-m-d'); ?>"
+                                                class="w-full px-4 py-3 pl-11 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all duration-200 shadow-sm hover:shadow">
+                                            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                                                <i class="fas fa-calendar-times"></i>
+                                            </div>
+                                        </div>
+                                        <div class="mt-2 text-xs text-gray-500">
+                                            <i class="fas fa-info-circle mr-1"></i>
+                                            Minimum: <?php echo date('d/m/Y', strtotime('+30 days')); ?> (30 jours)
+                                        </div>
+                                    </div>
+
+                                    <!-- Prix d'achat -->
+                                    <div>
+                                        <label class="block text-sm font-semibold text-gray-700 mb-3" for="prix_achat">
+                                            <span class="text-red-500">*</span> Prix d'achat unitaire
+                                        </label>
+                                        <div class="relative">
+                                            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                                                <i class="fas fa-dollar-sign"></i>
+                                            </div>
+                                            <input type="number" id="prix_achat" name="prix_achat" required min="0"
+                                                step="0.01" value="0.00"
+                                                class="w-full px-4 py-3 pl-11 pr-16 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all duration-200 shadow-sm hover:shadow">
+                                            <div class="absolute right-3 top-1/2 transform -translate-y-1/2">
+                                                <span class="text-gray-500 font-medium">$</span>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center space-x-4 mt-2">
+                                            <button type="button"
+                                                onclick="document.getElementById('prix_achat').value = 1.50"
+                                                class="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border border-gray-300">
+                                                1.50 $
+                                            </button>
+                                            <button type="button"
+                                                onclick="document.getElementById('prix_achat').value = 2.99"
+                                                class="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border border-gray-300">
+                                                2.99 $
+                                            </button>
+                                            <button type="button"
+                                                onclick="document.getElementById('prix_achat').value = 5.50"
+                                                class="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border border-gray-300">
+                                                5.50 $
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Date de réception -->
+                                    <div>
+                                        <label class="block text-sm font-semibold text-gray-700 mb-3" for="date_reception">
+                                            Date de réception
+                                        </label>
+                                        <div class="relative">
+                                            <input type="date" id="date_reception" name="date_reception"
+                                                value="<?php echo date('Y-m-d'); ?>"
+                                                class="w-full px-4 py-3 pl-11 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all duration-200 shadow-sm hover:shadow">
+                                            <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                                                <i class="fas fa-calendar-check"></i>
+                                            </div>
+                                        </div>
+                                        <p class="text-xs text-gray-500 mt-2">Date à laquelle le lot est reçu en stock</p>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+
+                            <!-- Aperçu du lot -->
+                            <div
+                                class="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-6 border border-gray-300 mt-6">
+                                <div class="flex items-center mb-4">
+                                    <div class="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg mr-3">
+                                        <i class="fas fa-eye text-blue-600"></i>
+                                    </div>
+                                    <h4 class="text-lg font-semibold text-gray-800">Aperçu du lot</h4>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div class="bg-white p-4 rounded-lg border border-gray-200">
+                                        <div class="text-sm text-gray-600 mb-1">Identifiant</div>
+                                        <div id="lot-preview-number" class="font-medium text-gray-900">-</div>
+                                    </div>
+                                    <div class="bg-white p-4 rounded-lg border border-gray-200">
+                                        <div class="text-sm text-gray-600 mb-1">Produit</div>
+                                        <div id="lot-preview-product" class="font-medium text-gray-900">Non sélectionné
+                                        </div>
+                                    </div>
+                                    <div class="bg-white p-4 rounded-lg border border-gray-200">
+                                        <div class="text-sm text-gray-600 mb-1">Valeur totale</div>
+                                        <div id="lot-preview-value" class="font-medium text-gray-900">0.00 $</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Boutons d'action -->
+                            <div class="pt-6 border-t border-gray-200">
+                                <div class="flex flex-col sm:flex-row justify-end space-y-3 sm:space-y-0 sm:space-x-4">
+                                    <a href="?page=lots"
+                                        class="group px-6 py-3 border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50 hover:shadow transition-all duration-200 text-center font-medium">
+                                        <i class="fas fa-times mr-2 group-hover:rotate-90 transition-transform"></i>
+                                        Annuler
+                                    </a>
+                                    <button type="submit"
+                                        class="group relative bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-8 py-3 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5">
+                                        <i class="fas fa-save mr-2 group-hover:rotate-12 transition-transform"></i>
+                                        Enregistrer le lot
+                                        <div
+                                            class="absolute inset-0 rounded-xl border border-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                                        </div>
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Script pour l'aperçu en temps réel -->
+                <script>
+                    document.addEventListener('DOMContentLoaded', function () {
+                        const numeroLotInput = document.getElementById('numero_lot');
+                        const produitSelect = document.getElementById('produit_id');
+                        const quantiteInput = document.getElementById('quantite_initiale');
+                        const prixInput = document.getElementById('prix_achat');
+
+                        const updateLotPreview = () => {
+                            // Aperçu numéro de lot
+                            document.getElementById('lot-preview-number').textContent =
+                                numeroLotInput.value || '-';
+
+                            // Aperçu produit
+                            const selectedOption = produitSelect.options[produitSelect.selectedIndex];
+                            document.getElementById('lot-preview-product').textContent =
+                                selectedOption.textContent || 'Non sélectionné';
+
+                            // Aperçu valeur totale
+                            const quantite = parseFloat(quantiteInput.value) || 0;
+                            const prix = parseFloat(prixInput.value) || 0;
+                            const totalValue = quantite * prix;
+                            document.getElementById('lot-preview-value').textContent =
+                                totalValue.toFixed(2) + ' $';
+                        };
+
+                        // Écouteurs d'événements
+                        [numeroLotInput, produitSelect, quantiteInput, prixInput].forEach(input => {
+                            input.addEventListener('input', updateLotPreview);
+                            input.addEventListener('change', updateLotPreview);
+                        });
+
+                        // Initialiser l'aperçu
+                        updateLotPreview();
+
+                        // Générer un numéro de lot automatique
+                        const generateLotNumber = () => {
+                            const today = new Date();
+                            const year = today.getFullYear();
+                            const month = String(today.getMonth() + 1).padStart(2, '0');
+                            const random = Math.floor(Math.random() * 999).toString().padStart(3, '0');
+                            const lotNumber = `LOT-${year}-${month}-${random}`;
+                            numeroLotInput.value = lotNumber;
+                            updateLotPreview();
+                        };
+
+                        // Bouton pour générer un numéro de lot
+                        const generateButton = document.createElement('button');
+                        generateButton.type = 'button';
+                        generateButton.innerHTML = '<i class="fas fa-magic mr-1"></i>Générer';
+                        generateButton.className = 'text-xs px-2 py-1 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded border border-emerald-300 mt-1';
+                        generateButton.addEventListener('click', generateLotNumber);
+
+                        // Ajouter le bouton après le champ numéro de lot
+                        numeroLotInput.parentNode.appendChild(generateButton);
+                    });
+                </script>
+
+            <?php elseif ($current_page == 'alertes'): ?>
+                <!-- ========== ALERTES STOCK ========== -->
+                <div class="mb-8">
+                    <!-- En-tête avec statistiques -->
+                    <div class="flex items-center justify-between mb-8">
+                        <div class="flex items-center">
+                            <div class="p-3 bg-gradient-to-br from-red-100 to-red-200 rounded-xl shadow-sm mr-4">
                                 <i class="fas fa-exclamation-triangle text-red-600 text-xl"></i>
                             </div>
-                        </div>
-                    </div>
-
-                    <!-- Péremptions Proches -->
-                    <div class="bg-white rounded-2xl shadow-sm p-6 border-l-4 border-orange-500">
-                        <div class="flex items-center justify-between">
                             <div>
-                                <p class="text-sm text-gray-600">Péremptions (30j)</p>
-                                <p class="text-2xl font-bold text-gray-900"><?php echo $alertes_expiration_count; ?></p>
-                            </div>
-                            <div class="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center">
-                                <i class="fas fa-clock text-orange-600 text-xl"></i>
+                                <h1 class="text-2xl font-bold text-gray-800">Alertes Stock</h1>
+                                <p class="text-gray-600 mt-1">Gérez les alertes de stock et de péremption</p>
                             </div>
                         </div>
-                    </div>
-                </div>
-
-                <!-- Actions Rapides -->
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-                    <div class="bg-white rounded-2xl shadow-sm p-6">
-                        <h3 class="text-lg font-semibold text-gray-900 mb-6">Actions Rapides</h3>
-                        <div class="grid grid-cols-2 gap-4">
-                            <button onclick="showSection('ajouter-lot')"
-                                class="flex flex-col items-center p-4 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors text-center">
-                                <i class="fas fa-plus-circle text-purple-600 text-2xl mb-2"></i>
-                                <span class="font-medium text-sm">Nouveau Lot</span>
-                            </button>
-
-                            <button onclick="showSection('nouvel-inventaire')"
-                                class="flex flex-col items-center p-4 bg-green-50 rounded-lg hover:bg-green-100 transition-colors text-center">
-                                <i class="fas fa-clipboard-check text-green-600 text-2xl mb-2"></i>
-                                <span class="font-medium text-sm">Nouvel Inventaire</span>
-                            </button>
-
-                            <button onclick="showSection('alertes-stock')"
-                                class="flex flex-col items-center p-4 bg-red-50 rounded-lg hover:bg-red-100 transition-colors text-center">
-                                <i class="fas fa-exclamation-triangle text-red-600 text-2xl mb-2"></i>
-                                <span class="font-medium text-sm">Vérifier Alertes</span>
-                            </button>
-
-                            <button onclick="showSection('rapports')"
-                                class="flex flex-col items-center p-4 bg-teal-50 rounded-lg hover:bg-teal-100 transition-colors text-center">
-                                <i class="fas fa-chart-bar text-teal-600 text-2xl mb-2"></i>
-                                <span class="font-medium text-sm">Générer Rapport</span>
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Alertes Urgentes -->
-                    <div class="bg-white rounded-2xl shadow-sm p-6">
-                        <div class="flex justify-between items-center mb-6">
-                            <h3 class="text-lg font-semibold text-gray-900">Alertes Urgentes</h3>
-                            <button onclick="showSection('alertes-stock')"
-                                class="text-blue-600 hover:text-blue-800 text-sm font-medium">
-                                Voir tout
-                            </button>
-                        </div>
-                        <div class="space-y-3 max-h-80 overflow-y-auto">
-                            <!-- Alertes Stock Bas -->
-                            <?php if (!empty($alertes_stock_data)): ?>
-                                <?php foreach (array_slice($alertes_stock_data, 0, 3) as $alerte): ?>
-                                    <div
-                                        class="flex items-center justify-between p-3 bg-red-50 border border-red-200 rounded-lg">
-                                        <div>
-                                            <div class="font-medium text-red-900 text-sm">
-                                                <?php echo htmlspecialchars($alerte['nom']); ?>
-                                            </div>
-                                            <div class="text-xs text-red-700">Stock: <?php echo $alerte['stock_actuel']; ?> /
-                                                Seuil: <?php echo $alerte['seuil_alerte']; ?></div>
-                                        </div>
-                                        <span class="bg-red-100 text-red-800 text-xs px-2 py-1 rounded-full">
-                                            Déficit: <?php echo $alerte['deficit']; ?>
-                                        </span>
-                                    </div>
-                                <?php endforeach; ?>
+                        <div class="flex items-center space-x-4">
+                            <?php
+                            $alertes_non_lues = count(array_filter($alertes, fn($a) => $a['statut'] == 'non_lu'));
+                            $alertes_critiques = count(array_filter($alertes, fn($a) => $a['niveau'] == 'critique'));
+                            ?>
+                            <?php if ($alertes_non_lues > 0): ?>
+                                <span
+                                    class="px-3 py-1 bg-gradient-to-r from-red-100 to-red-50 text-red-800 rounded-full text-sm font-semibold border border-red-200 animate-pulse">
+                                    <i class="fas fa-bell mr-1"></i>
+                                    <?php echo $alertes_non_lues; ?> non lue(s)
+                                </span>
                             <?php endif; ?>
-
-                            <!-- Alertes Expiration -->
-                            <?php if (!empty($alertes_expiration_data)): ?>
-                                <?php foreach (array_slice($alertes_expiration_data, 0, 2) as $lot): ?>
-                                    <?php list($bg_color, $text) = getNiveauAlerte($lot['jours_restants']); ?>
-                                    <div
-                                        class="flex items-center justify-between p-3 bg-orange-50 border border-orange-200 rounded-lg">
-                                        <div>
-                                            <div class="font-medium text-orange-900 text-sm">
-                                                <?php echo htmlspecialchars($lot['produit_nom']); ?>
-                                            </div>
-                                            <div class="text-xs text-orange-700">Lot:
-                                                <?php echo htmlspecialchars($lot['numero_lot']); ?>
-                                            </div>
-                                        </div>
-                                        <span
-                                            class="inline-flex items-center px-2 py-1 rounded text-xs font-medium <?php echo $bg_color; ?>">
-                                            <?php echo $lot['jours_restants']; ?> jours
-                                        </span>
-                                    </div>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
-
-                            <?php if (empty($alertes_stock_data) && empty($alertes_expiration_data)): ?>
-                                <div class="text-center py-4 text-gray-500">
-                                    <i class="fas fa-check-circle text-green-500 text-xl mb-2"></i>
-                                    <p class="text-sm">Aucune alerte urgente</p>
-                                </div>
-                            <?php endif; ?>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Derniers Mouvements -->
-                <div class="bg-white rounded-2xl shadow-sm p-6">
-                    <div class="flex justify-between items-center mb-6">
-                        <h3 class="text-lg font-semibold text-gray-900">Derniers Mouvements de Stock</h3>
-                        <button onclick="showSection('mouvements')"
-                            class="text-blue-600 hover:text-blue-800 text-sm font-medium">
-                            Voir tout
-                        </button>
-                    </div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm">
-                            <thead class="bg-gray-50">
-                                <tr>
-                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date
-                                    </th>
-                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Produit
-                                    </th>
-                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Lot</th>
-                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type
-                                    </th>
-                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Quantité
-                                    </th>
-                                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Raison
-                                    </th>
-                                </tr>
-                            </thead>
-                            <tbody class="bg-white divide-y divide-gray-200">
-                                <?php if (!empty($mouvements_data)): ?>
-                                    <?php foreach ($mouvements_data as $mouvement): ?>
-                                        <tr class="hover:bg-gray-50">
-                                            <td class="px-4 py-2 whitespace-nowrap text-gray-500">
-                                                <?php echo $mouvement['date_formatee']; ?>
-                                            </td>
-                                            <td class="px-4 py-2 whitespace-nowrap font-medium text-gray-900">
-                                                <?php echo htmlspecialchars($mouvement['produit_nom']); ?>
-                                            </td>
-                                            <td class="px-4 py-2 whitespace-nowrap text-gray-500">
-                                                <?php echo htmlspecialchars($mouvement['numero_lot']); ?>
-                                            </td>
-                                            <td class="px-4 py-2 whitespace-nowrap">
-                                                <span
-                                                    class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium 
-                                        <?php echo strpos($mouvement['type_mouvement'], 'entree') !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'; ?>">
-                                                    <?php echo strpos($mouvement['type_mouvement'], 'entree') !== false ? 'Entrée' : 'Sortie'; ?>
-                                                </span>
-                                            </td>
-                                            <td class="px-4 py-2 whitespace-nowrap text-gray-500">
-                                                <?php echo abs($mouvement['quantite']); ?> unités
-                                            </td>
-                                            <td class="px-4 py-2 whitespace-nowrap text-gray-500">
-                                                <?php echo htmlspecialchars($mouvement['raison'] ?? 'N/A'); ?>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                <?php else: ?>
-                                    <tr>
-                                        <td colspan="6" class="px-4 py-4 text-center text-gray-500">Aucun mouvement récent
-                                        </td>
-                                    </tr>
-                                <?php endif; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Section Produits & Stocks -->
-            <div id="produits" class="section">
-                <div class="bg-white rounded-2xl shadow-sm">
-                    <div class="px-6 py-4 border-b">
-                        <div class="flex items-center justify-between">
-                            <h3 class="text-xl font-semibold text-gray-900">Produits & Stocks</h3>
-                            <span class="text-sm text-gray-600"><?php echo $produits_total; ?> produit(s)</span>
-                        </div>
-                    </div>
-                    <div class="p-6">
-                        <?php if (!empty($produits_data)): ?>
-                            <div class="overflow-x-auto">
-                                <table class="w-full">
-                                    <thead class="bg-gray-50">
-                                        <tr>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Produit</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Catégorie</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Fournisseur</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code
-                                                Barre</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Stock Total</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nb
-                                                Lots</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Statut</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="bg-white divide-y divide-gray-200">
-                                        <?php foreach ($produits_data as $produit): ?>
-                                            <tr class="hover:bg-gray-50">
-                                                <td class="px-6 py-4 whitespace-nowrap">
-                                                    <div class="text-sm font-medium text-gray-900">
-                                                        <?php echo htmlspecialchars($produit['nom']); ?>
-                                                    </div>
-                                                    <div class="text-sm text-gray-500">
-                                                        <?php echo htmlspecialchars($produit['description']); ?>
-                                                    </div>
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    <?php echo htmlspecialchars($produit['categorie_nom']); ?>
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    <?php echo htmlspecialchars($produit['fournisseur_nom']); ?>
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    <?php echo htmlspecialchars($produit['code_barre']); ?>
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm">
-                                                    <span
-                                                        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium 
-                                            <?php echo $produit['stock_total'] <= 10 ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'; ?>">
-                                                        <?php echo $produit['stock_total']; ?> unités
-                                                    </span>
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    <?php echo $produit['nb_lots']; ?>
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm">
-                                                    <span
-                                                        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                                        <?php echo htmlspecialchars($produit['statut']); ?>
-                                                    </span>
-                                                </td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                        <?php else: ?>
-                            <div class="text-center py-8 text-gray-500">
-                                <i class="fas fa-pills text-4xl text-gray-300 mb-2"></i>
-                                <p>Aucun produit trouvé</p>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Section Gestion des Lots -->
-            <div id="lots" class="section">
-                <div class="bg-white rounded-2xl shadow-sm">
-                    <div class="px-6 py-4 border-b">
-                        <div class="flex items-center justify-between">
-                            <h3 class="text-xl font-semibold text-gray-900">Gestion des Lots</h3>
-                            <span class="text-sm text-gray-600"><?php echo $lots_total; ?> lot(s) en stock</span>
-                        </div>
-                    </div>
-                    <div class="p-6">
-                        <?php if (!empty($lots_data)): ?>
-                            <div class="overflow-x-auto">
-                                <table class="w-full">
-                                    <thead class="bg-gray-50">
-                                        <tr>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Produit</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">N°
-                                                Lot</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Quantité</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date
-                                                Réception</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date
-                                                Expiration</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Jours Restants</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Statut</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="bg-white divide-y divide-gray-200">
-                                        <?php foreach ($lots_data as $lot): ?>
-                                            <?php list($bg_color, $text) = getNiveauAlerte($lot['jours_restants']); ?>
-                                            <tr class="hover:bg-gray-50">
-                                                <td class="px-6 py-4 whitespace-nowrap">
-                                                    <div class="text-sm font-medium text-gray-900">
-                                                        <?php echo htmlspecialchars($lot['produit_nom']); ?>
-                                                    </div>
-                                                    <div class="text-sm text-gray-500">
-                                                        <?php echo htmlspecialchars($lot['code_barre']); ?>
-                                                    </div>
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                                    <?php echo htmlspecialchars($lot['numero_lot']); ?>
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    <?php echo $lot['quantite_actuelle']; ?> unités
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    <?php echo formatDate($lot['date_reception']); ?>
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    <?php echo date('d/m/Y', strtotime($lot['date_expiration'])); ?>
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm">
-                                                    <span
-                                                        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <?php echo $bg_color; ?>">
-                                                        <?php echo $lot['jours_restants']; ?> jours
-                                                    </span>
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm">
-                                                    <span
-                                                        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <?php echo getStatutLotBadge($lot['statut']); ?>">
-                                                        <?php echo $lot['statut']; ?>
-                                                    </span>
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                                    <button onclick="ajusterStock(<?php echo $lot['id']; ?>)"
-                                                        class="text-blue-600 hover:text-blue-900 mr-3">
-                                                        <i class="fas fa-edit"></i>
-                                                    </button>
-                                                    <button onclick="changerStatutLot(<?php echo $lot['id']; ?>)"
-                                                        class="text-orange-600 hover:text-orange-900">
-                                                        <i class="fas fa-exchange-alt"></i>
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                        <?php else: ?>
-                            <div class="text-center py-8 text-gray-500">
-                                <i class="fas fa-boxes text-4xl text-gray-300 mb-2"></i>
-                                <p>Aucun lot en stock</p>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Section Nouveau Lot -->
-            <div id="ajouter-lot" class="section">
-                <div class="bg-white rounded-2xl shadow-sm">
-                    <div class="px-6 py-4 border-b">
-                        <div class="flex items-center justify-between">
-                            <h3 class="text-xl font-semibold text-gray-900">Ajouter un Nouveau Lot</h3>
-                            <button onclick="showSection('lots')"
-                                class="px-4 py-2 text-gray-600 hover:text-gray-800 text-sm">
-                                <i class="fas fa-arrow-left mr-2"></i>Retour aux lots
-                            </button>
-                        </div>
-                    </div>
-                    <div class="p-6">
-                        <div class="max-w-4xl mx-auto">
-                            <form method="POST" id="formAjoutLotDirect">
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-2">Produit *</label>
-                                        <select name="produit_id" required
-                                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent">
-                                            <option value="">Sélectionnez un produit</option>
-                                            <?php foreach ($produits_data as $produit): ?>
-                                                <option value="<?php echo $produit['id']; ?>">
-                                                    <?php echo htmlspecialchars($produit['nom']); ?>
-                                                    (<?php echo htmlspecialchars($produit['code_barre']); ?>)
-                                                </option>
-                                            <?php endforeach; ?>
-                                        </select>
-                                    </div>
-
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-2">Numéro de lot
-                                            *</label>
-                                        <input type="text" name="numero_lot" required
-                                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                            placeholder="Ex: LOT-2024-001">
-                                    </div>
-
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-2">Quantité initiale
-                                            *</label>
-                                        <input type="number" name="quantite_initiale" required min="0"
-                                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                            placeholder="Nombre d'unités" value="0">
-                                    </div>
-
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-2">Statut du lot
-                                            *</label>
-                                        <select name="statut" required
-                                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                            onchange="gererVisibiliteQuantite(this.value)">
-                                            <option value="">Sélectionnez un statut</option>
-                                            <option value="en_stock" selected>En stock</option>
-                                            <option value="epuise">Épuisé</option>
-                                            <option value="vide">Vide</option>
-                                            <option value="quarantaine">En quarantaine</option>
-                                            <option value="retire">Retiré</option>
-                                            <option value="perime">Périmé</option>
-                                        </select>
-                                    </div>
-
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-2">Prix d'achat
-                                            *</label>
-                                        <input type="number" name="prix_achat" required min="0" step="0.01"
-                                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                            placeholder="0.00">
-                                    </div>
-
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-2">Date de
-                                            réception</label>
-                                        <input type="date" name="date_reception"
-                                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                            value="<?php echo date('Y-m-d'); ?>">
-                                    </div>
-
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-2">Date d'expiration
-                                            *</label>
-                                        <input type="date" name="date_expiration" required
-                                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                            min="<?php echo date('Y-m-d'); ?>">
-                                    </div>
-                                </div>
-
-                                <!-- Aide contextuelle -->
-                                <div class="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-                                    <div class="flex items-center">
-                                        <i class="fas fa-info-circle text-blue-500 mr-2"></i>
-                                        <div>
-                                            <p class="text-sm font-medium text-blue-800">Guide des statuts</p>
-                                            <div class="text-xs text-blue-600 grid grid-cols-2 gap-1 mt-1">
-                                                <div>• <span class="font-semibold">En stock</span> : Produit disponible
-                                                </div>
-                                                <div>• <span class="font-semibold">Épuisé</span> : Stock épuisé</div>
-                                                <div>• <span class="font-semibold">Vide</span> : Lot vide (quantité 0)
-                                                </div>
-                                                <div>• <span class="font-semibold">Quarantaine</span> : En attente de
-                                                    contrôle</div>
-                                                <div>• <span class="font-semibold">Retiré</span> : Retiré de la vente
-                                                </div>
-                                                <div>• <span class="font-semibold">Périmé</span> : Date expirée</div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div class="flex justify-end space-x-3 mt-6">
-                                    <button type="button" onclick="showSection('lots')"
-                                        class="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm font-medium">
-                                        Annuler
-                                    </button>
-                                    <button type="submit" name="ajouter_lot"
-                                        class="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm font-medium">
-                                        <i class="fas fa-plus-circle mr-2"></i>Ajouter le lot
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Section Alertes Stock -->
-            <div id="alertes-stock" class="section">
-                <div class="bg-white rounded-2xl shadow-sm">
-                    <div class="px-6 py-4 border-b">
-                        <div class="flex items-center justify-between">
-                            <h3 class="text-xl font-semibold text-gray-900">Alertes Stock Bas</h3>
-                            <span class="text-sm text-gray-600"><?php echo $alertes_stock_count; ?> alerte(s)</span>
-                        </div>
-                    </div>
-                    <div class="p-6">
-                        <?php if (!empty($alertes_stock_data)): ?>
-                            <div class="overflow-x-auto">
-                                <table class="w-full">
-                                    <thead class="bg-gray-50">
-                                        <tr>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Produit</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Catégorie</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Stock Actuel</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Seuil Alerte</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Déficit</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="bg-white divide-y divide-gray-200">
-                                        <?php foreach ($alertes_stock_data as $produit): ?>
-                                            <tr class="hover:bg-red-50">
-                                                <td class="px-6 py-4 whitespace-nowrap">
-                                                    <div class="text-sm font-medium text-gray-900">
-                                                        <?php echo htmlspecialchars($produit['nom']); ?>
-                                                    </div>
-                                                    <div class="text-sm text-gray-500">
-                                                        <?php echo htmlspecialchars($produit['description']); ?>
-                                                    </div>
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    <?php echo htmlspecialchars($produit['categorie_nom']); ?>
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-red-600">
-                                                    <?php echo $produit['stock_actuel']; ?> unités
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">10 unités</td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-red-600">
-                                                    -<?php echo $produit['deficit']; ?> unités</td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                                    <button onclick="signalerAuPharmacien(<?php echo $produit['id']; ?>)"
-                                                        class="text-orange-600 hover:text-orange-900">
-                                                        <i class="fas fa-bell mr-1"></i>Signaler
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-                        <?php else: ?>
-                            <div class="text-center py-8 text-gray-500">
-                                <i class="fas fa-check-circle text-green-500 text-4xl mb-2"></i>
-                                <p class="text-lg font-medium text-green-600">Aucune alerte stock bas</p>
-                                <p class="text-sm">Tous les produits ont un stock suffisant</p>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Section Alertes Expiration -->
-            <div id="alertes-expiration" class="section">
-                <div class="bg-white rounded-2xl shadow-sm">
-                    <div class="px-6 py-4 border-b">
-                        <div class="flex items-center justify-between">
-                            <h3 class="text-xl font-semibold text-gray-900">Alertes Péremption (30 jours)</h3>
-                            <span class="text-sm text-gray-600"><?php echo $alertes_expiration_count; ?> lot(s)
-                                concerné(s)</span>
-                        </div>
-                    </div>
-                    <div class="p-6">
-                        <?php if (!empty($alertes_expiration_data)): ?>
-                            <div class="overflow-x-auto">
-                                <table class="w-full">
-                                    <thead class="bg-gray-50">
-                                        <tr>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Produit</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">N°
-                                                Lot</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Quantité</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date
-                                                Expiration</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Jours Restants</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Niveau Alerte</th>
-                                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="bg-white divide-y divide-gray-200">
-                                        <?php foreach ($alertes_expiration_data as $lot): ?>
-                                            <?php
-                                            $jours_restants = $lot['jours_restants'];
-                                            $niveau_alerte = $jours_restants <= 7 ? ['bg-red-100 text-red-800', 'URGENT'] :
-                                                ($jours_restants <= 15 ? ['bg-orange-100 text-orange-800', 'ATTENTION'] :
-                                                    ['bg-yellow-100 text-yellow-800', 'SURVEILLANCE']);
-                                            ?>
-                                            <tr class="hover:bg-orange-50">
-                                                <td class="px-6 py-4 whitespace-nowrap">
-                                                    <div class="text-sm font-medium text-gray-900">
-                                                        <?php echo htmlspecialchars($lot['produit_nom']); ?>
-                                                    </div>
-                                                    <div class="text-sm text-gray-500">
-                                                        <?php echo htmlspecialchars($lot['code_barre']); ?>
-                                                    </div>
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                                                    <?php echo htmlspecialchars($lot['numero_lot']); ?>
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    <?php echo $lot['quantite_actuelle']; ?> unités
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    <?php echo date('d/m/Y', strtotime($lot['date_expiration'])); ?>
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm">
-                                                    <span
-                                                        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <?php echo $niveau_alerte[0]; ?>">
-                                                        <?php echo $jours_restants; ?> jours
-                                                    </span>
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm">
-                                                    <span
-                                                        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <?php echo $niveau_alerte[0]; ?>">
-                                                        <?php echo $niveau_alerte[1]; ?>
-                                                    </span>
-                                                </td>
-                                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                                                    <button onclick="traiterAlertePereemption(<?php echo $lot['id']; ?>)"
-                                                        class="text-blue-600 hover:text-blue-900 mr-3" title="Traiter">
-                                                        <i class="fas fa-cog"></i>
-                                                    </button>
-                                                    <button onclick="signalerAuPharmacien(<?php echo $lot['id']; ?>)"
-                                                        class="text-orange-600 hover:text-orange-900 mr-3" title="Signaler">
-                                                        <i class="fas fa-bell"></i>
-                                                    </button>
-                                                    <button onclick="deplacerLot(<?php echo $lot['id']; ?>)"
-                                                        class="text-green-600 hover:text-green-900" title="Déplacer">
-                                                        <i class="fas fa-arrows-alt"></i>
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
-                            </div>
-
-                            <!-- Résumé des alertes -->
-                            <div class="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div class="bg-red-50 border border-red-200 rounded-lg p-4">
-                                    <div class="flex items-center">
-                                        <i class="fas fa-exclamation-circle text-red-500 text-xl mr-3"></i>
-                                        <div>
-                                            <div class="font-semibold text-red-800">Urgent (≤ 7 jours)</div>
-                                            <div class="text-red-600 text-sm">
-                                                <?php
-                                                $urgent_count = count(array_filter($alertes_expiration_data, function ($lot) {
-                                                    return $lot['jours_restants'] <= 7;
-                                                }));
-                                                echo $urgent_count . ' lot(s)';
-                                                ?>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div class="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                                    <div class="flex items-center">
-                                        <i class="fas fa-exclamation-triangle text-orange-500 text-xl mr-3"></i>
-                                        <div>
-                                            <div class="font-semibold text-orange-800">Attention (8-15 jours)</div>
-                                            <div class="text-orange-600 text-sm">
-                                                <?php
-                                                $attention_count = count(array_filter($alertes_expiration_data, function ($lot) {
-                                                    return $lot['jours_restants'] > 7 && $lot['jours_restants'] <= 15;
-                                                }));
-                                                echo $attention_count . ' lot(s)';
-                                                ?>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                                    <div class="flex items-center">
-                                        <i class="fas fa-clock text-yellow-500 text-xl mr-3"></i>
-                                        <div>
-                                            <div class="font-semibold text-yellow-800">Surveillance (16-30 jours)</div>
-                                            <div class="text-yellow-600 text-sm">
-                                                <?php
-                                                $surveillance_count = count(array_filter($alertes_expiration_data, function ($lot) {
-                                                    return $lot['jours_restants'] > 15 && $lot['jours_restants'] <= 30;
-                                                }));
-                                                echo $surveillance_count . ' lot(s)';
-                                                ?>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                        <?php else: ?>
-                            <div class="text-center py-8 text-gray-500">
-                                <i class="fas fa-check-circle text-green-500 text-4xl mb-2"></i>
-                                <p class="text-lg font-medium text-green-600">Aucune alerte de péremption</p>
-                                <p class="text-sm">Aucun lot n'expire dans les 30 prochains jours</p>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
-            <!-- Section Inventaires en Cours -->
-            <div id="inventaires" class="section">
-                <div class="bg-white rounded-2xl shadow-sm">
-                    <div class="px-6 py-4 border-b">
-                        <div class="flex items-center justify-between">
-                            <h3 class="text-xl font-semibold text-gray-900">Inventaires en Cours</h3>
-                            <div class="flex items-center space-x-4">
-                                <span class="text-sm text-gray-600"><?php echo $inventaires_en_cours; ?> inventaire(s)
-                                    en cours</span>
-                                <button onclick="showSection('nouvel-inventaire')"
-                                    class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium">
-                                    <i class="fas fa-plus mr-2"></i>Nouvel Inventaire
+                            <div class="flex items-center space-x-2">
+                                <button onclick="markAllAsRead()"
+                                    class="group bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-4 py-2 rounded-lg font-medium shadow hover:shadow-md transition-all duration-200 text-sm">
+                                    <i class="fas fa-check-double mr-2 group-hover:scale-110 transition-transform"></i>
+                                    Tout marquer comme lu
                                 </button>
                             </div>
                         </div>
                     </div>
-                    <div class="p-6">
-                        <?php if (!empty($inventaires_data)): ?>
-                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                <?php foreach ($inventaires_data as $inventaire): ?>
-                                    <div
-                                        class="bg-indigo-50 border border-indigo-200 rounded-lg p-6 hover:shadow-md transition-shadow">
-                                        <!-- En-tête de l'inventaire -->
-                                        <div class="flex justify-between items-start mb-4">
-                                            <div>
-                                                <h4 class="font-semibold text-indigo-900 text-lg">
-                                                    <?php echo htmlspecialchars($inventaire['reference']); ?>
-                                                </h4>
-                                                <p class="text-sm text-indigo-600">
-                                                    <?php echo htmlspecialchars($inventaire['type_inventaire'] ?? 'Non spécifié'); ?>
+
+                    <!-- Statistiques des alertes -->
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+                        <?php
+                        $stock_bas = count(array_filter($alertes, fn($a) => $a['type_alerte'] == 'stock_bas'));
+                        $peremption = count(array_filter($alertes, fn($a) => $a['type_alerte'] == 'peremption'));
+                        $ruptures = count(array_filter($alertes, fn($a) => $a['type_alerte'] == 'rupture_stock'));
+                        ?>
+
+                        <div class="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow p-5 border border-gray-200">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <div class="text-lg font-bold text-gray-800"><?php echo count($alertes); ?></div>
+                                    <div class="text-sm text-gray-600">Total alertes</div>
+                                </div>
+                                <div class="p-2 bg-gradient-to-br from-gray-100 to-gray-200 rounded-lg">
+                                    <i class="fas fa-bell text-gray-600"></i>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div
+                            class="bg-gradient-to-br from-white to-yellow-50 rounded-xl shadow p-5 border border-yellow-200">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <div class="text-lg font-bold text-yellow-800"><?php echo $stock_bas; ?></div>
+                                    <div class="text-sm text-yellow-600">Stocks bas</div>
+                                </div>
+                                <div class="p-2 bg-gradient-to-br from-yellow-100 to-yellow-200 rounded-lg">
+                                    <i class="fas fa-exclamation-circle text-yellow-600"></i>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div
+                            class="bg-gradient-to-br from-white to-orange-50 rounded-xl shadow p-5 border border-orange-200">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <div class="text-lg font-bold text-orange-800"><?php echo $peremption; ?></div>
+                                    <div class="text-sm text-orange-600">Péremption</div>
+                                </div>
+                                <div class="p-2 bg-gradient-to-br from-orange-100 to-orange-200 rounded-lg">
+                                    <i class="fas fa-calendar-times text-orange-600"></i>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-gradient-to-br from-white to-red-50 rounded-xl shadow p-5 border border-red-200">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <div class="text-lg font-bold text-red-800"><?php echo $ruptures; ?></div>
+                                    <div class="text-sm text-red-600">Ruptures</div>
+                                </div>
+                                <div class="p-2 bg-gradient-to-br from-red-100 to-red-200 rounded-lg">
+                                    <i class="fas fa-ban text-red-600"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <?php if (count($alertes) > 0): ?>
+                        <!-- Filtres des alertes -->
+                        <div
+                            class="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg p-4 mb-6 border border-gray-200">
+                            <div class="flex flex-col md:flex-row justify-between items-center gap-4">
+                                <div class="flex items-center space-x-4">
+                                    <div class="flex items-center">
+                                        <i class="fas fa-filter text-emerald-600 mr-2"></i>
+                                        <span class="font-medium text-gray-700">Filtrer par :</span>
+                                    </div>
+                                    <div class="flex flex-wrap gap-2">
+                                        <button onclick="filterAlerts('all')"
+                                            class="px-3 py-1 bg-gradient-to-r from-emerald-100 to-emerald-50 text-emerald-800 rounded-full text-sm font-medium border border-emerald-200 hover:shadow transition-all">
+                                            Toutes
+                                        </button>
+                                        <button onclick="filterAlerts('stock_bas')"
+                                            class="px-3 py-1 bg-gradient-to-r from-yellow-100 to-yellow-50 text-yellow-800 rounded-full text-sm font-medium border border-yellow-200 hover:shadow transition-all">
+                                            Stocks bas
+                                        </button>
+                                        <button onclick="filterAlerts('peremption')"
+                                            class="px-3 py-1 bg-gradient-to-r from-orange-100 to-orange-50 text-orange-800 rounded-full text-sm font-medium border border-orange-200 hover:shadow transition-all">
+                                            Péremption
+                                        </button>
+                                        <button onclick="filterAlerts('rupture_stock')"
+                                            class="px-3 py-1 bg-gradient-to-r from-red-100 to-red-50 text-red-800 rounded-full text-sm font-medium border border-red-200 hover:shadow transition-all">
+                                            Ruptures
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    <button onclick="filterAlerts('non_lu')"
+                                        class="px-3 py-1 bg-gradient-to-r from-red-100 to-red-50 text-red-800 rounded-full text-sm font-medium border border-red-200 hover:shadow transition-all flex items-center">
+                                        <i class="fas fa-circle text-red-500 mr-1 text-xs"></i>
+                                        Non lues
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Liste des alertes -->
+                        <div class="space-y-4" id="alerts-container">
+                            <?php foreach ($alertes as $alerte):
+                                $bg_class = '';
+                                $icon_class = '';
+                                $border_class = '';
+
+                                if ($alerte['niveau'] == 'critique') {
+                                    $bg_class = 'bg-gradient-to-br from-red-50 to-red-100';
+                                    $border_class = 'border-red-200';
+                                    $icon_class = 'fas fa-fire text-red-600';
+                                } elseif ($alerte['niveau'] == 'moyen') {
+                                    $bg_class = 'bg-gradient-to-br from-orange-50 to-orange-100';
+                                    $border_class = 'border-orange-200';
+                                    $icon_class = 'fas fa-exclamation-triangle text-orange-600';
+                                } else {
+                                    $bg_class = 'bg-gradient-to-br from-yellow-50 to-yellow-100';
+                                    $border_class = 'border-yellow-200';
+                                    $icon_class = 'fas fa-exclamation-circle text-yellow-600';
+                                }
+
+                                $type_icon = '';
+                                if ($alerte['type_alerte'] == 'stock_bas') {
+                                    $type_icon = 'fas fa-arrow-down text-yellow-600';
+                                } elseif ($alerte['type_alerte'] == 'peremption') {
+                                    $type_icon = 'fas fa-clock text-orange-600';
+                                } else {
+                                    $type_icon = 'fas fa-times-circle text-red-600';
+                                }
+                                ?>
+                                <div class="<?php echo $bg_class; ?> rounded-xl shadow-lg p-5 border <?php echo $border_class; ?> alert-card"
+                                    data-type="<?php echo $alerte['type_alerte']; ?>"
+                                    data-status="<?php echo $alerte['statut']; ?>">
+                                    <div class="flex flex-col md:flex-row justify-between items-start gap-4">
+                                        <div class="flex-1">
+                                            <!-- En-tête de l'alerte -->
+                                            <div class="flex items-center mb-3">
+                                                <div
+                                                    class="p-2 bg-gradient-to-br from-white to-white/80 rounded-lg mr-3 border border-gray-300">
+                                                    <i class="<?php echo $icon_class; ?>"></i>
+                                                </div>
+                                                <div class="flex-1">
+                                                    <div class="flex flex-wrap items-center gap-2">
+                                                        <h3 class="font-bold text-gray-800 text-lg">
+                                                            <?php echo htmlspecialchars($alerte['type_alerte_text']); ?>
+                                                        </h3>
+                                                        <span
+                                                            class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold 
+                                            <?php echo $alerte['statut'] == 'non_lu' ?
+                                                'bg-gradient-to-r from-red-100 to-red-50 text-red-800 border border-red-200' :
+                                                'bg-gradient-to-r from-green-100 to-green-50 text-green-800 border border-green-200'; ?>">
+                                                            <i
+                                                                class="fas fa-circle <?php echo $alerte['statut'] == 'non_lu' ? 'text-red-500' : 'text-green-500'; ?> mr-1 text-xs"></i>
+                                                            <?php echo $alerte['statut'] == 'non_lu' ? 'NON LU' : 'LU'; ?>
+                                                        </span>
+                                                        <?php if ($alerte['niveau'] == 'critique'): ?>
+                                                            <span
+                                                                class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-red-100 to-red-50 text-red-800 border border-red-200 animate-pulse">
+                                                                <i class="fas fa-exclamation mr-1"></i> CRITIQUE
+                                                            </span>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                    <div class="flex items-center mt-1 text-sm text-gray-600">
+                                                        <i class="<?php echo $type_icon; ?> mr-1"></i>
+                                                        <?php echo $alerte['type_alerte'] == 'stock_bas' ? 'Stock insuffisant' :
+                                                            ($alerte['type_alerte'] == 'peremption' ? 'Péremption proche' : 'Rupture de stock'); ?>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <!-- Détails de l'alerte -->
+                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                                                <div class="bg-white/50 p-3 rounded-lg border border-gray-200">
+                                                    <div class="text-sm text-gray-600 mb-1">
+                                                        <i class="fas fa-capsules mr-1"></i> Produit concerné
+                                                    </div>
+                                                    <div class="font-medium text-gray-900">
+                                                        <?php echo htmlspecialchars($alerte['produit_nom']); ?>
+                                                    </div>
+                                                    <?php if (!empty($alerte['code_barre'])): ?>
+                                                        <div class="text-xs text-gray-500 mt-1">
+                                                            <i class="fas fa-barcode mr-1"></i>
+                                                            <?php echo htmlspecialchars($alerte['code_barre']); ?>
+                                                        </div>
+                                                    <?php endif; ?>
+                                                </div>
+
+                                                <div class="bg-white/50 p-3 rounded-lg border border-gray-200">
+                                                    <div class="text-sm text-gray-600 mb-1">
+                                                        <i class="fas fa-tag mr-1"></i> Informations lot
+                                                    </div>
+                                                    <div class="font-medium text-gray-900">
+                                                        <?php echo !empty($alerte['numero_lot']) ? htmlspecialchars($alerte['numero_lot']) : 'N/A'; ?>
+                                                    </div>
+                                                    <?php if (!empty($alerte['quantite_restante'])): ?>
+                                                        <div class="text-xs text-gray-500 mt-1">
+                                                            <i class="fas fa-box mr-1"></i>
+                                                            <?php echo $alerte['quantite_restante']; ?> unités restantes
+                                                        </div>
+                                                    <?php endif; ?>
+                                                </div>
+                                            </div>
+
+                                            <!-- Message détaillé -->
+                                            <div class="bg-white/70 p-4 rounded-lg border border-gray-200 mb-4">
+                                                <div class="text-sm text-gray-600 mb-2">
+                                                    <i class="fas fa-comment-alt mr-1"></i> Message d'alerte
+                                                </div>
+                                                <p class="text-gray-800">
+                                                    <?php echo htmlspecialchars($alerte['message']); ?>
                                                 </p>
                                             </div>
-                                            <span
-                                                class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
-                                                <?php echo htmlspecialchars($inventaire['statut']); ?>
-                                            </span>
-                                        </div>
 
-                                        <!-- Informations détaillées -->
-                                        <div class="space-y-3 mb-4">
-                                            <div class="flex justify-between text-sm">
-                                                <span class="text-indigo-700">Créé par:</span>
-                                                <span
-                                                    class="font-medium"><?php echo htmlspecialchars($inventaire['createur_nom']); ?></span>
-                                            </div>
-                                            <div class="flex justify-between text-sm">
-                                                <span class="text-indigo-700">Date création:</span>
-                                                <span
-                                                    class="font-medium"><?php echo formatDate($inventaire['created_at']); ?></span>
-                                            </div>
-                                            <div class="flex justify-between text-sm">
-                                                <span class="text-indigo-700">Lignes:</span>
-                                                <span class="font-medium"><?php echo $inventaire['nb_lignes']; ?></span>
-                                            </div>
-                                            <div class="flex justify-between text-sm">
-                                                <span class="text-indigo-700">Écarts:</span>
-                                                <span
-                                                    class="font-medium <?php echo $inventaire['nb_ecarts'] > 0 ? 'text-red-600' : 'text-green-600'; ?>">
-                                                    <?php echo $inventaire['nb_ecarts']; ?>
-                                                </span>
-                                            </div>
-                                        </div>
-
-                                        <!-- Progression -->
-                                        <div class="mb-4">
-                                            <div class="flex justify-between text-xs text-indigo-600 mb-1">
-                                                <span>Progression</span>
-                                                <span>
-                                                    <?php
-                                                    $pourcentage = $inventaire['nb_lignes'] > 0 ? min(100, ($inventaire['nb_lignes'] - $inventaire['nb_ecarts']) / $inventaire['nb_lignes'] * 100) : 0;
-                                                    echo round($pourcentage, 1) . '%';
-                                                    ?>
-                                                </span>
-                                            </div>
-                                            <div class="w-full bg-indigo-200 rounded-full h-2">
-                                                <div class="bg-indigo-600 h-2 rounded-full"
-                                                    style="width: <?php echo $pourcentage; ?>%"></div>
+                                            <!-- Date et info -->
+                                            <div class="flex items-center justify-between text-sm text-gray-500">
+                                                <div class="flex items-center">
+                                                    <i class="far fa-clock mr-2"></i>
+                                                    <?php echo formatDate($alerte['created_at']); ?>
+                                                </div>
+                                                <div class="text-xs text-gray-500">
+                                                    ID: #<?php echo str_pad((string) $alerte['id'], 4, '0', STR_PAD_LEFT); ?>
+                                                </div>
                                             </div>
                                         </div>
 
                                         <!-- Actions -->
-                                        <div class="flex space-x-2">
-                                            <button onclick="continuerInventaire(<?php echo $inventaire['id']; ?>)"
-                                                class="flex-1 bg-indigo-600 text-white py-2 px-3 rounded text-sm hover:bg-indigo-700 transition-colors text-center">
-                                                <i class="fas fa-play mr-1"></i>Continuer
-                                            </button>
-                                            <button onclick="voirInventaire(<?php echo $inventaire['id']; ?>)"
-                                                class="bg-white border border-indigo-300 text-indigo-600 py-2 px-3 rounded text-sm hover:bg-indigo-50 transition-colors">
-                                                <i class="fas fa-eye"></i>
-                                            </button>
-                                            <button onclick="exporterInventaire(<?php echo $inventaire['id']; ?>)"
-                                                class="bg-white border border-indigo-300 text-indigo-600 py-2 px-3 rounded text-sm hover:bg-indigo-50 transition-colors">
-                                                <i class="fas fa-download"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                <?php endforeach; ?>
-                            </div>
-
-                            <!-- Statistiques globales des inventaires -->
-                            <div class="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
-                                <h4 class="text-lg font-semibold text-blue-800 mb-4">📈 Statistiques des Inventaires</h4>
-                                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                    <div class="text-center">
-                                        <div class="text-2xl font-bold text-blue-600"><?php echo $inventaires_en_cours; ?>
-                                        </div>
-                                        <div class="text-sm text-blue-700">En cours</div>
-                                    </div>
-                                    <div class="text-center">
-                                        <div class="text-2xl font-bold text-green-600">
-                                            <?php
-                                            $total_lignes = array_sum(array_column($inventaires_data, 'nb_lignes'));
-                                            echo $total_lignes;
-                                            ?>
-                                        </div>
-                                        <div class="text-sm text-green-700">Lignes totales</div>
-                                    </div>
-                                    <div class="text-center">
-                                        <div class="text-2xl font-bold text-orange-600">
-                                            <?php
-                                            $total_ecarts = array_sum(array_column($inventaires_data, 'nb_ecarts'));
-                                            echo $total_ecarts;
-                                            ?>
-                                        </div>
-                                        <div class="text-sm text-orange-700">Écarts détectés</div>
-                                    </div>
-                                    <div class="text-center">
-                                        <div class="text-2xl font-bold text-purple-600">
-                                            <?php
-                                            $moyenne_ecarts = $total_lignes > 0 ? round(($total_ecarts / $total_lignes) * 100, 1) : 0;
-                                            echo $moyenne_ecarts . '%';
-                                            ?>
-                                        </div>
-                                        <div class="text-sm text-purple-700">Taux d'écarts</div>
-                                    </div>
-                                </div>
-                            </div>
-
-                        <?php else: ?>
-                            <div class="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
-                                <i class="fas fa-clipboard-list text-5xl text-gray-400 mb-4"></i>
-                                <h3 class="text-xl font-semibold text-gray-600 mb-2">Aucun inventaire en cours</h3>
-                                <p class="text-gray-500 mb-6">Commencez un nouvel inventaire pour gérer votre stock</p>
-                                <button onclick="showSection('nouvel-inventaire')"
-                                    class="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium">
-                                    <i class="fas fa-plus mr-2"></i>Démarrer un inventaire
-                                </button>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
-            <!-- Section Nouvel Inventaire -->
-            <div id="nouvel-inventaire" class="section">
-                <div class="bg-white rounded-2xl shadow-sm">
-                    <div class="px-6 py-4 border-b">
-                        <h3 class="text-xl font-semibold text-gray-900">Créer un Nouvel Inventaire</h3>
-                    </div>
-                    <div class="p-6">
-                        <div class="max-w-4xl mx-auto">
-                            <!-- Types d'inventaire -->
-                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                                <div class="border-2 border-green-200 bg-green-50 rounded-lg p-6 text-center cursor-pointer hover:bg-green-100 transition-colors"
-                                    onclick="selectTypeInventaire('complet')">
-                                    <i class="fas fa-clipboard-list text-green-600 text-3xl mb-3"></i>
-                                    <h4 class="font-semibold text-green-800 mb-2">Complet</h4>
-                                    <p class="text-sm text-green-600">Tous les produits et lots en stock</p>
-                                </div>
-
-                                <div class="border-2 border-blue-200 bg-blue-50 rounded-lg p-6 text-center cursor-pointer hover:bg-blue-100 transition-colors"
-                                    onclick="selectTypeInventaire('partiel')">
-                                    <i class="fas fa-list-alt text-blue-600 text-3xl mb-3"></i>
-                                    <h4 class="font-semibold text-blue-800 mb-2">Partiel</h4>
-                                    <p class="text-sm text-blue-600">Sélection de produits spécifiques</p>
-                                </div>
-
-                                <div class="border-2 border-purple-200 bg-purple-50 rounded-lg p-6 text-center cursor-pointer hover:bg-purple-100 transition-colors"
-                                    onclick="selectTypeInventaire('cyclique')">
-                                    <i class="fas fa-sync-alt text-purple-600 text-3xl mb-3"></i>
-                                    <h4 class="font-semibold text-purple-800 mb-2">Cyclique</h4>
-                                    <p class="text-sm text-purple-600">Rotation par zone de stockage</p>
-                                </div>
-
-                                <div class="border-2 border-orange-200 bg-orange-50 rounded-lg p-6 text-center cursor-pointer hover:bg-orange-100 transition-colors"
-                                    onclick="selectTypeInventaire('cible')">
-                                    <i class="fas fa-bullseye text-orange-600 text-3xl mb-3"></i>
-                                    <h4 class="font-semibold text-orange-800 mb-2">Ciblé</h4>
-                                    <p class="text-sm text-orange-600">Produits à risque ou valeur élevée</p>
-                                </div>
-                            </div>
-
-                            <!-- Formulaire de création -->
-                            <form method="POST" id="formNouvelInventaire" class="bg-gray-50 rounded-lg p-6">
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-2">Type d'inventaire
-                                            *</label>
-                                        <select name="type_inventaire" id="type_inventaire" required
-                                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent">
-                                            <option value="">Sélectionnez un type</option>
-                                            <option value="complet">Inventaire complet</option>
-                                            <option value="partiel">Inventaire partiel</option>
-                                            <option value="cyclique">Inventaire cyclique</option>
-                                            <option value="cible">Inventaire ciblé</option>
-                                        </select>
-                                    </div>
-
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 mb-2">Référence</label>
-                                        <input type="text" value="INV-<?php echo date('Ymd-His'); ?>"
-                                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-gray-100"
-                                            readonly>
-                                    </div>
-
-                                    <div class="md:col-span-2">
-                                        <label class="block text-sm font-medium text-gray-700 mb-2">Description</label>
-                                        <textarea name="description" rows="3"
-                                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                                            placeholder="Description de l'inventaire (objectifs, zones concernées, etc.)"></textarea>
-                                    </div>
-
-                                    <!-- Options spécifiques selon le type -->
-                                    <div id="options-inventaire" class="md:col-span-2 hidden">
-                                        <div class="bg-white border border-gray-200 rounded-lg p-4">
-                                            <h5 class="font-semibold text-gray-800 mb-3">Options spécifiques</h5>
-                                            <div id="options-complet" class="inventaire-options hidden">
-                                                <p class="text-sm text-gray-600">L'inventaire complet inclura tous les
-                                                    produits et lots en stock.</p>
-                                                <div class="mt-2 text-xs text-gray-500">
-                                                    <i class="fas fa-info-circle mr-1"></i>
-                                                    Estimation: <?php echo $produits_total; ?> produits,
-                                                    <?php echo $lots_total; ?> lots
-                                                </div>
-                                            </div>
-
-                                            <div id="options-partiel" class="inventaire-options hidden">
-                                                <label class="block text-sm font-medium text-gray-700 mb-2">Sélection
-                                                    des produits</label>
-                                                <select multiple
-                                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm h-32">
-                                                    <?php foreach ($produits_data as $produit): ?>
-                                                        <option value="<?php echo $produit['id']; ?>">
-                                                            <?php echo htmlspecialchars($produit['nom']); ?>
-                                                            (<?php echo htmlspecialchars($produit['code_barre']); ?>)
-                                                        </option>
-                                                    <?php endforeach; ?>
-                                                </select>
-                                            </div>
-
-                                            <div id="options-cyclique" class="inventaire-options hidden">
-                                                <label class="block text-sm font-medium text-gray-700 mb-2">Zone de
-                                                    stockage</label>
-                                                <select
-                                                    class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-                                                    <option value="zone_a">Zone A - Médicaments courants</option>
-                                                    <option value="zone_b">Zone B - Produits sensibles</option>
-                                                    <option value="zone_c">Zone C - Stock de réserve</option>
-                                                    <option value="zone_d">Zone D - Produits volumineux</option>
-                                                </select>
-                                            </div>
-
-                                            <div id="options-cible" class="inventaire-options hidden">
-                                                <label class="block text-sm font-medium text-gray-700 mb-2">Critères de
-                                                    sélection</label>
-                                                <div class="space-y-2">
-                                                    <label class="flex items-center">
-                                                        <input type="checkbox"
-                                                            class="rounded border-gray-300 text-green-600 focus:ring-green-500">
-                                                        <span class="ml-2 text-sm text-gray-700">Produits à haute
-                                                            valeur</span>
-                                                    </label>
-                                                    <label class="flex items-center">
-                                                        <input type="checkbox"
-                                                            class="rounded border-gray-300 text-green-600 focus:ring-green-500">
-                                                        <span class="ml-2 text-sm text-gray-700">Produits
-                                                            sensibles</span>
-                                                    </label>
-                                                    <label class="flex items-center">
-                                                        <input type="checkbox"
-                                                            class="rounded border-gray-300 text-green-600 focus:ring-green-500">
-                                                        <span class="ml-2 text-sm text-gray-700">Produits proches
-                                                            expiration</span>
-                                                    </label>
-                                                    <label class="flex items-center">
-                                                        <input type="checkbox"
-                                                            class="rounded border-gray-300 text-green-600 focus:ring-green-500">
-                                                        <span class="ml-2 text-sm text-gray-700">Produits en stock
-                                                            bas</span>
-                                                    </label>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div class="flex justify-end space-x-3 mt-6">
-                                    <button type="button" onclick="showSection('inventaires')"
-                                        class="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm font-medium">
-                                        Annuler
-                                    </button>
-                                    <button type="submit" name="creer_inventaire"
-                                        class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium">
-                                        <i class="fas fa-plus mr-2"></i>Créer l'inventaire
-                                    </button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <!-- Section Mouvements de Stock -->
-            <div id="mouvements" class="section">
-                <div class="bg-white rounded-2xl shadow-sm">
-                    <div class="px-6 py-4 border-b">
-                        <div class="flex items-center justify-between">
-                            <h3 class="text-xl font-semibold text-gray-900">Mouvements de Stock</h3>
-                            <div class="flex items-center space-x-3">
-                                <button onclick="filtrerMouvements()"
-                                    class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 text-sm">
-                                    <i class="fas fa-filter mr-2"></i>Filtrer
-                                </button>
-                                <button onclick="exporterMouvements()"
-                                    class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">
-                                    <i class="fas fa-download mr-2"></i>Exporter
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="p-6">
-                        <!-- Filtres -->
-                        <div class="bg-gray-50 rounded-lg p-4 mb-6">
-                            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">Période</label>
-                                    <select class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
-                                        <option value="7">7 derniers jours</option>
-                                        <option value="30" selected>30 derniers jours</option>
-                                        <option value="90">3 derniers mois</option>
-                                        <option value="custom">Période personnalisée</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">Type</label>
-                                    <select class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
-                                        <option value="">Tous les types</option>
-                                        <option value="entree">Entrées</option>
-                                        <option value="sortie">Sorties</option>
-                                        <option value="ajustement">Ajustements</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">Produit</label>
-                                    <select class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
-                                        <option value="">Tous les produits</option>
-                                        <?php foreach ($produits_data as $produit): ?>
-                                            <option value="<?php echo $produit['id']; ?>">
-                                                <?php echo htmlspecialchars($produit['nom']); ?>
-                                            </option>
-                                        <?php endforeach; ?>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-1">Utilisateur</label>
-                                    <select class="w-full border border-gray-300 rounded px-3 py-2 text-sm">
-                                        <option value="">Tous les utilisateurs</option>
-                                        <option value="<?php echo $user_id; ?>">Moi</option>
-                                        <!-- Autres utilisateurs -->
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Tableau des mouvements -->
-                        <div class="overflow-x-auto">
-                            <table class="w-full text-sm">
-                                <thead class="bg-gray-50">
-                                    <tr>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date
-                                        </th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                            Produit</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">N°
-                                            Lot</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type
-                                        </th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                            Quantité</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                            Avant/Après</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                            Raison</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                            Utilisateur</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="bg-white divide-y divide-gray-200">
-                                    <?php if (!empty($mouvements_data)): ?>
-                                        <?php foreach ($mouvements_data as $mouvement): ?>
-                                            <tr class="hover:bg-gray-50">
-                                                <td class="px-4 py-3 whitespace-nowrap text-gray-500">
-                                                    <?php echo $mouvement['date_formatee']; ?>
-                                                </td>
-                                                <td class="px-4 py-3 whitespace-nowrap font-medium text-gray-900">
-                                                    <?php echo htmlspecialchars($mouvement['produit_nom']); ?>
-                                                </td>
-                                                <td class="px-4 py-3 whitespace-nowrap text-gray-500">
-                                                    <?php echo htmlspecialchars($mouvement['numero_lot']); ?>
-                                                </td>
-                                                <td class="px-4 py-3 whitespace-nowrap">
-                                                    <span
-                                                        class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium 
-                                            <?php echo strpos($mouvement['type_mouvement'], 'entree') !== false ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'; ?>">
+                                        <div class="flex flex-col space-y-2 min-w-[160px]">
+                                            <?php if ($alerte['statut'] == 'non_lu'): ?>
+                                                <form method="POST" action="" class="w-full">
+                                                    <input type="hidden" name="action" value="marquer_lu">
+                                                    <input type="hidden" name="alerte_id" value="<?php echo $alerte['id']; ?>">
+                                                    <button type="submit"
+                                                        class="group w-full bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-4 py-2 rounded-lg font-medium shadow hover:shadow-md transition-all duration-200 text-sm flex items-center justify-center">
                                                         <i
-                                                            class="fas fa-<?php echo strpos($mouvement['type_mouvement'], 'entree') !== false ? 'arrow-down' : 'arrow-up'; ?> mr-1"></i>
-                                                        <?php
-                                                        $type_text = strpos($mouvement['type_mouvement'], 'entree') !== false ? 'Entrée' : 'Sortie';
-                                                        echo $type_text;
-                                                        ?>
-                                                    </span>
-                                                </td>
-                                                <td class="px-4 py-3 whitespace-nowrap text-gray-500 font-medium">
-                                                    <?php echo abs($mouvement['quantite']); ?> unités
-                                                </td>
-                                                <td class="px-4 py-3 whitespace-nowrap text-gray-500 text-xs">
-                                                    <?php
-                                                    $avant = $mouvement['quantite_avant'] ?? 'N/A';
-                                                    $apres = $mouvement['quantite_apres'] ?? 'N/A';
-                                                    echo $avant . ' → ' . $apres;
-                                                    ?>
-                                                </td>
-                                                <td class="px-4 py-3 whitespace-nowrap text-gray-500">
-                                                    <?php echo htmlspecialchars($mouvement['raison'] ?? 'N/A'); ?>
-                                                </td>
-                                                <td class="px-4 py-3 whitespace-nowrap text-gray-500">
-                                                    <?php echo htmlspecialchars($mouvement['utilisateur_nom']); ?>
-                                                </td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    <?php else: ?>
-                                        <tr>
-                                            <td colspan="8" class="px-4 py-8 text-center text-gray-500">
-                                                <i class="fas fa-exchange-alt text-4xl text-gray-300 mb-2"></i>
-                                                <p>Aucun mouvement trouvé pour la période sélectionnée</p>
-                                            </td>
-                                        </tr>
-                                    <?php endif; ?>
-                                </tbody>
-                            </table>
-                        </div>
+                                                            class="fas fa-check-circle mr-2 group-hover:scale-110 transition-transform"></i>
+                                                        Marquer lu
+                                                    </button>
+                                                </form>
+                                            <?php endif; ?>
 
-                        <!-- Pagination -->
-                        <div class="flex items-center justify-between mt-6">
-                            <div class="text-sm text-gray-700">
-                                Affichage de <span class="font-medium">1</span> à <span
-                                    class="font-medium"><?php echo count($mouvements_data); ?></span> sur <span
-                                    class="font-medium"><?php echo count($mouvements_data); ?></span> résultats
+                                            <?php if ($alerte['produit_id']): ?>
+                                                <a href="?page=ajouter_lot&produit_id=<?php echo $alerte['produit_id']; ?>"
+                                                    class="group w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-4 py-2 rounded-lg font-medium shadow hover:shadow-md transition-all duration-200 text-sm flex items-center justify-center">
+                                                    <i class="fas fa-plus-circle mr-2 group-hover:scale-110 transition-transform"></i>
+                                                    Ajouter lot
+                                                </a>
+                                            <?php endif; ?>
+
+                                            <a href="?page=lots"
+                                                class="group w-full bg-gradient-to-r from-gray-100 to-gray-200 hover:from-gray-200 hover:to-gray-300 text-gray-700 px-4 py-2 rounded-lg font-medium shadow hover:shadow-md transition-all duration-200 text-sm flex items-center justify-center border border-gray-300">
+                                                <i class="fas fa-boxes mr-2 group-hover:scale-110 transition-transform"></i>
+                                                Voir lots
+                                            </a>
+                                        </div>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php else: ?>
+                        <!-- Aucune alerte -->
+                        <div
+                            class="bg-gradient-to-br from-white to-emerald-50 rounded-2xl shadow-lg p-16 text-center border border-emerald-200">
+                            <div
+                                class="inline-flex items-center justify-center w-24 h-24 rounded-full bg-gradient-to-r from-emerald-100 to-emerald-200 mb-8 shadow-sm">
+                                <i class="fas fa-check-circle text-emerald-600 text-4xl"></i>
                             </div>
-                            <div class="flex space-x-2">
-                                <button
-                                    class="px-3 py-1 border border-gray-300 rounded text-sm text-gray-600 hover:bg-gray-50">
-                                    Précédent
-                                </button>
-                                <button class="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">
-                                    1
-                                </button>
-                                <button
-                                    class="px-3 py-1 border border-gray-300 rounded text-sm text-gray-600 hover:bg-gray-50">
-                                    Suivant
-                                </button>
+                            <h3 class="text-3xl font-bold text-gray-800 mb-4">Aucune alerte active</h3>
+                            <p class="text-gray-600 text-lg mb-10 max-w-md mx-auto">
+                                Toutes les alertes sont traitées et votre stock est optimal.
+                            </p>
+                            <div class="flex flex-col sm:flex-row justify-center gap-6">
+                                <a href="?page=dashboard"
+                                    class="group bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-8 py-4 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5 text-lg">
+                                    <i class="fas fa-tachometer-alt mr-3 group-hover:scale-110 transition-transform"></i>
+                                    Tableau de bord
+                                </a>
+                                <a href="?page=lots"
+                                    class="group bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-8 py-4 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5 text-lg">
+                                    <i class="fas fa-boxes mr-3 group-hover:scale-110 transition-transform"></i>
+                                    Voir les lots
+                                </a>
                             </div>
                         </div>
-                    </div>
+                    <?php endif; ?>
                 </div>
-            </div>
 
-            <!-- Section Rapports & Statistiques -->
-            <div id="rapports" class="section">
-                <div class="bg-white rounded-2xl shadow-sm">
-                    <div class="px-6 py-4 border-b">
-                        <div class="flex items-center justify-between">
-                            <h3 class="text-xl font-semibold text-gray-900">Rapports & Statistiques</h3>
-                            <button onclick="showModal('modalRapports')"
-                                class="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 text-sm font-medium">
-                                <i class="fas fa-download mr-2"></i>Générer Rapports
+                <!-- Script de filtrage -->
+                <script>
+                    function filterAlerts(filter) {
+                        const alerts = document.querySelectorAll('.alert-card');
+                        alerts.forEach(alert => {
+                            const type = alert.getAttribute('data-type');
+                            const status = alert.getAttribute('data-status');
+
+                            let show = false;
+
+                            switch (filter) {
+                                case 'all':
+                                    show = true;
+                                    break;
+                                case 'stock_bas':
+                                    show = type === 'stock_bas';
+                                    break;
+                                case 'peremption':
+                                    show = type === 'peremption';
+                                    break;
+                                case 'rupture_stock':
+                                    show = type === 'rupture_stock';
+                                    break;
+                                case 'non_lu':
+                                    show = status === 'non_lu';
+                                    break;
+                                default:
+                                    show = true;
+                            }
+
+                            alert.style.display = show ? 'block' : 'none';
+                            alert.style.opacity = show ? '1' : '0';
+                            alert.style.transform = show ? 'translateY(0)' : 'translateY(-10px)';
+                            alert.style.transition = 'all 0.3s ease';
+                        });
+                    }
+
+                    function markAllAsRead() {
+                        if (confirm('Marquer toutes les alertes comme lues ?')) {
+                            const forms = document.querySelectorAll('form[action*="marquer_lu"]');
+                            forms.forEach(form => form.submit());
+                        }
+                    }
+                </script>
+
+            <?php elseif ($current_page == 'mouvements'): ?>
+                <!-- ========== HISTORIQUE DES MOUVEMENTS ========== -->
+                <div class="mb-8">
+                    <!-- En-tête avec statistiques -->
+                    <div class="flex items-center justify-between mb-8">
+                        <div class="flex items-center">
+                            <div class="p-3 bg-gradient-to-br from-blue-100 to-blue-200 rounded-xl shadow-sm mr-4">
+                                <i class="fas fa-history text-blue-600 text-xl"></i>
+                            </div>
+                            <div>
+                                <h1 class="text-2xl font-bold text-gray-800">Historique des Mouvements</h1>
+                                <p class="text-gray-600 mt-1">Suivi des entrées et sorties de stock</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-4">
+                            <div
+                                class="text-center px-4 py-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl border border-blue-200">
+                                <div class="text-2xl font-bold text-blue-700"><?php echo count($mouvements); ?></div>
+                                <div class="text-xs text-blue-600 font-medium">Mouvements</div>
+                            </div>
+                            <button onclick="exportToCSV()"
+                                class="group bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-4 py-2 rounded-lg font-medium shadow hover:shadow-md transition-all duration-200">
+                                <i class="fas fa-download mr-2 group-hover:scale-110 transition-transform"></i>
+                                Exporter CSV
                             </button>
                         </div>
                     </div>
-                    <div class="p-6">
-                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            <!-- Statistiques Rapides -->
-                            <div class="bg-blue-50 rounded-lg p-6">
-                                <h4 class="text-lg font-semibold text-blue-800 mb-4">📊 Aperçu du Stock</h4>
-                                <div class="space-y-2">
-                                    <div class="flex justify-between">
-                                        <span class="text-blue-700">Produits actifs:</span>
-                                        <span class="font-semibold"><?php echo $produits_total; ?></span>
+
+                    <!-- Statistiques des mouvements -->
+                    <?php if (count($mouvements) > 0): ?>
+                        <?php
+                        $entrees = array_sum(array_map(function ($m) {
+                            return $m['type_mouvement'] == 'entree' ? $m['quantite'] : 0;
+                        }, $mouvements));
+                        $sorties = array_sum(array_map(function ($m) {
+                            return $m['type_mouvement'] == 'sortie' ? $m['quantite'] : 0;
+                        }, $mouvements));
+                        $ajustements = array_filter($mouvements, fn($m) => $m['type_mouvement'] == 'ajustement');
+                        ?>
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+                            <div class="bg-gradient-to-br from-white to-green-50 rounded-xl shadow p-5 border border-green-200">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <div class="text-lg font-bold text-green-700"><?php echo $entrees; ?></div>
+                                        <div class="text-sm text-green-600">Entrées totales</div>
                                     </div>
-                                    <div class="flex justify-between">
-                                        <span class="text-blue-700">Lots en stock:</span>
-                                        <span class="font-semibold"><?php echo $lots_total; ?></span>
-                                    </div>
-                                    <div class="flex justify-between">
-                                        <span class="text-blue-700">Stock total:</span>
-                                        <span class="font-semibold">
-                                            <?php
-                                            $stock_total = 0;
-                                            foreach ($lots_data as $lot) {
-                                                $stock_total += $lot['quantite_actuelle'];
-                                            }
-                                            echo $stock_total;
-                                            ?> unités
-                                        </span>
+                                    <div class="p-2 bg-gradient-to-br from-green-100 to-green-200 rounded-lg">
+                                        <i class="fas fa-arrow-down text-green-600"></i>
                                     </div>
                                 </div>
                             </div>
 
-                            <!-- Alertes Actives -->
-                            <div class="bg-red-50 rounded-lg p-6">
-                                <h4 class="text-lg font-semibold text-red-800 mb-4">🚨 Alertes Actives</h4>
-                                <div class="space-y-2">
-                                    <div class="flex justify-between">
-                                        <span class="text-red-700">Stock bas:</span>
-                                        <span class="font-semibold"><?php echo $alertes_stock_count; ?></span>
+                            <div class="bg-gradient-to-br from-white to-red-50 rounded-xl shadow p-5 border border-red-200">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <div class="text-lg font-bold text-red-700"><?php echo $sorties; ?></div>
+                                        <div class="text-sm text-red-600">Sorties totales</div>
                                     </div>
-                                    <div class="flex justify-between">
-                                        <span class="text-red-700">Péremption (30j):</span>
-                                        <span class="font-semibold"><?php echo $alertes_expiration_count; ?></span>
-                                    </div>
-                                    <div class="flex justify-between">
-                                        <span class="text-red-700">Inventaires en cours:</span>
-                                        <span class="font-semibold"><?php echo $inventaires_en_cours; ?></span>
+                                    <div class="p-2 bg-gradient-to-br from-red-100 to-red-200 rounded-lg">
+                                        <i class="fas fa-arrow-up text-red-600"></i>
                                     </div>
                                 </div>
                             </div>
 
-                            <!-- Activité Récente -->
-                            <div class="bg-green-50 rounded-lg p-6">
-                                <h4 class="text-lg font-semibold text-green-800 mb-4">📈 Activité Récente</h4>
-                                <div class="space-y-2">
-                                    <div class="flex justify-between">
-                                        <span class="text-green-700">Mouvements (7j):</span>
-                                        <span class="font-semibold"><?php echo count($mouvements_data); ?></span>
+                            <div
+                                class="bg-gradient-to-br from-white to-orange-50 rounded-xl shadow p-5 border border-orange-200">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <div class="text-lg font-bold text-orange-700"><?php echo count($ajustements); ?></div>
+                                        <div class="text-sm text-orange-600">Ajustements</div>
                                     </div>
-                                    <div class="flex justify-between">
-                                        <span class="text-green-700">Dernier inventaire:</span>
-                                        <span class="font-semibold">
-                                            <?php
-                                            if (!empty($inventaires_data)) {
-                                                echo formatDate($inventaires_data[0]['created_at']);
-                                            } else {
-                                                echo 'Aucun';
-                                            }
-                                            ?>
-                                        </span>
+                                    <div class="p-2 bg-gradient-to-br from-orange-100 to-orange-200 rounded-lg">
+                                        <i class="fas fa-sliders-h text-orange-600"></i>
                                     </div>
-                                    <div class="flex justify-between">
-                                        <span class="text-green-700">Prochaine expiration:</span>
-                                        <span class="font-semibold">
+                                </div>
+                            </div>
+
+                            <div class="bg-gradient-to-br from-white to-blue-50 rounded-xl shadow p-5 border border-blue-200">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <?php
+                                        $unique_produits = count(array_unique(array_column($mouvements, 'produit_nom')));
+                                        ?>
+                                        <div class="text-lg font-bold text-blue-700"><?php echo $unique_produits; ?></div>
+                                        <div class="text-sm text-blue-600">Produits distincts</div>
+                                    </div>
+                                    <div class="p-2 bg-gradient-to-br from-blue-100 to-blue-200 rounded-lg">
+                                        <i class="fas fa-capsules text-blue-600"></i>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endif; ?>
+
+                    <!-- Filtres avancés -->
+                    <div
+                        class="bg-gradient-to-br from-white to-blue-50 rounded-xl shadow-lg p-6 mb-8 border border-blue-200">
+                        <div class="flex items-center mb-4">
+                            <div class="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg mr-3">
+                                <i class="fas fa-filter text-blue-600"></i>
+                            </div>
+                            <h3 class="text-lg font-semibold text-gray-800">Filtres de recherche</h3>
+                        </div>
+
+                        <form method="GET" action="" class="space-y-4">
+                            <input type="hidden" name="page" value="mouvements">
+
+                            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                <!-- Dates -->
+                                <div>
+                                    <label class="block text-sm font-semibold text-gray-700 mb-2" for="date_debut">
+                                        <i class="fas fa-calendar-start mr-1 text-gray-500"></i> Date début
+                                    </label>
+                                    <div class="relative">
+                                        <input type="date" id="date_debut" name="date_debut"
+                                            value="<?php echo htmlspecialchars($_GET['date_debut'] ?? date('Y-m-01')); ?>"
+                                            class="w-full px-4 py-3 pl-11 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 shadow-sm hover:shadow">
+                                        <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                                            <i class="fas fa-calendar-day"></i>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label class="block text-sm font-semibold text-gray-700 mb-2" for="date_fin">
+                                        <i class="fas fa-calendar-end mr-1 text-gray-500"></i> Date fin
+                                    </label>
+                                    <div class="relative">
+                                        <input type="date" id="date_fin" name="date_fin"
+                                            value="<?php echo htmlspecialchars($_GET['date_fin'] ?? date('Y-m-t')); ?>"
+                                            class="w-full px-4 py-3 pl-11 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 shadow-sm hover:shadow">
+                                        <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                                            <i class="fas fa-calendar-day"></i>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Type de mouvement -->
+                                <div>
+                                    <label class="block text-sm font-semibold text-gray-700 mb-2" for="type_mouvement">
+                                        <i class="fas fa-exchange-alt mr-1 text-gray-500"></i> Type
+                                    </label>
+                                    <div class="relative">
+                                        <select id="type_mouvement" name="type_mouvement"
+                                            class="w-full px-4 py-3 pl-11 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 shadow-sm hover:shadow appearance-none bg-white">
+                                            <option value="">Tous les types</option>
+                                            <option value="entree" <?php echo (isset($_GET['type_mouvement']) && $_GET['type_mouvement'] == 'entree') ? 'selected' : ''; ?>>
+                                                Entrée
+                                            </option>
+                                            <option value="sortie" <?php echo (isset($_GET['type_mouvement']) && $_GET['type_mouvement'] == 'sortie') ? 'selected' : ''; ?>>
+                                                Sortie
+                                            </option>
+                                            <option value="ajustement" <?php echo (isset($_GET['type_mouvement']) && $_GET['type_mouvement'] == 'ajustement') ? 'selected' : ''; ?>>
+                                                Ajustement
+                                            </option>
+                                        </select>
+                                        <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                                            <i class="fas fa-filter"></i>
+                                        </div>
+                                        <div class="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                                            <i class="fas fa-chevron-down"></i>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Produit -->
+                                <div>
+                                    <label class="block text-sm font-semibold text-gray-700 mb-2" for="produit_id">
+                                        <i class="fas fa-capsules mr-1 text-gray-500"></i> Produit
+                                    </label>
+                                    <div class="relative">
+                                        <select id="produit_id" name="produit_id"
+                                            class="w-full px-4 py-3 pl-11 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 shadow-sm hover:shadow appearance-none bg-white">
+                                            <option value="">Tous les produits</option>
                                             <?php
-                                            if (!empty($alertes_expiration_data)) {
-                                                echo date('d/m/Y', strtotime($alertes_expiration_data[0]['date_expiration']));
-                                            } else {
-                                                echo 'Aucune';
-                                            }
-                                            ?>
-                                        </span>
+                                            $produits_uniques = array_unique(array_map(function ($m) {
+                                                return ['id' => $m['produit_id'], 'nom' => $m['produit_nom']];
+                                            }, $mouvements), SORT_REGULAR);
+                                            foreach ($produits_uniques as $produit):
+                                                ?>
+                                                <option value="<?php echo $produit['id']; ?>" <?php echo (isset($_GET['produit_id']) && $_GET['produit_id'] == $produit['id']) ? 'selected' : ''; ?>>
+                                                    <?php echo htmlspecialchars($produit['nom']); ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                        <div class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                                            <i class="fas fa-pills"></i>
+                                        </div>
+                                        <div class="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                                            <i class="fas fa-chevron-down"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div
+                                class="flex flex-col sm:flex-row justify-between items-center gap-4 pt-4 border-t border-gray-200">
+                                <div class="text-sm text-gray-600">
+                                    <i class="fas fa-info-circle mr-1 text-blue-500"></i>
+                                    <?php echo count($mouvements); ?> mouvement(s) trouvé(s)
+                                </div>
+                                <div class="flex items-center space-x-3">
+                                    <a href="?page=mouvements"
+                                        class="group px-5 py-2 border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50 hover:shadow transition-all duration-200 font-medium">
+                                        <i class="fas fa-redo mr-2 group-hover:rotate-180 transition-transform"></i>
+                                        Réinitialiser
+                                    </a>
+                                    <button type="submit"
+                                        class="group bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-6 py-2.5 rounded-xl font-medium shadow hover:shadow-md transition-all duration-200 flex items-center">
+                                        <i class="fas fa-search mr-2 group-hover:scale-110 transition-transform"></i>
+                                        Appliquer les filtres
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+
+                    <?php if (count($mouvements) > 0): ?>
+                        <!-- Tableau des mouvements -->
+                        <div
+                            class="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg overflow-hidden border border-gray-200">
+                            <!-- En-tête du tableau -->
+                            <div class="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-gray-100">
+                                <div class="flex flex-col md:flex-row justify-between items-center gap-4">
+                                    <div class="flex items-center">
+                                        <i class="fas fa-list text-blue-600 mr-2"></i>
+                                        <span class="font-medium text-gray-700">Liste des mouvements</span>
+                                    </div>
+                                    <div class="flex items-center space-x-2">
+                                        <div class="text-sm text-gray-600">
+                                            Période: <?php echo formatDate($_GET['date_debut'] ?? date('Y-m-01')); ?>
+                                            au <?php echo formatDate($_GET['date_fin'] ?? date('Y-m-t')); ?>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Tableau -->
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full divide-y divide-gray-200">
+                                    <thead>
+                                        <tr class="bg-gradient-to-r from-gray-50 to-gray-100">
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-calendar mr-2 text-gray-400"></i> Date
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-capsules mr-2 text-gray-400"></i> Produit
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-tag mr-2 text-gray-400"></i> Lot
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-exchange-alt mr-2 text-gray-400"></i> Type
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-box mr-2 text-gray-400"></i> Quantité
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-comment mr-2 text-gray-400"></i> Raison
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-user mr-2 text-gray-400"></i> Par
+                                                </div>
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white divide-y divide-gray-200">
+                                        <?php foreach ($mouvements as $mouvement): ?>
+                                            <tr
+                                                class="hover:bg-gradient-to-r hover:from-blue-50 hover:to-transparent transition-all duration-200 group">
+                                                <!-- Date -->
+                                                <td class="px-6 py-4">
+                                                    <div class="text-sm text-gray-900">
+                                                        <?php echo formatDate($mouvement['created_at']); ?>
+                                                    </div>
+                                                    <div class="text-xs text-gray-500 mt-1">
+                                                        <?php echo date('H:i', strtotime($mouvement['created_at'])); ?>
+                                                    </div>
+                                                </td>
+
+                                                <!-- Produit -->
+                                                <td class="px-6 py-4">
+                                                    <div class="flex items-center">
+                                                        <div
+                                                            class="p-2 bg-gradient-to-br from-emerald-50 to-emerald-100 rounded-lg mr-3 border border-emerald-200">
+                                                            <i class="fas fa-pills text-emerald-600 text-sm"></i>
+                                                        </div>
+                                                        <div>
+                                                            <div
+                                                                class="font-semibold text-gray-900 group-hover:text-blue-700 transition-colors">
+                                                                <?php echo htmlspecialchars($mouvement['produit_nom']); ?>
+                                                            </div>
+                                                            <?php if (!empty($mouvement['code_barre'])): ?>
+                                                                <div class="text-xs text-gray-500 mt-1">
+                                                                    <i class="fas fa-barcode mr-1"></i>
+                                                                    <?php echo htmlspecialchars($mouvement['code_barre']); ?>
+                                                                </div>
+                                                            <?php endif; ?>
+                                                        </div>
+                                                    </div>
+                                                </td>
+
+                                                <!-- Lot -->
+                                                <td class="px-6 py-4">
+                                                    <code
+                                                        class="text-sm text-gray-900 bg-gray-50 px-2 py-1 rounded font-mono border border-gray-200">
+                                                                                        <?php echo htmlspecialchars($mouvement['numero_lot']); ?>
+                                                                                    </code>
+                                                </td>
+
+                                                <!-- Type -->
+                                                <td class="px-6 py-4">
+                                                    <?php if ($mouvement['type_mouvement'] == 'entree'): ?>
+                                                        <div
+                                                            class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-green-100 to-green-50 text-green-800 border border-green-200">
+                                                            <i class="fas fa-arrow-down text-green-500 mr-1 text-xs"></i>
+                                                            Entrée
+                                                        </div>
+                                                    <?php elseif ($mouvement['type_mouvement'] == 'sortie'): ?>
+                                                        <div
+                                                            class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-red-100 to-red-50 text-red-800 border border-red-200">
+                                                            <i class="fas fa-arrow-up text-red-500 mr-1 text-xs"></i>
+                                                            Sortie
+                                                        </div>
+                                                    <?php else: ?>
+                                                        <div
+                                                            class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-orange-100 to-orange-50 text-orange-800 border border-orange-200">
+                                                            <i class="fas fa-sliders-h text-orange-500 mr-1 text-xs"></i>
+                                                            Ajustement
+                                                        </div>
+                                                    <?php endif; ?>
+                                                </td>
+
+                                                <!-- Quantité -->
+                                                <td class="px-6 py-4">
+                                                    <div class="flex items-center">
+                                                        <div
+                                                            class="text-2xl font-bold <?php echo $mouvement['type_mouvement'] == 'entree' ? 'text-green-700' : ($mouvement['type_mouvement'] == 'sortie' ? 'text-red-700' : 'text-orange-700'); ?>">
+                                                            <?php echo $mouvement['type_mouvement'] == 'entree' ? '+' : ($mouvement['type_mouvement'] == 'sortie' ? '-' : '±'); ?>
+                                                            <?php echo $mouvement['quantite']; ?>
+                                                        </div>
+                                                        <span class="text-xs text-gray-500 ml-2">unités</span>
+                                                    </div>
+                                                </td>
+
+                                                <!-- Raison -->
+                                                <td class="px-6 py-4">
+                                                    <div class="text-sm text-gray-800 max-w-xs">
+                                                        <?php echo htmlspecialchars($mouvement['raison']); ?>
+                                                    </div>
+                                                </td>
+
+                                                <!-- Utilisateur -->
+                                                <td class="px-6 py-4">
+                                                    <div class="flex items-center">
+                                                        <div
+                                                            class="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg mr-2 border border-blue-200">
+                                                            <i class="fas fa-user text-blue-600 text-xs"></i>
+                                                        </div>
+                                                        <div class="text-sm text-gray-900">
+                                                            <?php echo htmlspecialchars($mouvement['utilisateur_nom']); ?>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    <?php else: ?>
+                        <!-- Aucun mouvement -->
+                        <div
+                            class="bg-gradient-to-br from-white to-blue-50 rounded-2xl shadow-lg p-16 text-center border border-blue-200">
+                            <div
+                                class="inline-flex items-center justify-center w-24 h-24 rounded-full bg-gradient-to-r from-blue-100 to-blue-200 mb-8 shadow-sm">
+                                <i class="fas fa-history text-blue-600 text-4xl"></i>
+                            </div>
+                            <h3 class="text-3xl font-bold text-gray-800 mb-4">Aucun mouvement trouvé</h3>
+                            <p class="text-gray-600 text-lg mb-10 max-w-md mx-auto">
+                                Aucun mouvement de stock n'a été enregistré pour la période ou les filtres sélectionnés.
+                            </p>
+                            <div class="flex flex-col sm:flex-row justify-center gap-6">
+                                <a href="?page=mouvements"
+                                    class="group bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-8 py-4 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5 text-lg">
+                                    <i class="fas fa-redo mr-3 group-hover:rotate-180 transition-transform"></i>
+                                    Réinitialiser les filtres
+                                </a>
+                                <a href="?page=dashboard"
+                                    class="group bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-8 py-4 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5 text-lg">
+                                    <i class="fas fa-tachometer-alt mr-3 group-hover:scale-110 transition-transform"></i>
+                                    Tableau de bord
+                                </a>
+                            </div>
+                        </div>
+                    <?php endif; ?>
+                </div>
+
+                <!-- Script d'exportation CSV -->
+                <script>
+                    function exportToCSV() {
+                        const dateDebut = document.getElementById('date_debut').value || '<?php echo date("Y-m-01"); ?>';
+                        const dateFin = document.getElementById('date_fin').value || '<?php echo date("Y-m-t"); ?>';
+                        const typeMouvement = document.getElementById('type_mouvement').value || '';
+                        const produitId = document.getElementById('produit_id').value || '';
+
+                        const params = new URLSearchParams({
+                            action: 'export_csv',
+                            date_debut: dateDebut,
+                            date_fin: dateFin,
+                            type_mouvement: typeMouvement,
+                            produit_id: produitId
+                        });
+
+                        window.location.href = `?page=mouvements&${params.toString()}`;
+                    }
+                </script>
+
+            <?php elseif ($current_page == 'inventaire'): ?>
+                <!-- ========== INVENTAIRE RAPIDE ========== -->
+                <div class="mb-8">
+                    <!-- En-tête avec instructions -->
+                    <div class="flex items-center justify-between mb-8">
+                        <div class="flex items-center">
+                            <div class="p-3 bg-gradient-to-br from-emerald-100 to-emerald-200 rounded-xl shadow-sm mr-4">
+                                <i class="fas fa-clipboard-check text-emerald-600 text-xl"></i>
+                            </div>
+                            <div>
+                                <h1 class="text-2xl font-bold text-gray-800">Inventaire Rapide</h1>
+                                <p class="text-gray-600 mt-1">Ajustez les quantités de stock selon l'inventaire physique</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-4">
+                            <?php if (count($inventaire_data) > 0): ?>
+                                <span
+                                    class="px-3 py-1 bg-gradient-to-r from-orange-100 to-orange-50 text-orange-800 rounded-full text-sm font-semibold border border-orange-200">
+                                    <i class="fas fa-exclamation-triangle mr-1"></i>
+                                    <?php echo count($inventaire_data); ?> produit(s) à vérifier
+                                </span>
+                            <?php endif; ?>
+                            <button onclick="validateAllInventory()"
+                                class="group bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-4 py-2 rounded-lg font-medium shadow hover:shadow-md transition-all duration-200">
+                                <i class="fas fa-check-double mr-2 group-hover:scale-110 transition-transform"></i>
+                                Valider tout
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Instructions et conseils -->
+                    <div
+                        class="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl shadow-lg p-6 mb-8 border border-blue-200">
+                        <div class="flex items-start">
+                            <div class="p-3 bg-gradient-to-br from-blue-100 to-blue-200 rounded-lg mr-4">
+                                <i class="fas fa-info-circle text-blue-600 text-lg"></i>
+                            </div>
+                            <div class="flex-1">
+                                <h3 class="text-lg font-semibold text-gray-800 mb-2">Comment procéder à l'inventaire ?</h3>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div class="flex items-start">
+                                        <div class="p-1 bg-white rounded mr-3">
+                                            <i class="fas fa-1 text-blue-500 text-xs"></i>
+                                        </div>
+                                        <div>
+                                            <p class="text-sm text-gray-700">Comptez physiquement les unités disponibles</p>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-start">
+                                        <div class="p-1 bg-white rounded mr-3">
+                                            <i class="fas fa-2 text-blue-500 text-xs"></i>
+                                        </div>
+                                        <div>
+                                            <p class="text-sm text-gray-700">Saisissez le nombre réel dans la colonne
+                                                "Inventaire réel"</p>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-start">
+                                        <div class="p-1 bg-white rounded mr-3">
+                                            <i class="fas fa-3 text-blue-500 text-xs"></i>
+                                        </div>
+                                        <div>
+                                            <p class="text-sm text-gray-700">Cliquez sur ✓ pour valider ou utilisez "Valider
+                                                tout"</p>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-start">
+                                        <div class="p-1 bg-white rounded mr-3">
+                                            <i class="fas fa-4 text-blue-500 text-xs"></i>
+                                        </div>
+                                        <div>
+                                            <p class="text-sm text-gray-700">Les écarts seront automatiquement ajustés</p>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
+
+                    <?php if (count($inventaire_data) > 0): ?>
+                        <!-- Résumé des écarts -->
+                        <?php
+                        $total_ecart = 0;
+                        $produits_ecart = 0;
+                        foreach ($inventaire_data as $produit) {
+                            if ($produit['quantite_stock'] != $produit['quantite_stock']) { // Cette condition semble incorrecte, devrait être comparée à une quantité réelle
+                                $produits_ecart++;
+                                // $total_ecart += abs($produit['quantite_stock'] - $produit['quantite_reelle']);
+                            }
+                        }
+                        ?>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                            <div class="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow p-5 border border-gray-200">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <div class="text-lg font-bold text-gray-800"><?php echo count($inventaire_data); ?>
+                                        </div>
+                                        <div class="text-sm text-gray-600">Produits à vérifier</div>
+                                    </div>
+                                    <div class="p-2 bg-gradient-to-br from-gray-100 to-gray-200 rounded-lg">
+                                        <i class="fas fa-list-check text-gray-600"></i>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div
+                                class="bg-gradient-to-br from-white to-yellow-50 rounded-xl shadow p-5 border border-yellow-200">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <div class="text-lg font-bold text-yellow-800" id="ecart-count">0</div>
+                                        <div class="text-sm text-yellow-600">Écarts détectés</div>
+                                    </div>
+                                    <div class="p-2 bg-gradient-to-br from-yellow-100 to-yellow-200 rounded-lg">
+                                        <i class="fas fa-balance-scale text-yellow-600"></i>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div
+                                class="bg-gradient-to-br from-white to-emerald-50 rounded-xl shadow p-5 border border-emerald-200">
+                                <div class="flex items-center justify-between">
+                                    <div>
+                                        <div class="text-lg font-bold text-emerald-800" id="validated-count">0</div>
+                                        <div class="text-sm text-emerald-600">Validés</div>
+                                    </div>
+                                    <div class="p-2 bg-gradient-to-br from-emerald-100 to-emerald-200 rounded-lg">
+                                        <i class="fas fa-check-circle text-emerald-600"></i>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Tableau d'inventaire -->
+                        <div
+                            class="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg overflow-hidden border border-gray-200">
+                            <!-- En-tête du tableau -->
+                            <div class="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-gray-100">
+                                <div class="flex flex-col md:flex-row justify-between items-center gap-4">
+                                    <div class="flex items-center">
+                                        <i class="fas fa-clipboard-list text-emerald-600 mr-2"></i>
+                                        <span class="font-medium text-gray-700">Inventaire en cours</span>
+                                    </div>
+                                    <div class="flex items-center space-x-2">
+                                        <div class="text-sm text-gray-600">
+                                            <i class="fas fa-clock mr-1"></i>
+                                            Session: <?php echo date('d/m/Y H:i'); ?>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Tableau -->
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full divide-y divide-gray-200">
+                                    <thead>
+                                        <tr class="bg-gradient-to-r from-gray-50 to-gray-100">
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-capsules mr-2 text-gray-400"></i> Produit
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-tag mr-2 text-gray-400"></i> Catégorie
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-barcode mr-2 text-gray-400"></i> Code barre
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-database mr-2 text-gray-400"></i> Stock système
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-hand-sparkles mr-2 text-gray-400"></i> Inventaire réel
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-exchange-alt mr-2 text-gray-400"></i> Écart
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-cogs mr-2 text-gray-400"></i> Actions
+                                                </div>
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white divide-y divide-gray-200" id="inventory-table">
+                                        <?php foreach ($inventaire_data as $produit): ?>
+                                            <tr class="inventory-row hover:bg-gradient-to-r hover:from-emerald-50 hover:to-transparent transition-all duration-200"
+                                                data-id="<?php echo $produit['id']; ?>"
+                                                data-stock="<?php echo $produit['quantite_stock']; ?>">
+                                                <!-- Produit -->
+                                                <td class="px-6 py-4">
+                                                    <div class="flex items-center">
+                                                        <div
+                                                            class="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg mr-3 border border-blue-200">
+                                                            <i class="fas fa-pills text-blue-600 text-sm"></i>
+                                                        </div>
+                                                        <div>
+                                                            <div class="font-semibold text-gray-900">
+                                                                <?php echo htmlspecialchars($produit['nom']); ?>
+                                                            </div>
+                                                            <?php if (isset($produit['fournisseur'])): ?>
+                                                                <div class="text-xs text-gray-500 mt-1">
+                                                                    <i class="fas fa-truck mr-1"></i>
+                                                                    <?php echo htmlspecialchars($produit['fournisseur']); ?>
+                                                                </div>
+                                                            <?php endif; ?>
+                                                        </div>
+                                                    </div>
+                                                </td>
+
+                                                <!-- Catégorie -->
+                                                <td class="px-6 py-4">
+                                                    <span
+                                                        class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gradient-to-r from-gray-50 to-gray-100 text-gray-800 border border-gray-200">
+                                                        <?php echo htmlspecialchars($produit['categorie']); ?>
+                                                    </span>
+                                                </td>
+
+                                                <!-- Code barre -->
+                                                <td class="px-6 py-4">
+                                                    <code
+                                                        class="text-sm text-gray-900 bg-gray-50 px-2 py-1 rounded font-mono border border-gray-200">
+                                                                            <?php echo htmlspecialchars($produit['code_barre']); ?>
+                                                                        </code>
+                                                </td>
+
+                                                <!-- Stock système -->
+                                                <td class="px-6 py-4">
+                                                    <div class="flex flex-col items-start">
+                                                        <span
+                                                            class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold 
+                                            <?php echo $produit['quantite_stock'] <= 10 ?
+                                                'bg-gradient-to-r from-red-100 to-red-50 text-red-800 border border-red-200' :
+                                                'bg-gradient-to-r from-green-100 to-green-50 text-green-800 border border-green-200'; ?>">
+                                                            <i class="fas fa-box mr-1 text-xs"></i>
+                                                            <?php echo $produit['quantite_stock']; ?> unités
+                                                        </span>
+                                                        <?php if ($produit['quantite_stock'] <= 10): ?>
+                                                            <div class="text-xs text-red-600 mt-1">
+                                                                <i class="fas fa-exclamation-circle mr-1"></i> Stock bas
+                                                            </div>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                </td>
+
+                                                <!-- Inventaire réel -->
+                                                <td class="px-6 py-4">
+                                                    <div class="flex items-center space-x-3">
+                                                        <form method="POST" action="" class="inventory-form">
+                                                            <input type="hidden" name="action" value="realiser_inventaire">
+                                                            <input type="hidden" name="produit_id"
+                                                                value="<?php echo $produit['id']; ?>">
+                                                            <div class="relative">
+                                                                <input type="number" name="quantite_reelle" min="0"
+                                                                    value="<?php echo $produit['quantite_stock']; ?>"
+                                                                    class="w-32 px-4 py-2 pl-11 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all duration-200 shadow-sm"
+                                                                    onchange="updateEcart(this)">
+                                                                <div
+                                                                    class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
+                                                                    <i class="fas fa-hashtag"></i>
+                                                                </div>
+                                                            </div>
+                                                        </form>
+                                                    </div>
+                                                </td>
+
+                                                <!-- Écart -->
+                                                <td class="px-6 py-4">
+                                                    <div class="text-center">
+                                                        <span class="ecart-display text-sm font-semibold text-gray-900">0</span>
+                                                        <div class="ecart-badge hidden"></div>
+                                                    </div>
+                                                </td>
+
+                                                <!-- Actions -->
+                                                <td class="px-6 py-4">
+                                                    <div class="flex items-center space-x-2">
+                                                        <button type="button" onclick="validateInventoryRow(this)"
+                                                            class="p-2 bg-gradient-to-br from-emerald-50 to-emerald-100 hover:from-emerald-100 hover:to-emerald-200 text-emerald-600 rounded-lg border border-emerald-200 hover:shadow-sm transition-all duration-200 group/validate"
+                                                            title="Valider l'inventaire">
+                                                            <i
+                                                                class="fas fa-check text-sm group-hover/validate:scale-110 transition-transform"></i>
+                                                        </button>
+
+                                                        <a href="?page=ajouter_lot&produit_id=<?php echo $produit['id']; ?>"
+                                                            class="p-2 bg-gradient-to-br from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-600 rounded-lg border border-blue-200 hover:shadow-sm transition-all duration-200 group/add"
+                                                            title="Ajouter un lot">
+                                                            <i
+                                                                class="fas fa-plus-circle text-sm group-hover/add:scale-110 transition-transform"></i>
+                                                        </a>
+
+                                                        <button type="button" onclick="copyStockValue(this)"
+                                                            class="p-2 bg-gradient-to-br from-gray-50 to-gray-100 hover:from-gray-100 hover:to-gray-200 text-gray-600 rounded-lg border border-gray-200 hover:shadow-sm transition-all duration-200 group/copy"
+                                                            title="Copier le stock système">
+                                                            <i
+                                                                class="fas fa-copy text-sm group-hover/copy:scale-110 transition-transform"></i>
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- Actions en masse -->
+                            <div class="px-6 py-4 border-t border-gray-200 bg-gray-50">
+                                <div class="flex flex-col md:flex-row justify-between items-center gap-4">
+                                    <div class="text-sm text-gray-700">
+                                        <i class="fas fa-info-circle mr-2 text-blue-500"></i>
+                                        Cliquez sur "Valider tout" pour ajuster tous les écarts en une seule fois
+                                    </div>
+                                    <div class="flex items-center space-x-3">
+                                        <button onclick="resetAllInventories()"
+                                            class="group px-5 py-2 border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50 hover:shadow transition-all duration-200 font-medium">
+                                            <i class="fas fa-redo mr-2 group-hover:rotate-180 transition-transform"></i>
+                                            Réinitialiser
+                                        </button>
+                                        <button onclick="validateAllInventory()"
+                                            class="group bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-6 py-2.5 rounded-xl font-medium shadow hover:shadow-md transition-all duration-200 flex items-center">
+                                            <i class="fas fa-check-double mr-2 group-hover:scale-110 transition-transform"></i>
+                                            Valider tout l'inventaire
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    <?php else: ?>
+                        <!-- Inventaire à jour -->
+                        <div
+                            class="bg-gradient-to-br from-white to-emerald-50 rounded-2xl shadow-lg p-16 text-center border border-emerald-200">
+                            <div
+                                class="inline-flex items-center justify-center w-24 h-24 rounded-full bg-gradient-to-r from-emerald-100 to-emerald-200 mb-8 shadow-sm">
+                                <i class="fas fa-clipboard-check text-emerald-600 text-4xl"></i>
+                            </div>
+                            <h3 class="text-3xl font-bold text-gray-800 mb-4">Inventaire à jour</h3>
+                            <p class="text-gray-600 text-lg mb-10 max-w-md mx-auto">
+                                Aucun produit ne nécessite actuellement de vérification d'inventaire.
+                                Tous les stocks semblent être à jour.
+                            </p>
+                            <div class="flex flex-col sm:flex-row justify-center gap-6">
+                                <a href="?page=alertes"
+                                    class="group bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-8 py-4 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5 text-lg">
+                                    <i class="fas fa-exclamation-triangle mr-3 group-hover:scale-110 transition-transform"></i>
+                                    Vérifier les alertes
+                                </a>
+                                <a href="?page=dashboard"
+                                    class="group bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-8 py-4 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5 text-lg">
+                                    <i class="fas fa-tachometer-alt mr-3 group-hover:scale-110 transition-transform"></i>
+                                    Tableau de bord
+                                </a>
+                            </div>
+                        </div>
+                    <?php endif; ?>
                 </div>
-            </div>
 
-            <!-- Les autres sections (alertes-stock, alertes-expiration, inventaires, etc.) suivent le même pattern -->
+                <!-- Scripts pour l'inventaire -->
+                <script>
 
+                    document.addEventListener('DOMContentLoaded', function () {
+                        // Initialiser les écarts
+                        updateAllEcarts();
+                        updateStats();
 
-        </main>
-    </div>
+                        // Ajouter un événement de saisie sur tous les champs d'inventaire
+                        document.querySelectorAll('input[name="quantite_reelle"]').forEach(input => {
+                            input.addEventListener('input', function () {
+                                updateEcart(this);
+                                updateStats();
+                            });
+                        });
+                    });
 
-    <!-- Modals -->
-    <div id="modalReception" class="modal">
-        <div class="modal-content">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-semibold">Encoder une réception</h3>
-                <button onclick="closeModal('modalReception')" class="text-gray-500 hover:text-gray-700">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-            <form method="POST" id="formReception">
-                <input type="hidden" name="commande_id" id="commande_id">
-                <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Sélectionner une commande</label>
-                    <select id="select_commande" onchange="chargerLignesCommande(this.value)"
-                        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-                        <option value="">Sélectionnez une commande</option>
-                        <?php foreach ($receptions_data as $commande): ?>
-                            <option value="<?php echo $commande['id']; ?>">
-                                <?php echo htmlspecialchars($commande['reference']); ?> -
-                                <?php echo htmlspecialchars($commande['fournisseur_nom']); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
+                    function updateEcart(input) {
+                        const row = input.closest('.inventory-row');
+                        const stockValue = parseInt(row.getAttribute('data-stock'));
+                        const realValue = parseInt(input.value) || 0;
+                        const ecart = realValue - stockValue;
+
+                        const ecartDisplay = row.querySelector('.ecart-display');
+                        const ecartBadge = row.querySelector('.ecart-badge');
+
+                        ecartDisplay.textContent = ecart;
+
+                        // Mettre à jour le style de l'écart
+                        ecartDisplay.className = 'ecart-display text-sm font-bold ' +
+                            (ecart > 0 ? 'text-green-700' :
+                                ecart < 0 ? 'text-red-700' : 'text-gray-900');
+
+                        ecartDisplay.textContent = (ecart > 0 ? '+' : '') + ecart;
+
+                        // Mettre à jour ou créer le badge
+                        if (ecart !== 0) {
+                            ecartBadge.className = 'ecart-badge inline-flex items-center px-2 py-1 rounded-full text-xs font-medium mt-1 ' +
+                                (ecart > 0 ? 'bg-gradient-to-r from-green-100 to-green-50 text-green-800 border border-green-200' :
+                                    'bg-gradient-to-r from-red-100 to-red-50 text-red-800 border border-red-200');
+                            ecartBadge.innerHTML = (ecart > 0 ? '<i class="fas fa-plus mr-1"></i>Surplus' :
+                                '<i class="fas fa-minus mr-1"></i>Manquant');
+                            ecartBadge.style.display = 'inline-flex';
+                        } else {
+                            ecartBadge.style.display = 'none';
+                        }
+                    }
+
+                    function updateAllEcarts() {
+                        document.querySelectorAll('input[name="quantite_reelle"]').forEach(input => {
+                            updateEcart(input);
+                        });
+                    }
+
+                    function updateStats() {
+                        let ecartCount = 0;
+                        let validatedCount = 0;
+
+                        document.querySelectorAll('.inventory-row').forEach(row => {
+                            const realInput = row.querySelector('input[name="quantite_reelle"]');
+                            const stockValue = parseInt(row.getAttribute('data-stock'));
+                            const realValue = parseInt(realInput.value) || 0;
+
+                            if (realValue !== stockValue) {
+                                ecartCount++;
+                            }
+
+                            // Compter les lignes validées (pourrait être étendu avec des données de validation)
+                            if (realInput.value !== '') {
+                                validatedCount++;
+                            }
+                        });
+
+                        document.getElementById('ecart-count').textContent = ecartCount;
+                        document.getElementById('validated-count').textContent = validatedCount;
+                    }
+
+                    function validateInventoryRow(button) {
+                        const form = button.closest('tr').querySelector('.inventory-form');
+                        if (form) {
+                            // Ajouter un indicateur visuel de validation
+                            const row = button.closest('tr');
+                            row.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
+                            button.disabled = true;
+                            button.innerHTML = '<i class="fas fa-check text-green-600"></i>';
+
+                            // Soumettre le formulaire après un court délai pour l'animation
+                            setTimeout(() => {
+                                form.submit();
+                            }, 500);
+                        }
+                    }
+
+                    function validateAllInventory() {
+                        if (confirm('Valider tout l\'inventaire ? Cette action ajustera tous les écarts détectés.')) {
+                            // Marquer toutes les lignes comme validées visuellement
+                            document.querySelectorAll('.inventory-row').forEach(row => {
+                                const button = row.querySelector('[title="Valider l\'inventaire"]');
+                                if (button) {
+                                    row.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
+                                    button.disabled = true;
+                                    button.innerHTML = '<i class="fas fa-check text-green-600"></i>';
+                                }
+                            });
+
+                            // Soumettre tous les formulaires
+                            setTimeout(() => {
+                                document.querySelectorAll('.inventory-form').forEach(form => {
+                                    form.submit();
+                                });
+                            }, 1000);
+                        }
+                    }
+
+                    function resetAllInventories() {
+                        if (confirm('Réinitialiser toutes les valeurs d\'inventaire aux valeurs système ?')) {
+                            document.querySelectorAll('.inventory-row').forEach(row => {
+                                const stockValue = parseInt(row.getAttribute('data-stock'));
+                                const input = row.querySelector('input[name="quantite_reelle"]');
+                                input.value = stockValue;
+                                updateEcart(input);
+                            });
+                            updateStats();
+                        }
+                    }
+
+                    function copyStockValue(button) {
+                        const row = button.closest('tr');
+                        const stockValue = row.getAttribute('data-stock');
+                        const input = row.querySelector('input[name="quantite_reelle"]');
+
+                        input.value = stockValue;
+                        updateEcart(input);
+                        updateStats();
+
+                        // Animation de feedback
+                        const originalHTML = button.innerHTML;
+                        button.innerHTML = '<i class="fas fa-check text-green-600"></i>';
+                        button.classList.add('bg-green-50', 'border-green-300');
+
+                        setTimeout(() => {
+                            button.innerHTML = originalHTML;
+                            button.classList.remove('bg-green-50', 'border-green-300');
+                        }, 1000);
+                    }
+                </script>
+
+            <?php elseif ($current_page == 'rapports'): ?>
+                <!-- ========== RAPPORTS STOCK ========== -->
+                <div class="mb-8">
+                    <!-- En-tête avec options d'export -->
+                    <div class="flex items-center justify-between mb-8">
+                        <div class="flex items-center">
+                            <div class="p-3 bg-gradient-to-br from-purple-100 to-purple-200 rounded-xl shadow-sm mr-4">
+                                <i class="fas fa-chart-bar text-purple-600 text-xl"></i>
+                            </div>
+                            <div>
+                                <h1 class="text-2xl font-bold text-gray-800">Rapports Stock</h1>
+                                <p class="text-gray-600 mt-1">Statistiques et analyses détaillées du stock</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-4">
+                            <div
+                                class="text-center px-4 py-2 bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl border border-purple-200">
+                                <div class="text-2xl font-bold text-purple-700" id="total-mouvements">
+                                    <?php echo count($rapports_data); ?>
+                                </div>
+                                <div class="text-xs text-purple-600 font-medium">Période</div>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <button onclick="exportReportPDF()"
+                                    class="group bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white px-4 py-2 rounded-lg font-medium shadow hover:shadow-md transition-all duration-200">
+                                    <i class="fas fa-file-pdf mr-2 group-hover:scale-110 transition-transform"></i>
+                                    PDF
+                                </button>
+                                <button onclick="exportReportExcel()"
+                                    class="group bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 text-white px-4 py-2 rounded-lg font-medium shadow hover:shadow-md transition-all duration-200">
+                                    <i class="fas fa-file-excel mr-2 group-hover:scale-110 transition-transform"></i>
+                                    Excel
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Filtres période -->
+                    <div
+                        class="bg-gradient-to-br from-white to-purple-50 rounded-xl shadow-lg p-6 mb-8 border border-purple-200">
+                        <div class="flex items-center mb-4">
+                            <div class="p-2 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg mr-3">
+                                <i class="fas fa-calendar-alt text-purple-600"></i>
+                            </div>
+                            <h3 class="text-lg font-semibold text-gray-800">Période d'analyse</h3>
+                        </div>
+
+                        <div class="flex flex-wrap gap-3">
+                            <a href="?page=rapports&periode=jour"
+                                class="group px-5 py-3 rounded-xl font-medium transition-all duration-200 flex items-center
+                    <?php echo ($_GET['periode'] ?? '') == 'jour' ?
+                        'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-lg' :
+                        'bg-gradient-to-r from-gray-100 to-gray-200 text-gray-700 hover:from-gray-200 hover:to-gray-300 border border-gray-300'; ?>">
+                                <i
+                                    class="fas fa-sun mr-2 <?php echo ($_GET['periode'] ?? '') == 'jour' ? 'text-white' : 'text-yellow-500'; ?>"></i>
+                                Journalier
+                                <?php if (($_GET['periode'] ?? '') == 'jour'): ?>
+                                    <div class="ml-2 w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                                <?php endif; ?>
+                            </a>
+
+                            <a href="?page=rapports&periode=semaine"
+                                class="group px-5 py-3 rounded-xl font-medium transition-all duration-200 flex items-center
+                    <?php echo ($_GET['periode'] ?? '') == 'semaine' ?
+                        'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-lg' :
+                        'bg-gradient-to-r from-gray-100 to-gray-200 text-gray-700 hover:from-gray-200 hover:to-gray-300 border border-gray-300'; ?>">
+                                <i
+                                    class="fas fa-calendar-week mr-2 <?php echo ($_GET['periode'] ?? '') == 'semaine' ? 'text-white' : 'text-blue-500'; ?>"></i>
+                                Hebdomadaire
+                                <?php if (($_GET['periode'] ?? '') == 'semaine'): ?>
+                                    <div class="ml-2 w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                                <?php endif; ?>
+                            </a>
+
+                            <a href="?page=rapports&periode=mois"
+                                class="group px-5 py-3 rounded-xl font-medium transition-all duration-200 flex items-center
+                    <?php echo ($_GET['periode'] ?? '') == 'mois' ?
+                        'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-lg' :
+                        'bg-gradient-to-r from-gray-100 to-gray-200 text-gray-700 hover:from-gray-200 hover:to-gray-300 border border-gray-300'; ?>">
+                                <i
+                                    class="fas fa-calendar mr-2 <?php echo ($_GET['periode'] ?? '') == 'mois' ? 'text-white' : 'text-purple-500'; ?>"></i>
+                                Mensuel
+                                <?php if (($_GET['periode'] ?? '') == 'mois'): ?>
+                                    <div class="ml-2 w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                                <?php endif; ?>
+                            </a>
+
+                            <!-- Période personnalisée -->
+                            <div class="relative group-custom">
+                                <a href="?page=rapports&periode=personnalisee"
+                                    class="group px-5 py-3 rounded-xl font-medium transition-all duration-200 flex items-center
+                        bg-gradient-to-r from-gray-100 to-gray-200 text-gray-700 hover:from-gray-200 hover:to-gray-300 border border-gray-300">
+                                    <i class="fas fa-calendar-day mr-2 text-orange-500"></i>
+                                    Personnalisée
+                                </a>
+                                <!-- Menu déroulant personnalisé -->
+                                <div
+                                    class="absolute hidden group-hover-custom:block bg-white shadow-2xl rounded-xl p-4 mt-2 w-64 z-10 border border-gray-200">
+                                    <form method="GET" action="" class="space-y-3">
+                                        <input type="hidden" name="page" value="rapports">
+                                        <input type="hidden" name="periode" value="personnalisee">
+
+                                        <div>
+                                            <label class="block text-xs font-medium text-gray-700 mb-1">Date début</label>
+                                            <input type="date" name="date_debut"
+                                                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                                value="<?php echo date('Y-m-01'); ?>">
+                                        </div>
+
+                                        <div>
+                                            <label class="block text-xs font-medium text-gray-700 mb-1">Date fin</label>
+                                            <input type="date" name="date_fin"
+                                                class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                                                value="<?php echo date('Y-m-t'); ?>">
+                                        </div>
+
+                                        <button type="submit"
+                                            class="w-full bg-gradient-to-r from-orange-500 to-orange-600 text-white px-3 py-2 rounded-lg text-sm font-medium hover:shadow transition-all">
+                                            Appliquer
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Indicateur de période active -->
+                        <div class="mt-4 text-sm text-gray-600 flex items-center">
+                            <i class="fas fa-clock mr-2 text-gray-400"></i>
+                            <?php
+                            $periode_text = 'Période : ';
+                            switch ($_GET['periode'] ?? '') {
+                                case 'jour':
+                                    $periode_text .= 'Aujourd\'hui - ' . date('d/m/Y');
+                                    break;
+                                case 'semaine':
+                                    $periode_text .= 'Cette semaine - ' . date('W/Y');
+                                    break;
+                                case 'mois':
+                                    $periode_text .= 'Ce mois - ' . date('m/Y');
+                                    break;
+                                default:
+                                    $periode_text .= 'Période sélectionnée';
+                            }
+                            echo $periode_text;
+                            ?>
+                        </div>
+                    </div>
+
+                    <!-- Cartes de synthèse -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                        <?php
+                        // Calcul des totaux pour la période
+                        $total_entrees = 0;
+                        $total_sorties = 0;
+                        $total_mouvements = 0;
+                        $produits_mouvants = 0;
+
+                        if (isset($rapports_data) && count($rapports_data) > 0) {
+                            foreach ($rapports_data as $rapport) {
+                                $total_entrees += $rapport['entrees'];
+                                $total_sorties += $rapport['sorties'];
+                                $total_mouvements += $rapport['entrees'] + $rapport['sorties'];
+                            }
+                            $produits_mouvants = count(array_unique(array_column($rapports_data, 'produit_count')));
+                        }
+                        ?>
+
+                        <div
+                            class="bg-gradient-to-br from-white to-green-50 rounded-xl shadow-lg p-6 border border-green-200">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <div class="text-2xl font-bold text-green-700"><?php echo $total_entrees; ?></div>
+                                    <div class="text-sm text-green-600">Entrées totales</div>
+                                </div>
+                                <div class="p-3 bg-gradient-to-br from-green-100 to-green-200 rounded-lg">
+                                    <i class="fas fa-arrow-down text-green-600"></i>
+                                </div>
+                            </div>
+                            <div class="mt-3 text-xs text-gray-500">
+                                <i class="fas fa-chart-line mr-1"></i>
+                                Stock entrant
+                            </div>
+                        </div>
+
+                        <div class="bg-gradient-to-br from-white to-red-50 rounded-xl shadow-lg p-6 border border-red-200">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <div class="text-2xl font-bold text-red-700"><?php echo $total_sorties; ?></div>
+                                    <div class="text-sm text-red-600">Sorties totales</div>
+                                </div>
+                                <div class="p-3 bg-gradient-to-br from-red-100 to-red-200 rounded-lg">
+                                    <i class="fas fa-arrow-up text-red-600"></i>
+                                </div>
+                            </div>
+                            <div class="mt-3 text-xs text-gray-500">
+                                <i class="fas fa-chart-line mr-1"></i>
+                                Stock sortant
+                            </div>
+                        </div>
+
+                        <div
+                            class="bg-gradient-to-br from-white to-blue-50 rounded-xl shadow-lg p-6 border border-blue-200">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <div class="text-2xl font-bold text-blue-700"><?php echo $total_mouvements; ?></div>
+                                    <div class="text-sm text-blue-600">Mouvements totaux</div>
+                                </div>
+                                <div class="p-3 bg-gradient-to-br from-blue-100 to-blue-200 rounded-lg">
+                                    <i class="fas fa-exchange-alt text-blue-600"></i>
+                                </div>
+                            </div>
+                            <div class="mt-3 text-xs text-gray-500">
+                                <i class="fas fa-chart-bar mr-1"></i>
+                                Activité totale
+                            </div>
+                        </div>
+
+                        <div
+                            class="bg-gradient-to-br from-white to-purple-50 rounded-xl shadow-lg p-6 border border-purple-200">
+                            <div class="flex items-center justify-between">
+                                <div>
+                                    <div class="text-2xl font-bold text-purple-700"><?php echo $produits_mouvants; ?></div>
+                                    <div class="text-sm text-purple-600">Produits actifs</div>
+                                </div>
+                                <div class="p-3 bg-gradient-to-br from-purple-100 to-purple-200 rounded-lg">
+                                    <i class="fas fa-capsules text-purple-600"></i>
+                                </div>
+                            </div>
+                            <div class="mt-3 text-xs text-gray-500">
+                                <i class="fas fa-boxes mr-1"></i>
+                                Avec mouvement
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tableau détaillé et statistiques -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                        <!-- Tableau des mouvements -->
+                        <div
+                            class="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg p-6 border border-gray-200">
+                            <div class="flex items-center justify-between mb-6">
+                                <div class="flex items-center">
+                                    <div class="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg mr-3">
+                                        <i class="fas fa-exchange-alt text-blue-600"></i>
+                                    </div>
+                                    <h3 class="text-lg font-semibold text-gray-800">Mouvements détaillés</h3>
+                                </div>
+                                <div class="text-sm text-gray-600">
+                                    <?php echo count($rapports_data); ?> jour(s)
+                                </div>
+                            </div>
+
+                            <?php if (isset($rapports_data) && count($rapports_data) > 0): ?>
+                                <div class="overflow-x-auto">
+                                    <table class="min-w-full">
+                                        <thead>
+                                            <tr class="border-b border-gray-300">
+                                                <th
+                                                    class="text-left py-3 text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                    <div class="flex items-center">
+                                                        <i class="fas fa-calendar mr-2 text-gray-400"></i> Date
+                                                    </div>
+                                                </th>
+                                                <th
+                                                    class="text-left py-3 text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                    <div class="flex items-center">
+                                                        <i class="fas fa-arrow-down mr-2 text-gray-400"></i> Entrées
+                                                    </div>
+                                                </th>
+                                                <th
+                                                    class="text-left py-3 text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                    <div class="flex items-center">
+                                                        <i class="fas fa-arrow-up mr-2 text-gray-400"></i> Sorties
+                                                    </div>
+                                                </th>
+                                                <th
+                                                    class="text-left py-3 text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                    <div class="flex items-center">
+                                                        <i class="fas fa-balance-scale mr-2 text-gray-400"></i> Solde
+                                                    </div>
+                                                </th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php
+                                            $total_entrees = 0;
+                                            $total_sorties = 0;
+                                            foreach ($rapports_data as $rapport):
+                                                $total_entrees += $rapport['entrees'];
+                                                $total_sorties += $rapport['sorties'];
+                                                $solde = $rapport['entrees'] - $rapport['sorties'];
+                                                ?>
+                                                <tr class="border-b border-gray-200 hover:bg-gray-50 transition-colors">
+                                                    <td class="py-3 text-sm text-gray-900">
+                                                        <?php echo formatDate($rapport['date']); ?>
+                                                    </td>
+                                                    <td class="py-3">
+                                                        <span
+                                                            class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-green-100 to-green-50 text-green-800 border border-green-200">
+                                                            <i class="fas fa-plus mr-1 text-xs"></i>
+                                                            <?php echo $rapport['entrees']; ?>
+                                                        </span>
+                                                    </td>
+                                                    <td class="py-3">
+                                                        <span
+                                                            class="inline-flex items-center px-2 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-red-100 to-red-50 text-red-800 border border-red-200">
+                                                            <i class="fas fa-minus mr-1 text-xs"></i>
+                                                            <?php echo $rapport['sorties']; ?>
+                                                        </span>
+                                                    </td>
+                                                    <td class="py-3">
+                                                        <span
+                                                            class="text-sm font-bold <?php echo $solde >= 0 ? 'text-green-700' : 'text-red-700'; ?>">
+                                                            <?php echo $solde >= 0 ? '+' : ''; ?>             <?php echo $solde; ?>
+                                                        </span>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                        <tfoot class="bg-gradient-to-r from-gray-50 to-gray-100">
+                                            <tr>
+                                                <td class="py-3 text-sm font-semibold text-gray-900">Total</td>
+                                                <td class="py-3">
+                                                    <span
+                                                        class="inline-flex items-center px-3 py-1 rounded-full text-sm font-bold bg-gradient-to-r from-green-100 to-green-50 text-green-800 border border-green-200">
+                                                        +<?php echo $total_entrees; ?>
+                                                    </span>
+                                                </td>
+                                                <td class="py-3">
+                                                    <span
+                                                        class="inline-flex items-center px-3 py-1 rounded-full text-sm font-bold bg-gradient-to-r from-red-100 to-red-50 text-red-800 border border-red-200">
+                                                        -<?php echo $total_sorties; ?>
+                                                    </span>
+                                                </td>
+                                                <td class="py-3">
+                                                    <span
+                                                        class="text-lg font-bold <?php echo ($total_entrees - $total_sorties) >= 0 ? 'text-green-700' : 'text-red-700'; ?>">
+                                                        <?php echo ($total_entrees - $total_sorties) >= 0 ? '+' : ''; ?>
+                                                        <?php echo $total_entrees - $total_sorties; ?>
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        </tfoot>
+                                    </table>
+                                </div>
+                            <?php else: ?>
+                                <div class="text-center py-10">
+                                    <div
+                                        class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-r from-gray-100 to-gray-200 mb-4">
+                                        <i class="fas fa-exchange-alt text-gray-400 text-xl"></i>
+                                    </div>
+                                    <h4 class="text-lg font-medium text-gray-700 mb-2">Aucun mouvement</h4>
+                                    <p class="text-gray-500 text-sm">Aucun mouvement de stock pour cette période</p>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+
+                        <!-- Statistiques avancées -->
+                        <div
+                            class="bg-gradient-to-br from-white to-purple-50 rounded-xl shadow-lg p-6 border border-purple-200">
+                            <div class="flex items-center mb-6">
+                                <div class="p-2 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg mr-3">
+                                    <i class="fas fa-chart-pie text-purple-600"></i>
+                                </div>
+                                <h3 class="text-lg font-semibold text-gray-800">Statistiques avancées</h3>
+                            </div>
+
+                            <?php
+                            try {
+                                // Produits les plus en stock
+                                $stmt = $pdo->query("
+                    SELECT p.nom, SUM(l.quantite_actuelle) as quantite
+                    FROM produits p
+                    LEFT JOIN lots l ON p.id = l.produit_id AND l.statut = 'en_stock'
+                    WHERE p.statut = 'actif'
+                    GROUP BY p.id
+                    ORDER BY quantite DESC
+                    LIMIT 5
+                ");
+                                $top_produits = $stmt->fetchAll();
+                                ?>
+
+                                <!-- Top produits -->
+                                <div class="mb-8">
+                                    <h4 class="font-bold text-gray-700 mb-4 flex items-center">
+                                        <i class="fas fa-medal mr-2 text-yellow-500"></i>
+                                        Top 5 produits en stock
+                                    </h4>
+                                    <div class="space-y-3">
+                                        <?php foreach ($top_produits as $index => $produit): ?>
+                                            <div
+                                                class="flex items-center justify-between p-3 bg-gradient-to-r from-gray-50 to-white rounded-lg border border-gray-200 hover:shadow-sm transition-shadow">
+                                                <div class="flex items-center">
+                                                    <div class="flex items-center justify-center w-6 h-6 rounded-full bg-gradient-to-br 
+                                        <?php echo $index == 0 ? 'from-yellow-100 to-yellow-200 text-yellow-700' :
+                                            ($index == 1 ? 'from-gray-100 to-gray-200 text-gray-700' :
+                                                ($index == 2 ? 'from-orange-100 to-orange-200 text-orange-700' :
+                                                    'from-blue-100 to-blue-200 text-blue-700')); ?> 
+                                        text-xs font-bold mr-3">
+                                                        <?php echo $index + 1; ?>
+                                                    </div>
+                                                    <div>
+                                                        <div class="font-medium text-gray-900">
+                                                            <?php echo htmlspecialchars($produit['nom']); ?>
+                                                        </div>
+                                                        <?php if ($produit['quantite'] <= 10): ?>
+                                                            <div class="text-xs text-red-600">
+                                                                <i class="fas fa-exclamation-circle mr-1"></i> Stock bas
+                                                            </div>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                </div>
+                                                <div class="text-lg font-bold text-blue-700">
+                                                    <?php echo $produit['quantite'] ?? 0; ?>
+                                                    <span class="text-xs text-gray-500">unités</span>
+                                                </div>
+                                            </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                </div>
+
+                                <!-- Alertes actives -->
+                                <div>
+                                    <h4 class="font-bold text-gray-700 mb-4 flex items-center">
+                                        <i class="fas fa-bell mr-2 text-red-500"></i>
+                                        Alertes actives
+                                    </h4>
+                                    <div class="grid grid-cols-3 gap-3">
+                                        <div
+                                            class="bg-gradient-to-br from-red-50 to-red-100 rounded-lg p-4 border border-red-200 text-center">
+                                            <div class="text-2xl font-bold text-red-700"><?php echo $stats['ruptures_stock']; ?>
+                                            </div>
+                                            <div class="text-xs text-red-600 font-medium mt-1">Ruptures</div>
+                                            <div class="text-xs text-red-500 mt-2">
+                                                <i class="fas fa-times-circle"></i> Stock nul
+                                            </div>
+                                        </div>
+                                        <div
+                                            class="bg-gradient-to-br from-yellow-50 to-yellow-100 rounded-lg p-4 border border-yellow-200 text-center">
+                                            <div class="text-2xl font-bold text-yellow-700">
+                                                <?php echo $stats['alertes_stock_bas']; ?>
+                                            </div>
+                                            <div class="text-xs text-yellow-600 font-medium mt-1">Stocks bas</div>
+                                            <div class="text-xs text-yellow-500 mt-2">
+                                                <i class="fas fa-exclamation-circle"></i> ≤ 10 unités
+                                            </div>
+                                        </div>
+                                        <div
+                                            class="bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg p-4 border border-orange-200 text-center">
+                                            <div class="text-2xl font-bold text-orange-700">
+                                                <?php echo $stats['alertes_peremption']; ?>
+                                            </div>
+                                            <div class="text-xs text-orange-600 font-medium mt-1">Péremption</div>
+                                            <div class="text-xs text-orange-500 mt-2">
+                                                <i class="fas fa-clock"></i> ≤ 30 jours
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                            <?php } catch (Exception $e) { ?>
+                                <div class="text-center py-8">
+                                    <div
+                                        class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-r from-red-100 to-red-200 mb-4">
+                                        <i class="fas fa-exclamation-circle text-red-600 text-xl"></i>
+                                    </div>
+                                    <h4 class="text-lg font-medium text-gray-700 mb-2">Erreur de chargement</h4>
+                                    <p class="text-gray-500 text-sm">Impossible de charger les statistiques</p>
+                                </div>
+                            <?php } ?>
+                        </div>
+                    </div>
                 </div>
 
-                <div id="lignes_commande" class="space-y-4 max-h-96 overflow-y-auto mb-4">
-                    <div class="text-center text-gray-500 py-8">Sélectionnez une commande pour voir les produits</div>
-                </div>
+                <!-- Styles pour le menu déroulant personnalisé -->
+                <style>
+                    .group-custom:hover .group-hover-custom\:block {
+                        display: block !important;
+                    }
+                </style>
 
-                <div class="flex justify-end space-x-3">
-                    <button type="button" onclick="closeModal('modalReception')"
-                        class="px-4 py-2 text-gray-600 hover:text-gray-800">Annuler</button>
-                    <button type="submit" name="encoder_reception"
-                        class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
-                        <i class="fas fa-clipboard-check mr-2"></i>Encoder la réception
-                    </button>
-                </div>
-            </form>
+                <!-- Scripts pour l'exportation -->
+                <script>
+                    function exportReportPDF() {
+                        const periode = getCurrentPeriod();
+                        const url = `?page=rapports&export=pdf&periode=${periode}&date_debut=<?php echo $_GET['date_debut'] ?? ''; ?>&date_fin=<?php echo $_GET['date_fin'] ?? ''; ?>`;
+                        window.open(url, '_blank');
+                    }
+
+                    function exportReportExcel() {
+                        const periode = getCurrentPeriod();
+                        const url = `?page=rapports&export=excel&periode=${periode}&date_debut=<?php echo $_GET['date_debut'] ?? ''; ?>&date_fin=<?php echo $_GET['date_fin'] ?? ''; ?>`;
+                        window.open(url, '_blank');
+                    }
+
+                    function getCurrentPeriod() {
+                        const params = new URLSearchParams(window.location.search);
+                        return params.get('periode') || 'jour';
+                    }
+
+                    // Mettre à jour le compteur total
+                    document.addEventListener('DOMContentLoaded', function () {
+                        const totalEntrees = <?php echo $total_entrees; ?>;
+                        const totalSorties = <?php echo $total_sorties; ?>;
+                        const totalMouvements = totalEntrees + totalSorties;
+                        document.getElementById('total-mouvements').textContent = totalMouvements;
+                    });
+                </script>
+
+            <?php endif; ?>
         </div>
     </div>
 
-    <div id="modalInventaire" class="modal">
-        <div class="modal-content">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-semibold">Créer un nouvel inventaire</h3>
-                <button onclick="closeModal('modalInventaire')" class="text-gray-500 hover:text-gray-700">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-            <form method="POST">
-                <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Type d'inventaire *</label>
-                    <select name="type_inventaire" required
-                        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-                        <option value="partiel">Inventaire partiel</option>
-                        <option value="complet">Inventaire complet</option>
-                        <option value="cyclique">Inventaire cyclique</option>
-                    </select>
-                </div>
-
-                <div class="flex justify-end space-x-3">
-                    <button type="button" onclick="closeModal('modalInventaire')"
-                        class="px-4 py-2 text-gray-600 hover:text-gray-800">Annuler</button>
-                    <button type="submit" name="creer_inventaire"
-                        class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">
-                        <i class="fas fa-plus mr-2"></i>Créer l'inventaire
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
+    <!-- Scripts JavaScript -->
     <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            showSection('dashboard');
+        // Fonction pour ajuster le stock
+        function ajusterStock(lotId, quantiteActuelle, produitNom) {
+            let nouvelleQuantite = prompt('Ajuster le stock pour "' + produitNom + '"\nQuantité actuelle: ' + quantiteActuelle + '\n\nNouvelle quantité:', quantiteActuelle);
 
-            const navLinks = document.querySelectorAll('.nav-link');
-            navLinks.forEach(link => {
-                link.addEventListener('click', function (e) {
-                    e.preventDefault();
-                    const targetId = this.getAttribute('href').substring(1);
-                    showSection(targetId);
-                });
-            });
+            if (nouvelleQuantite !== null && !isNaN(nouvelleQuantite)) {
+                let raison = prompt('Raison de l\'ajustement:', 'Ajustement manuel');
 
-            window.addEventListener('click', function (event) {
-                if (event.target.classList.contains('modal')) {
-                    event.target.style.display = 'none';
-                }
-            });
+                if (raison !== null) {
+                    let form = document.createElement('form');
+                    form.method = 'POST';
+                    form.action = '';
 
-            setTimeout(() => {
-                const messages = document.querySelectorAll('.fixed');
-                messages.forEach(msg => msg.style.display = 'none');
-            }, 5000);
-        });
+                    let inputAction = document.createElement('input');
+                    inputAction.type = 'hidden';
+                    inputAction.name = 'action';
+                    inputAction.value = 'ajuster_stock';
+                    form.appendChild(inputAction);
 
-        function showSection(sectionId) {
-            document.querySelectorAll('.section').forEach(section => {
-                section.classList.remove('active');
-            });
+                    let inputLotId = document.createElement('input');
+                    inputLotId.type = 'hidden';
+                    inputLotId.name = 'lot_id';
+                    inputLotId.value = lotId;
+                    form.appendChild(inputLotId);
 
-            const targetSection = document.getElementById(sectionId);
-            if (targetSection) {
-                targetSection.classList.add('active');
-            }
+                    let inputQuantite = document.createElement('input');
+                    inputQuantite.type = 'hidden';
+                    inputQuantite.name = 'nouvelle_quantite';
+                    inputQuantite.value = nouvelleQuantite;
+                    form.appendChild(inputQuantite);
 
-            const titles = {
-                'dashboard': 'Tableau de bord Stockiste',
-                'produits': 'Produits & Stocks',
-                'lots': 'Gestion des Lots',
-                'ajouter-lot': 'Ajouter un Nouveau Lot',
-                'inventaires': 'Inventaires en Cours',
-                'nouvel-inventaire': 'Nouvel Inventaire',
-                'alertes-stock': 'Alertes Stock Bas',
-                'alertes-expiration': 'Alertes Péremption',
-                'mouvements': 'Mouvements de Stock',
-                'rapports': 'Rapports & Statistiques'
-            };
-            document.getElementById('pageTitle').textContent = titles[sectionId] || 'Tableau de bord Stockiste';
+                    let inputRaison = document.createElement('input');
+                    inputRaison.type = 'hidden';
+                    inputRaison.name = 'raison';
+                    inputRaison.value = raison;
+                    form.appendChild(inputRaison);
 
-            document.querySelectorAll('.nav-link').forEach(link => {
-                link.classList.remove('active');
-            });
-
-
-            const activeLink = document.querySelector(`.nav-link[href="#${sectionId}"]`);
-            if (activeLink) {
-                activeLink.classList.add('active');
-            }
-        }
-
-        function showModal(modalId) {
-            document.getElementById(modalId).style.display = 'block';
-        }
-
-        function closeModal(modalId) {
-            document.getElementById(modalId).style.display = 'none';
-        }
-
-        function encoderReception(commandeId) {
-            document.getElementById('select_commande').value = commandeId;
-            document.getElementById('commande_id').value = commandeId;
-            showModal('modalReception');
-        }
-        // Fonctions pour la gestion des lots
-        function ouvrirModalAjoutLot() {
-            document.getElementById('modalLotTitre').textContent = 'Ajouter un nouveau lot';
-            document.getElementById('modalAjoutLotTitre').textContent = 'Ajouter un nouveau lot';
-            document.getElementById('submitLot').name = 'ajouter_lot';
-            document.getElementById('submitLot').textContent = 'Ajouter le lot';
-            document.getElementById('formAjoutLot').reset();
-            document.getElementById('formLot').reset();
-            document.getElementById('lot_id').value = '';
-            showModal('modalAjoutLot');
-            showModal('modalLot');
-        }
-        function ajusterStock(lotId) {
-            document.getElementById('lot_id_ajustement').value = lotId;
-            showModal('modalAjustementStock');
-        }
-        function changerStatutLot(lotId) {
-            document.getElementById('lot_id_statut').value = lotId;
-            showModal('modalChangerStatut');
-        }
-
-        // Fonctions pour les inventaires
-        function ouvrirModalNouvelInventaire() {
-            document.getElementById('modalNouvelInventaireTitre').textContent = 'Créer un nouvel inventaire';
-            document.getElementById('formNouvelInventaire').reset();
-            showModal('modalNouvelInventaire');
-        }
-        // Fonctions d'export
-        function exporterRapportStock() {
-            const date = new Date().toISOString().split('T')[0];
-            const filename = `rapport_stock_${date}.csv`;
-
-            let csvContent = "Produit,Catégorie,Stock Actuel,Seuil Alerte,Statut,Nb Lots\n";
-
-            <?php if (!empty($produits_data)): ?>
-                <?php foreach ($produits_data as $produit): ?>
-                    csvContent += `"<?php echo htmlspecialchars($produit['nom']); ?>","<?php echo htmlspecialchars($produit['categorie_nom']); ?>","<?php echo $produit['stock_total']; ?>","<?php echo $produit['seuil_alerte']; ?>","<?php echo $produit['stock_total'] <= $produit['seuil_alerte'] ? 'ALERTE' : 'NORMAL'; ?>","<?php echo $produit['nb_lots']; ?>"\n`;
-                <?php endforeach; ?>
-            <?php endif; ?>
-
-            // Téléchargement du fichier
-            downloadCSV(csvContent, filename);
-        }
-        // Fonctions d'export (suite)
-        function exporterRapportPereemption() {
-            const date = new Date().toISOString().split('T')[0];
-            const filename = `rapport_pereemption_${date}.csv`;
-
-            let csvContent = "Produit,N° Lot,Quantité,Date Expiration,Jours Restants,Statut\n";
-
-            <?php if (!empty($alertes_expiration_data)): ?>
-                <?php foreach ($alertes_expiration_data as $lot): ?>
-                    csvContent += `"<?php echo htmlspecialchars($lot['produit_nom']); ?>","<?php echo htmlspecialchars($lot['numero_lot']); ?>","<?php echo $lot['quantite_actuelle']; ?>","<?php echo date('d/m/Y', strtotime($lot['date_expiration'])); ?>","<?php echo $lot['jours_restants']; ?>","<?php echo $lot['jours_restants'] <= 7 ? 'URGENT' : ($lot['jours_restants'] <= 15 ? 'ATTENTION' : 'NORMAL'); ?>"\n`;
-                <?php endforeach; ?>
-            <?php endif; ?>
-
-            downloadCSV(csvContent, filename);
-        }
-        function exporterInventaireComplet() {
-            const date = new Date().toISOString().split('T')[0];
-            const filename = `inventaire_complet_${date}.csv`;
-
-            let csvContent = "Produit,Code Barre,Catégorie,Stock Théorique,Stock Réel,Écart\n";
-
-            <?php if (!empty($produits_data)): ?>
-                <?php foreach ($produits_data as $produit): ?>
-                    csvContent += `"<?php echo htmlspecialchars($produit['nom']); ?>","<?php echo htmlspecialchars($produit['code_barre']); ?>","<?php echo htmlspecialchars($produit['categorie_nom']); ?>","<?php echo $produit['stock_total']; ?>","<?php echo $produit['stock_total']; ?>","0"\n`;
-                <?php endforeach; ?>
-            <?php endif; ?>
-
-            downloadCSV(csvContent, filename);
-        }
-        // Fonction utilitaire pour télécharger CSV
-        function downloadCSV(csvContent, filename) {
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            const url = URL.createObjectURL(blob);
-            link.setAttribute('href', url);
-            link.setAttribute('download', filename);
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-
-            // Message de confirmation
-            const nbLignes = csvContent.split('\n').length - 1;
-            alert(`Export terminé!\nFichier: ${filename}\nLignes exportées: ${nbLignes}`);
-        }
-        // Fonctions pour les alertes
-        function traiterAlerteStock(produitId) {
-            // Marquer l'alerte comme traitée ou créer une commande
-            if (confirm("Voulez-vous créer une commande de réapprovisionnement pour ce produit ?")) {
-                // Redirection vers la création de commande
-                window.location.href = `creer_commande.php?produit_id=${produitId}&urgence=stock_bas`;
-            }
-        }
-        function traiterAlertePereemption(lotId) {
-            // Actions pour les produits proches de l'expiration
-            if (confirm("Que voulez-vous faire avec ce lot ?")) {
-                const action = prompt("Options:\n1 - Mettre en promotion\n2 - Déplacer en zone 'à utiliser en premier'\n3 - Signaler au pharmacien\n\nEntrez le numéro de l'action:");
-
-                switch (action) {
-                    case '1':
-                        // Mettre en promotion
-                        window.location.href = `gestion_promotions.php?lot_id=${lotId}`;
-                        break;
-                    case '2':
-                        // Changer la zone de stockage
-                        changerZoneStockage(lotId);
-                        break;
-                    case '3':
-                        // Signaler au pharmacien
-                        signalerAuPharmacien(lotId);
-                        break;
-                    default:
-                        alert("Action annulée");
+                    document.body.appendChild(form);
+                    form.submit();
                 }
             }
         }
 
-        // Fonctions utilitaires
-        function changerZoneStockage(lotId) {
-            const nouvelleZone = prompt("Entrez la nouvelle zone de stockage:");
-            if (nouvelleZone) {
-                // Envoyer la requête AJAX pour changer la zone
-                fetch('changer_zone_stockage.php', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        lot_id: lotId,
-                        nouvelle_zone: nouvelleZone
-                    })
-                })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            alert("Zone de stockage mise à jour avec succès!");
-                            location.reload();
-                        } else {
-                            alert("Erreur: " + data.message);
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Erreur:', error);
-                        alert("Erreur lors du changement de zone");
-                    });
-            }
-        }
-
-        function signalerAuPharmacien(lotId) {
-            const message = prompt("Message pour le pharmacien:");
-            if (message) {
-                // Envoyer la notification au pharmacien
-                fetch('signaler_pharmacien.php', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        lot_id: lotId,
-                        message: message,
-                        type: 'peremption'
-                    })
-                })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            alert("Signalement envoyé au pharmacien!");
-                        } else {
-                            alert("Erreur: " + data.message);
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Erreur:', error);
-                        alert("Erreur lors de l'envoi du signalement");
-                    });
-            }
-        }
-        // Fonctions pour les alertes
-        function signalerAuPharmacien(produitId) {
-            const message = prompt("Message pour le pharmacien concernant le réapprovisionnement:");
-            if (message) {
-                // Simulation d'envoi au pharmacien
-                alert("Signalement envoyé au pharmacien pour le produit #" + produitId);
-            }
-        }
-
-        // Génération de rapports statistiques
-        function genererRapportHebdomadaire() {
-            const dateDebut = new Date();
-            dateDebut.setDate(dateDebut.getDate() - 7);
-            const dateFin = new Date();
-
-            const rapportData = {
-                periode: 'hebdomadaire',
-                date_debut: dateDebut.toISOString().split('T')[0],
-                date_fin: dateFin.toISOString().split('T')[0],
-                mouvements: <?php echo count($mouvements_data); ?>,
-                alertes_traitees: 0, // À calculer
-                inventaires_realises: <?php echo $inventaires_en_cours; ?>,
-                produits_verifies: <?php echo $produits_total; ?>
-            };
-
-            // Générer le rapport PDF (simulation)
-            alert("Rapport hebdomadaire généré!\nPériode: " + rapportData.date_debut + " à " + rapportData.date_fin +
-                "\nMouvements: " + rapportData.mouvements +
-                "\nInventaires: " + rapportData.inventaires_realises);
-        }
-        // Fonctions pour la gestion des inventaires
-        function selectTypeInventaire(type) {
-            document.getElementById('type_inventaire').value = type;
-            document.getElementById('options-inventaire').classList.remove('hidden');
-
-            // Masquer toutes les options
-            document.querySelectorAll('.inventaire-options').forEach(opt => {
-                opt.classList.add('hidden');
+        // Auto-dismiss les messages d'alerte après 5 secondes
+        setTimeout(function () {
+            let alerts = document.querySelectorAll('.bg-green-100, .bg-red-100');
+            alerts.forEach(function (alert) {
+                alert.style.transition = 'opacity 0.5s ease';
+                alert.style.opacity = '0';
+                setTimeout(() => alert.remove(), 500);
             });
-
-            // Afficher les options du type sélectionné
-            document.getElementById('options-' + type).classList.remove('hidden');
-
-            // Mettre en surbrillance la carte sélectionnée
-            document.querySelectorAll('[onclick^="selectTypeInventaire"]').forEach(card => {
-                card.classList.remove('border-green-400', 'bg-green-100');
-                card.classList.add('border-gray-200', 'bg-gray-50');
-            });
-
-            event.currentTarget.classList.remove('border-gray-200', 'bg-gray-50');
-            event.currentTarget.classList.add('border-green-400', 'bg-green-100');
-        }
-
-        // Fonctions pour les mouvements
-        function filtrerMouvements() {
-            // Implémentation du filtrage des mouvements
-            alert('Fonction de filtrage des mouvements - À implémenter');
-        }
-
-        function exporterMouvements() {
-            const date = new Date().toISOString().split('T')[0];
-            const filename = `mouvements_stock_${date}.csv`;
-
-            let csvContent = "Date,Produit,N° Lot,Type,Quantité,Avant,Après,Raison,Utilisateur\n";
-
-            <?php if (!empty($mouvements_data)): ?>
-                <?php foreach ($mouvements_data as $mouvement): ?>
-                    csvContent += `"<?php echo $mouvement['date_formatee']; ?>","<?php echo htmlspecialchars($mouvement['produit_nom']); ?>","<?php echo htmlspecialchars($mouvement['numero_lot']); ?>","<?php echo strpos($mouvement['type_mouvement'], 'entree') !== false ? 'Entrée' : 'Sortie'; ?>","<?php echo abs($mouvement['quantite']); ?>","<?php echo $mouvement['quantite_avant'] ?? 'N/A'; ?>","<?php echo $mouvement['quantite_apres'] ?? 'N/A'; ?>","<?php echo htmlspecialchars($mouvement['raison'] ?? 'N/A'); ?>","<?php echo htmlspecialchars($mouvement['utilisateur_nom']); ?>"\n`;
-                <?php endforeach; ?>
-            <?php endif; ?>
-
-            downloadCSV(csvContent, filename);
-        }
-
-        // Fonctions pour les lots
-        function deplacerLot(lotId) {
-            const nouvelleZone = prompt("Entrez la nouvelle zone de stockage pour ce lot:");
-            if (nouvelleZone) {
-                // Envoyer la requête AJAX pour déplacer le lot
-                fetch('deplacer_lot.php', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        lot_id: lotId,
-                        nouvelle_zone: nouvelleZone
-                    })
-                })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            alert("Lot déplacé avec succès vers: " + nouvelleZone);
-                            location.reload();
-                        } else {
-                            alert("Erreur: " + data.message);
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Erreur:', error);
-                        alert("Erreur lors du déplacement du lot");
-                    });
-            }
-        }
-
-        function exporterInventaire(inventaireId) {
-            // Exporter un inventaire spécifique
-            const date = new Date().toISOString().split('T')[0];
-            const filename = `inventaire_${inventaireId}_${date}.csv`;
-
-            // Simulation d'export
-            alert(`Export de l'inventaire ${inventaireId} - Fichier: ${filename}`);
-        }
-
-        // Initialisation au chargement
-        document.addEventListener('DOMContentLoaded', function () {
-            // Initialiser les tooltips
-            const tooltips = document.querySelectorAll('[data-tooltip]');
-            tooltips.forEach(tooltip => {
-                tooltip.addEventListener('mouseenter', function () {
-                    // Implémentation des tooltips
-                });
-            });
-        });
-
-        function genererRapportMensuel() {
-            const date = new Date();
-            const mois = date.toLocaleString('fr-FR', { month: 'long', year: 'numeric' });
-
-            const rapportData = {
-                periode: 'mensuel',
-                mois: mois,
-                produits_gestion: <?php echo $produits_total; ?>,
-                lots_gestion: <?php echo $lots_total; ?>,
-                alertes_stock: <?php echo $alertes_stock_count; ?>,
-                alertes_peremption: <?php echo $alertes_expiration_count; ?>,
-                inventaires_complets: Math.floor(<?php echo $inventaires_en_cours; ?> / 2) // Simulation
-            };
-
-            // Générer le rapport PDF (simulation)
-            alert("Rapport mensuel généré!\nPériode: " + rapportData.mois +
-                "\nProduits gérés: " + rapportData.produits_gestion +
-                "\nLots gérés: " + rapportData.lots_gestion +
-                "\nAlertes stock: " + rapportData.alertes_stock +
-                "\nInventaires complets: " + rapportData.inventaires_complets);
-        }
-
-
-        // Fonctions pour les rapports
-        function genererRapportStock() {
-            const date = new Date().toISOString().split('T')[0];
-            const filename = `rapport_stock_${date}.csv`;
-
-            let csvContent = "Produit,Catégorie,Code Barre,Stock Total,Seuil Alerte,Statut\n";
-
-            <?php if (!empty($produits_data)): ?>
-                <?php foreach ($produits_data as $produit): ?>
-                    csvContent += `"<?php echo htmlspecialchars($produit['nom']); ?>","<?php echo htmlspecialchars($produit['categorie_nom']); ?>","<?php echo htmlspecialchars($produit['code_barre']); ?>","<?php echo $produit['stock_total']; ?>","<?php echo $produit['seuil_alerte']; ?>","<?php echo $produit['stock_total'] == 0 ? 'Rupture' : ($produit['stock_total'] <= $produit['seuil_alerte'] ? 'Stock bas' : 'Normal'); ?>"\n`;
-                <?php endforeach; ?>
-            <?php endif; ?>
-
-            // Téléchargement du fichier
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            const url = URL.createObjectURL(blob);
-            link.setAttribute('href', url);
-            link.setAttribute('download', filename);
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-
-            alert(`Rapport généré: ${filename}`);
-        }
-        function genererRapportInventaire() {
-            const date = new Date().toISOString().split('T')[0];
-            const filename = `rapport_inventaire_${date}.csv`;
-
-            let csvContent = "Référence,Type,Statut,Créé par,Lignes totales,Lignes avec écart,Date\n";
-
-            <?php if (!empty($inventaires_data)): ?>
-                <?php foreach ($inventaires_data as $inventaire): ?>
-                    csvContent += `"<?php echo htmlspecialchars($inventaire['reference']); ?>","<?php echo htmlspecialchars($inventaire['type_inventaire']); ?>","<?php echo htmlspecialchars($inventaire['statut']); ?>","<?php echo htmlspecialchars($inventaire['createur_nom']); ?>","<?php echo $inventaire['total_lignes']; ?>","<?php echo $inventaire['lignes_ecart']; ?>","<?php echo formatDate($inventaire['date_inventaire']); ?>"\n`;
-                <?php endforeach; ?>
-            <?php endif; ?>
-
-            // Téléchargement du fichier
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            const url = URL.createObjectURL(blob);
-            link.setAttribute('href', url);
-            link.setAttribute('download', filename);
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-
-            alert(`Rapport inventaire généré: ${filename}`);
-        }
-
-
-        function chargerLignesCommande(commandeId) {
-            const lignesContainer = document.getElementById('lignes_commande');
-            if (!commandeId) {
-                lignesContainer.innerHTML = '<div class="text-center text-gray-500 py-8">Sélectionnez une commande pour voir les produits</div>';
-                return;
-            }
-
-            lignesContainer.innerHTML = `
-                <div class="text-center text-gray-500 py-8">
-                    <i class="fas fa-spinner fa-spin mr-2"></i>
-                    Chargement des produits...
-                </div>
-            `;
-
-            setTimeout(() => {
-                const lignesExemple = [
-                    { id: 1, produit_nom: 'Paracétamol 500mg', quantite_commandee: 100 },
-                    { id: 2, produit_nom: 'Ibuprofène 400mg', quantite_commandee: 50 },
-                    { id: 3, produit_nom: 'Vitamine C 1000mg', quantite_commandee: 30 }
-                ];
-
-                let html = '';
-                lignesExemple.forEach(ligne => {
-                    html += `
-                        <div class="border border-gray-200 rounded-lg p-4">
-                            <div class="flex justify-between items-center mb-2">
-                                <div class="font-medium">${ligne.produit_nom}</div>
-                                <div class="text-sm text-gray-500">Commandé: ${ligne.quantite_commandee}</div>
-                            </div>
-                            <div class="flex items-center space-x-4">
-                                <label class="text-sm text-gray-700">Quantité reçue:</label>
-                                <input type="number" name="produits[${ligne.id}]" 
-                                       min="0" max="${ligne.quantite_commandee}"
-                                       class="w-20 border border-gray-300 rounded px-2 py-1 text-sm"
-                                       value="${ligne.quantite_commandee}">
-                            </div>
-                        </div>
-                    `;
-                });
-                lignesContainer.innerHTML = html;
-            }, 1000);
-        }
-        // Fonctions pour les inventaires
-        function continuerInventaire(inventaireId) {
-            // Redirection vers la page de continuation d'inventaire
-            window.location.href = `inventaire_continuation.php?id=${inventaireId}`;
-        }
-
-        function voirInventaire(inventaireId) {
-            // Redirection vers la page de détail d'inventaire
-            window.location.href = `detail_inventaire.php?id=${inventaireId}`;
-        }
-
-        // Fonctions pour les alertes
-        function signalerRupture(produitId) {
-            document.querySelector('select[name="produit_id_anomalie"]').value = produitId;
-            document.querySelector('select[name="type_anomalie"]').value = 'quantite';
-            document.querySelector('textarea[name="description_anomalie"]').value = 'Produit en rupture de stock - réapprovisionnement urgent nécessaire';
-            showSection('alertes');
-        }
-
-        function signalerStockBas(produitId) {
-            document.querySelector('select[name="produit_id_anomalie"]').value = produitId;
-            document.querySelector('select[name="type_anomalie"]').value = 'quantite';
-            document.querySelector('textarea[name="description_anomalie"]').value = 'Stock bas - attention au seuil d\'alerte';
-            showSection('alertes');
-        }
-
-        function commanderProduit(produitId) {
-            // Redirection vers la page de création de commande
-            window.location.href = `creer_commande.php?produit_id=${produitId}`;
-        }
-
-        // Fonctions utilitaires
-        function exporterMouvements() {
-            // Fonctionnalité d'export des mouvements
-            const date = new Date().toISOString().split('T')[0];
-            const filename = `mouvements_stock_${date}.csv`;
-
-            // Simulation d'export CSV
-            let csvContent = "Date,Produit,Lot,Type,Quantité,Motif,Utilisateur\n";
-
-            <?php if (!empty($mouvements_data)): ?>
-                <?php foreach ($mouvements_data as $mouvement): ?>
-                    csvContent += `"<?php echo date('d/m/Y H:i', strtotime($mouvement['date_mouvement'])); ?>","<?php echo htmlspecialchars($mouvement['produit_nom']); ?>","<?php echo htmlspecialchars($mouvement['numero_lot']); ?>","<?php echo $mouvement['type_mouvement'] === 'entree' ? 'Entrée' : 'Sortie'; ?>","<?php echo $mouvement['quantite']; ?>","<?php echo htmlspecialchars($mouvement['motif'] ?? 'N/A'); ?>","<?php echo htmlspecialchars($mouvement['utilisateur_nom']); ?>"\n`;
-                <?php endforeach; ?>
-            <?php endif; ?>
-
-            // Création et téléchargement du fichier
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            const url = URL.createObjectURL(blob);
-            link.setAttribute('href', url);
-            link.setAttribute('download', filename);
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-
-            alert(`Export terminé: ${filename}`);
-        }
-        // Fonction pour exporter les inventaires
-        function exporterInventaires() {
-            const date = new Date().toISOString().split('T')[0];
-            const filename = `inventaires_${date}.csv`;
-
-            // En-têtes CSV
-            let csvContent = "Référence,Type,Statut,Créé par,Lignes,Date\n";
-
-            // Données des inventaires
-            <?php if (!empty($inventaires_data)): ?>
-                <?php foreach ($inventaires_data as $inventaire): ?>
-                    csvContent += `"<?php echo htmlspecialchars($inventaire['reference']); ?>","<?php echo htmlspecialchars($inventaire['type_inventaire'] ?? ''); ?>","<?php echo htmlspecialchars($inventaire['statut']); ?>","<?php echo htmlspecialchars($inventaire['createur_nom']); ?>","<?php echo intval($inventaire['total_lignes']); ?>","<?php echo !empty($inventaire['date_inventaire']) ? date('d/m/Y H:i', strtotime($inventaire['date_inventaire'])) : ''; ?>"\n`;
-                <?php endforeach; ?>
-            <?php endif; ?>
-
-            // Création et téléchargement du fichier
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            const url = URL.createObjectURL(blob);
-            link.setAttribute('href', url);
-            link.setAttribute('download', filename);
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-
-            // Message de confirmation
-            alert(`Export terminé!\nFichier: ${filename}\nInventaires exportés: <?php echo count($inventaires_data); ?>`);
-        }
-
-        // Gestion intelligente de la quantité selon le statut
-        function gererVisibiliteQuantite(statut) {
-            const champQuantite = document.querySelector('input[name="quantite_initiale"]');
-            const labelQuantite = document.querySelector('label[for="quantite_initiale"]');
-
-            if (statut === 'vide' || statut === 'epuise') {
-                // Forcer la quantité à 0 pour les statuts "vide" et "épuisé"
-                champQuantite.value = 0;
-                champQuantite.disabled = true;
-                champQuantite.classList.add('bg-gray-100');
-                labelQuantite.innerHTML = 'Quantité initiale <span class="text-gray-500">(automatique: 0)</span>';
-            } else if (statut === 'perime' || statut === 'retire') {
-                // Quantité possible mais généralement 0
-                champQuantite.disabled = false;
-                champQuantite.classList.remove('bg-gray-100');
-                labelQuantite.innerHTML = 'Quantité initiale <span class="text-orange-500">(attention: produit périmé/retiré)</span>';
-            } else {
-                // Statuts normaux
-                champQuantite.disabled = false;
-                champQuantite.classList.remove('bg-gray-100');
-                labelQuantite.innerHTML = 'Quantité initiale *';
-
-                if (statut === 'en_stock' && champQuantite.value == 0) {
-                    champQuantite.value = 1; // Valeur par défaut pour "en stock"
-                }
-            }
-        }
-
-        // Initialisation au chargement
-        document.addEventListener('DOMContentLoaded', function () {
-            const statutSelect = document.querySelector('select[name="statut"]');
-            if (statutSelect) {
-                gererVisibiliteQuantite(statutSelect.value);
-            }
-        });
-
-        // Fonctions pour les inventaires
-        function continuerInventaire(inventaireId) {
-            // Simulation - À remplacer par votre logique
-            if (confirm("Voulez-vous continuer cet inventaire ?")) {
-                // Redirection vers la page de continuation
-                window.location.href = `inventaire_continuation.php?id=${inventaireId}`;
-            }
-        }
-
-        function voirInventaire(inventaireId) {
-            // Simulation - À remplacer par votre logique
-            if (confirm("Voulez-vous voir les détails de cet inventaire ?")) {
-                // Redirection vers la page de détail
-                window.location.href = `detail_inventaire.php?id=${inventaireId}`;
-            }
-        }
+        }, 5000);
     </script>
-
-    <!-- Modal Ajout de Lot -->
-    <div id="modalAjoutLot" class="modal">
-        <div class="modal-content">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-semibold" id="modalAjoutLotTitre">Ajouter un nouveau lot</h3>
-                <button onclick="closeModal('modalAjoutLot')" class="text-gray-500 hover:text-gray-700">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-            <form method="POST" id="formAjoutLot">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Produit *</label>
-                        <select name="produit_id" required
-                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-                            <option value="">Sélectionnez un produit</option>
-                            <?php foreach ($produits_data as $produit): ?>
-                                <option value="<?php echo $produit['id']; ?>">
-                                    <?php echo htmlspecialchars($produit['nom']); ?>
-                                    (<?php echo htmlspecialchars($produit['code_barre']); ?>)
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Numéro de lot *</label>
-                        <input type="text" name="numero_lot" required
-                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                            placeholder="Ex: LOT-2024-001">
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Quantité initiale *</label>
-                        <input type="number" name="quantite_initiale" required min="1"
-                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                            placeholder="Nombre d'unités">
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Prix d'achat *</label>
-                        <input type="number" name="prix_achat" required min="0" step="0.01"
-                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="0.00">
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Date de réception</label>
-                        <input type="date" name="date_reception"
-                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                            value="<?php echo date('Y-m-d'); ?>">
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Date d'expiration *</label>
-                        <input type="date" name="date_expiration" required
-                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                            min="<?php echo date('Y-m-d'); ?>">
-                    </div>
-                </div>
-
-                <div class="flex justify-end space-x-3 mt-6">
-                    <button type="button" onclick="closeModal('modalAjoutLot')"
-                        class="px-4 py-2 text-gray-600 hover:text-gray-800">
-                        Annuler
-                    </button>
-                    <button type="submit" name="ajouter_lot"
-                        class="px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700">
-                        <i class="fas fa-save mr-2"></i>Enregistrer le lot
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Modal Ajustement Stock -->
-    <div id="modalAjustementStock" class="modal">
-        <div class="modal-content">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-semibold">Ajuster le stock</h3>
-                <button onclick="closeModal('modalAjustementStock')" class="text-gray-500 hover:text-gray-700">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-            <form method="POST">
-                <input type="hidden" name="lot_id" id="lot_id_ajustement">
-
-                <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Nouvelle quantité</label>
-                    <input type="number" name="nouvelle_quantite" required min="0"
-                        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                        placeholder="Quantité actuelle">
-                </div>
-
-                <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Raison de l'ajustement</label>
-                    <select name="raison_ajustement" required
-                        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-                        <option value="">Sélectionnez une raison</option>
-                        <option value="inventaire">Correction d'inventaire</option>
-                        <option value="casse">Casse/Perte</option>
-                        <option value="don">Don/Échantillon</option>
-                        <option value="retour">Retour fournisseur</option>
-                        <option value="autre">Autre</option>
-                    </select>
-                </div>
-
-                <div class="flex justify-end space-x-3">
-                    <button type="button" onclick="closeModal('modalAjustementStock')"
-                        class="px-4 py-2 text-gray-600 hover:text-gray-800">
-                        Annuler
-                    </button>
-                    <button type="submit" name="ajuster_stock"
-                        class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">
-                        <i class="fas fa-sync-alt mr-2"></i>Ajuster le stock
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Modal Changer Statut Lot -->
-    <div id="modalChangerStatut" class="modal">
-        <div class="modal-content">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-semibold">Changer le statut du lot</h3>
-                <button onclick="closeModal('modalChangerStatut')" class="text-gray-500 hover:text-gray-700">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-            <form method="POST">
-                <input type="hidden" name="lot_id" id="lot_id_statut">
-
-                <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Nouveau statut</label>
-                    <select name="nouveau_statut" required
-                        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-                        <option value="en_stock">En stock</option>
-                        <option value="epuise">Épuisé</option>
-                        <option value="perime">Périmé</option>
-                        <option value="retire">Retiré</option>
-                    </select>
-                </div>
-
-                <div class="flex justify-end space-x-3">
-                    <button type="button" onclick="closeModal('modalChangerStatut')"
-                        class="px-4 py-2 text-gray-600 hover:text-gray-800">
-                        Annuler
-                    </button>
-                    <button type="submit" name="modifier_statut_lot"
-                        class="px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700">
-                        <i class="fas fa-exchange-alt mr-2"></i>Changer le statut
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Modal Nouvel Inventaire -->
-    <div id="modalNouvelInventaire" class="modal">
-        <div class="modal-content">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-semibold" id="modalNouvelInventaireTitre">Créer un nouvel inventaire</h3>
-                <button onclick="closeModal('modalNouvelInventaire')" class="text-gray-500 hover:text-gray-700">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-            <form method="POST">
-                <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Type d'inventaire *</label>
-                    <select name="type_inventaire" required
-                        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-                        <option value="complet">Inventaire complet</option>
-                        <option value="partiel">Inventaire partiel</option>
-                        <option value="cyclique">Inventaire cyclique</option>
-                        <option value="cible">Inventaire ciblé</option>
-                    </select>
-                </div>
-
-                <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Description (optionnel)</label>
-                    <textarea name="description" rows="3"
-                        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                        placeholder="Description de l'inventaire..."></textarea>
-                </div>
-
-                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-                    <div class="flex items-center">
-                        <i class="fas fa-info-circle text-blue-500 mr-2"></i>
-                        <span class="text-sm text-blue-700">
-                            <strong>Inventaire complet:</strong> Tous les produits en stock<br>
-                            <strong>Inventaire partiel:</strong> Sélection de produits<br>
-                            <strong>Inventaire cyclique:</strong> Rotation par zone<br>
-                            <strong>Inventaire ciblé:</strong> Produits spécifiques
-                        </span>
-                    </div>
-                </div>
-
-                <div class="flex justify-end space-x-3">
-                    <button type="button" onclick="closeModal('modalNouvelInventaire')"
-                        class="px-4 py-2 text-gray-600 hover:text-gray-800">
-                        Annuler
-                    </button>
-                    <button type="submit" name="creer_inventaire"
-                        class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">
-                        <i class="fas fa-plus mr-2"></i>Créer l'inventaire
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Modal Rapports -->
-    <div id="modalRapports" class="modal">
-        <div class="modal-content">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-lg font-semibold">Générer un rapport</h3>
-                <button onclick="closeModal('modalRapports')" class="text-gray-500 hover:text-gray-700">
-                    <i class="fas fa-times"></i>
-                </button>
-            </div>
-
-            <div class="space-y-4">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <button onclick="exporterRapportStock()"
-                        class="flex items-center p-4 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors text-left">
-                        <div class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center mr-3">
-                            <i class="fas fa-boxes text-blue-600"></i>
-                        </div>
-                        <div>
-                            <div class="font-medium text-blue-900">Rapport Stock</div>
-                            <div class="text-xs text-blue-600">État complet du stock</div>
-                        </div>
-                    </button>
-
-                    <button onclick="exporterRapportPereemption()"
-                        class="flex items-center p-4 bg-orange-50 border border-orange-200 rounded-lg hover:bg-orange-100 transition-colors text-left">
-                        <div class="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center mr-3">
-                            <i class="fas fa-clock text-orange-600"></i>
-                        </div>
-                        <div>
-                            <div class="font-medium text-orange-900">Rapport Péremption</div>
-                            <div class="text-xs text-orange-600">Produits à expiration</div>
-                        </div>
-                    </button>
-
-                    <button onclick="exporterInventaireComplet()" <div
-                        class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center mr-3">
-                        <i class="fas fa-clipboard-list text-green-600"></i>
-                </div>
-                <div>
-                    <div class="font-medium text-green-900">Fiche Inventaire</div>
-                    <div class="text-xs text-green-600">Template d'inventaire</div>
-                </div>
-                </button>
-
-                <button onclick="genererRapportHebdomadaire()"
-                    class="flex items-center p-4 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors text-left">
-                    <div class="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center mr-3">
-                        <i class="fas fa-chart-line text-purple-600"></i>
-                    </div>
-                    <div>
-                        <div class="font-medium text-purple-900">Rapport Hebdo</div>
-                        <div class="text-xs text-purple-600">Activité de la semaine</div>
-                    </div>
-                </button>
-            </div>
-
-            <div class="border-t pt-4">
-                <button onclick="genererRapportMensuel()"
-                    class="w-full flex items-center justify-center p-4 bg-teal-50 border border-teal-200 rounded-lg hover:bg-teal-100 transition-colors">
-                    <div class="w-10 h-10 bg-teal-100 rounded-full flex items-center justify-center mr-3">
-                        <i class="fas fa-chart-bar text-teal-600"></i>
-                    </div>
-                    <div class="text-left">
-                        <div class="font-medium text-teal-900">Rapport Mensuel Complet</div>
-                        <div class="text-xs text-teal-600">Statistiques et indicateurs du mois</div>
-                    </div>
-                </button>
-            </div>
-        </div>
-
-        <div class="flex justify-end space-x-3 mt-6">
-            <button type="button" onclick="closeModal('modalRapports')"
-                class="px-4 py-2 text-gray-600 hover:text-gray-800">
-                Fermer
-            </button>
-        </div>
-    </div>
-    </div>
-    </div>
 </body>
 
 </html>

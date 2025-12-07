@@ -1,696 +1,511 @@
 <?php
 declare(strict_types=1);
+// ============================================
+// MODULE CAISSIER - Système NAGEX Pharma
+// ============================================
+// Fichier : caissier_dashboard.php
+// Description : Interface complète du caissier
+// ============================================
+
+// Démarrage de session et vérification du rôle
 session_start();
+
+// Vérifier si l'utilisateur est connecté et a le rôle caissier
+if (!isset($_SESSION['user_id']) || ($_SESSION['user_role'] ?? '') !== 'caissier') {
+    header('Location: login.php');
+    exit();
+}
+
+// Inclure la classe Database
 require_once __DIR__ . '/../../config/database.php';
 
-// Vérifier l'authentification et le rôle
-if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSION['user_role'] !== 'caissier') {
-    header('Location: /login.php');
-    exit;
+// Initialisation des variables
+$message = '';
+$error = '';
+$current_page = $_GET['page'] ?? 'dashboard';
+
+// ============================================
+// CONNEXION À LA BASE DE DONNÉES
+// ============================================
+
+try {
+    $database = new Database();
+    $pdo = $database->getConnection();
+} catch (Exception $e) {
+    error_log("Erreur de connexion à la base de données: " . $e->getMessage());
+    die("Erreur de connexion à la base de données. Veuillez contacter l'administrateur.");
 }
 
-$db = new Database();
-$user_id = $_SESSION['user_id'];
-$user_name = $_SESSION['user_nom'];
-$user_role = $_SESSION['user_role'];
+// ============================================
+// FONCTIONS UTILITAIRES
+// ============================================
 
-// ============================================================================
-// FONCTIONS POUR LA GESTION DES PRIX
-// ============================================================================
-
-function getTauxChange()
+/**
+ * Récupère les statistiques du dashboard caissier
+ */
+function getDashboardStats(PDO $pdo, int $caissier_id): array
 {
-    // Taux par défaut si l'API échoue
-    $tauxParDefaut = 2500;
+    $stats = [];
 
-    try {
-        // Utilisation d'une API gratuite de taux de change
-        $apiUrl = 'https://api.exchangerate-api.com/v4/latest/USD';
-        $response = file_get_contents($apiUrl);
+    // Commandes en attente
+    $stmt = $pdo->prepare("SELECT COUNT(*) as total FROM commandes WHERE statut = 'en_attente'");
+    $stmt->execute();
+    $stats['commandes_attente'] = $stmt->fetch()['total'] ?? 0;
 
-        if ($response !== false) {
-            $data = json_decode($response, true);
-            if (isset($data['rates']['CDF'])) {
-                return floatval($data['rates']['CDF']);
-            }
-        }
-    } catch (Exception $e) {
-        error_log("Erreur API taux de change: " . $e->getMessage());
-    }
+    // Transactions aujourd'hui
+    $stmt = $pdo->prepare("
+        SELECT COUNT(*) as total, COALESCE(SUM(montant_total), 0) as chiffre_affaires 
+        FROM commandes 
+        WHERE caissier_id = :caissier_id 
+        AND DATE(date_commande) = CURDATE()
+        AND statut = 'paye'
+    ");
+    $stmt->execute([':caissier_id' => $caissier_id]);
+    $row = $stmt->fetch();
+    $stats['transactions_aujourdhui'] = $row['total'] ?? 0;
+    $stats['chiffre_affaires'] = $row['chiffre_affaires'] ?? 0;
 
-    return $tauxParDefaut;
+    // Produits à gérer les prix
+    $stmt = $pdo->query("
+        SELECT COUNT(*) as total 
+        FROM produits p
+        LEFT JOIN prix_vente pv ON p.id = pv.produit_id AND pv.date_fin IS NULL
+        WHERE p.statut = 'actif' AND pv.id IS NULL
+    ");
+    $stats['produits_sans_prix'] = $stmt->fetch()['total'] ?? 0;
+
+    // Retours à traiter
+    $stmt = $pdo->query("SELECT COUNT(*) as total FROM commandes WHERE statut = 'rembourse'");
+    $stats['retours_a_traiter'] = $stmt->fetch()['total'] ?? 0;
+
+    return $stats;
 }
 
-function getPrixProduits($db)
+/**
+ * Formate le montant avec devise
+ */
+function formatMontant($montant, string $devise = 'CDF'): string
 {
-    try {
-        $stmt = $db->prepare("
-            SELECT p.id, p.reference, p.nom, 
-                   COALESCE(pp.prix_fc, p.prix_vente) as prix_fc,
-                   COALESCE(pp.prix_usd, p.prix_vente / 2500) as prix_usd,
-                   COALESCE(pp.taux_conversion, 2500) as taux_conversion,
-                   pp.date_debut, pp.date_fin
-            FROM produits p
-            LEFT JOIN prix_vente pp ON p.id = pp.produit_id 
-                AND pp.date_fin IS NULL
-            WHERE p.actif = 1
-        ");
-        $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    } catch (PDOException $e) {
-        error_log("Erreur getPrixProduits: " . $e->getMessage());
-        return [];
+    // Convertir en float si c'est une string
+    $montantFloat = is_string($montant) ? (float) $montant : $montant;
+
+    if ($devise === 'USD') {
+        return '$' . number_format($montantFloat, 2, '.', ',');
     }
+    return number_format($montantFloat, 0, '.', ',') . ' FC';
 }
 
-function updatePrixProduit($db, $produit_id, $prix_fc, $prix_usd, $taux_conversion, $user_id)
+/**
+ * Échapper les données pour l'affichage HTML
+ */
+function e(string $string): string
 {
-    try {
-        // Désactiver l'ancien prix
-        $stmt = $db->prepare("
-            UPDATE prix_vente 
-            SET date_fin = CURDATE() 
-            WHERE produit_id = :produit_id AND date_fin IS NULL
-        ");
-        $stmt->bindParam(':produit_id', $produit_id);
-        $stmt->execute();
-
-        // Insérer le nouveau prix
-        $stmt = $db->prepare("
-            INSERT INTO prix_vente (produit_id, prix_fc, prix_usd, taux_conversion, date_debut, created_by)
-            VALUES (:produit_id, :prix_fc, :prix_usd, :taux_conversion, CURDATE(), :user_id)
-        ");
-        $stmt->bindParam(':produit_id', $produit_id);
-        $stmt->bindParam(':prix_fc', $prix_fc);
-        $stmt->bindParam(':prix_usd', $prix_usd);
-        $stmt->bindParam(':taux_conversion', $taux_conversion);
-        $stmt->bindParam(':user_id', $user_id);
-        $stmt->execute();
-
-        return true;
-    } catch (PDOException $e) {
-        error_log("Erreur updatePrixProduit: " . $e->getMessage());
-        return false;
-    }
+    return htmlspecialchars($string, ENT_QUOTES, 'UTF-8');
 }
 
-// ============================================================================
-// FONCTION POUR RÉCUPÉRER TOUS LES PRODUITS
-// ============================================================================
-
-function getAllProduits($db)
-{
-    try {
-        $stmt = $db->prepare("
-            SELECT 
-                p.id,
-                p.reference,
-                p.nom,
-                p.description,
-                p.prix_vente as prix_vente_ht,
-                COALESCE(p.taux_tva, 0) as taux_tva,
-                (p.prix_vente * (1 + COALESCE(p.taux_tva, 0)/100)) as prix_ttc,
-                COALESCE(SUM(s.quantite_actuelle), 0) as stock,
-                c.nom as categorie_nom,
-                f.nom_societe as fournisseur_nom,
-                COALESCE(pp.prix_fc, p.prix_vente) as prix_fc,
-                COALESCE(pp.prix_usd, p.prix_vente / 2500) as prix_usd
-            FROM produits p
-            LEFT JOIN stocks s ON p.id = s.produit_id AND s.statut = 'en_stock'
-            LEFT JOIN categories c ON p.categorie_id = c.id
-            LEFT JOIN fournisseurs f ON p.fournisseur_id = f.id
-            LEFT JOIN prix_vente pp ON p.id = pp.produit_id AND pp.date_fin IS NULL
-            WHERE p.statut = 'actif'
-            GROUP BY p.id, p.reference, p.nom, p.description, p.prix_vente, p.taux_tva,
-                     c.nom, f.nom_societe, pp.prix_fc, pp.prix_usd
-            HAVING stock > 0
-            ORDER BY p.nom
-        ");
-        $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    } catch (PDOException $e) {
-        error_log("Erreur getAllProduits: " . $e->getMessage());
-        return [];
-    }
-}
-
-// Récupérer tous les produits
-$all_produits = getAllProduits($db);
-
-function getHistoriquePrix($db, $produit_id = null)
-{
-    try {
-        $sql = "
-            SELECT pp.*, p.nom as produit_nom, u.nom as caissier_nom
-            FROM prix_vente pp
-            JOIN produits p ON pp.produit_id = p.id
-            JOIN utilisateurs u ON pp.created_by = u.id
-        ";
-
-        if ($produit_id) {
-            $sql .= " WHERE pp.produit_id = :produit_id";
-        }
-
-        $sql .= " ORDER BY pp.date_debut DESC, pp.created_at DESC";
-
-        $stmt = $db->prepare($sql);
-
-        if ($produit_id) {
-            $stmt->bindParam(':produit_id', $produit_id);
-        }
-
-        $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    } catch (PDOException $e) {
-        error_log("Erreur getHistoriquePrix: " . $e->getMessage());
-        return [];
-    }
-}
-
-
-
-// ============================================================================
-// FONCTIONS POUR LE TRAITEMENT DES COMMANDES
-// ============================================================================
-
-function getCommandesEnAttente($db, $user_id)
-{
-    try {
-        $stmt = $db->prepare("
-            SELECT c.*, cl.nom as client_nom, cl.prenom as client_prenom,
-                   COUNT(cd.id) as nb_produits
-            FROM commandes c
-            JOIN utilisateurs cl ON c.client_id = cl.id
-            LEFT JOIN commande_details cd ON c.id = cd.commande_id
-            WHERE c.statut = 'en_attente'
-            AND (c.caissier_id IS NULL OR c.caissier_id = :user_id)
-            GROUP BY c.id
-            ORDER BY c.date_commande ASC
-        ");
-        $stmt->bindParam(':user_id', $user_id);
-        $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    } catch (PDOException $e) {
-        error_log("Erreur getCommandesEnAttente: " . $e->getMessage());
-        return [];
-    }
-}
-
-function getDetailsCommande($db, $commande_id)
-{
-    try {
-        $stmt = $db->prepare("
-            SELECT cd.*, p.nom as produit_nom, p.reference
-            FROM commande_details cd
-            JOIN produits p ON cd.produit_id = p.id
-            WHERE cd.commande_id = :commande_id
-        ");
-        $stmt->bindParam(':commande_id', $commande_id);
-        $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    } catch (PDOException $e) {
-        error_log("Erreur getDetailsCommande: " . $e->getMessage());
-        return [];
-    }
-}
-
-function validerCommande($db, $commande_id, $mode_paiement, $user_id)
-{
-    try {
-        $db->beginTransaction();
-
-        // Mettre à jour la commande
-        $stmt = $db->prepare("
-            UPDATE commandes 
-            SET statut = 'paye', 
-                caissier_id = :user_id,
-                mode_paiement = :mode_paiement,
-                date_paiement = NOW()
-            WHERE id = :commande_id AND statut = 'en_attente'
-        ");
-        $stmt->bindParam(':commande_id', $commande_id);
-        $stmt->bindParam(':mode_paiement', $mode_paiement);
-        $stmt->bindParam(':user_id', $user_id);
-        $stmt->execute();
-
-        // Mettre à jour les stocks
-        $stmt = $db->prepare("
-            UPDATE stocks s
-            JOIN commande_details cd ON s.produit_id = cd.produit_id
-            SET s.quantite_actuelle = s.quantite_actuelle - cd.quantite
-            WHERE cd.commande_id = :commande_id
-        ");
-        $stmt->bindParam(':commande_id', $commande_id);
-        $stmt->execute();
-
-        $db->commit();
-        return true;
-    } catch (PDOException $e) {
-        $db->rollBack();
-        error_log("Erreur validerCommande: " . $e->getMessage());
-        return false;
-    }
-}
-
-// ============================================================================
-// FONCTIONS POUR LES TRANSACTIONS
-// ============================================================================
-
-function getStatsTransactionsTempsReel($db, $user_id)
-{
-    try {
-        $stmt = $db->prepare("
-            SELECT 
-                COUNT(*) as total_ventes_jour,
-                COALESCE(SUM(total_ttc), 0) as ca_jour,
-                COALESCE(SUM(CASE WHEN mode_paiement = 'especes' THEN total_ttc ELSE 0 END), 0) as especes_jour,
-                COALESCE(SUM(CASE WHEN mode_paiement = 'mobile_money' THEN total_ttc ELSE 0 END), 0) as mobile_money_jour,
-                COALESCE(SUM(CASE WHEN mode_paiement = 'carte' THEN total_ttc ELSE 0 END), 0) as carte_jour,
-                COUNT(CASE WHEN statut = 'rembourse' THEN 1 END) as remboursements_jour
-            FROM ventes 
-            WHERE caissier_id = :user_id 
-            AND DATE(date_vente) = CURDATE()
-        ");
-        $stmt->bindParam(':user_id', $user_id);
-        $stmt->execute();
-        return $stmt->fetch(PDO::FETCH_ASSOC);
-    } catch (PDOException $e) {
-        error_log("Erreur getStatsTransactionsTempsReel: " . $e->getMessage());
-        return [];
-    }
-}
-
-function traiterRemboursement($db, $vente_id, $motif, $user_id)
-{
-    try {
-        $db->beginTransaction();
-
-        // Récupérer les détails de la vente
-        $stmt = $db->prepare("
-            SELECT vd.produit_id, vd.quantite
-            FROM vente_details vd
-            WHERE vd.vente_id = :vente_id
-        ");
-        $stmt->bindParam(':vente_id', $vente_id);
-        $stmt->execute();
-        $details = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        // Restocker les produits
-        foreach ($details as $detail) {
-            $stmt = $db->prepare("
-                UPDATE stocks 
-                SET quantite_actuelle = quantite_actuelle + :quantite
-                WHERE produit_id = :produit_id
-                ORDER BY date_reception ASC
-                LIMIT 1
-            ");
-            $stmt->bindParam(':quantite', $detail['quantite']);
-            $stmt->bindParam(':produit_id', $detail['produit_id']);
-            $stmt->execute();
-        }
-
-        // Marquer la vente comme remboursée
-        $stmt = $db->prepare("
-            UPDATE ventes 
-            SET statut = 'rembourse',
-                motif_remboursement = :motif,
-                date_remboursement = NOW(),
-                caissier_remboursement = :user_id
-            WHERE id = :vente_id
-        ");
-        $stmt->bindParam(':vente_id', $vente_id);
-        $stmt->bindParam(':motif', $motif);
-        $stmt->bindParam(':user_id', $user_id);
-        $stmt->execute();
-
-        $db->commit();
-        return true;
-    } catch (PDOException $e) {
-        $db->rollBack();
-        error_log("Erreur traiterRemboursement: " . $e->getMessage());
-        return false;
-    }
-}
-// ============================================================================
-// FONCTIONS POUR LA RECHERCHE ET GESTION DES PRODUITS
-// ============================================================================
-
-function rechercherProduit($db, $search_term)
-{
-    try {
-        $stmt = $db->prepare("
-            SELECT 
-                p.id,
-                p.reference,
-                p.nom,
-                p.description,
-                p.prix_vente as prix_vente_ht,
-                COALESCE(p.taux_tva, 0) as taux_tva,
-                (p.prix_vente * (1 + COALESCE(p.taux_tva, 0)/100)) as prix_ttc,
-                COALESCE(SUM(s.quantite_actuelle), 0) as stock,
-                c.nom as categorie_nom,
-                f.nom_societe as fournisseur_nom,
-                -- Prix en devises
-                COALESCE(pp.prix_fc, p.prix_vente) as prix_fc,
-                COALESCE(pp.prix_usd, p.prix_vente / 2500) as prix_usd,
-                COALESCE(pp.taux_conversion, 2500) as taux_conversion
-            FROM produits p
-            LEFT JOIN stocks s ON p.id = s.produit_id AND s.statut = 'en_stock'
-            LEFT JOIN categories c ON p.categorie_id = c.id
-            LEFT JOIN fournisseurs f ON p.fournisseur_id = f.id
-            LEFT JOIN prix_vente pp ON p.id = pp.produit_id AND pp.date_fin IS NULL
-            WHERE (p.reference LIKE :search OR p.nom LIKE :search OR p.description LIKE :search)
-            AND p.statut = 'actif'
-            GROUP BY p.id, p.reference, p.nom, p.description, p.prix_vente, p.taux_tva,
-                     c.nom, f.nom_societe, pp.prix_fc, pp.prix_usd, pp.taux_conversion
-            HAVING stock > 0
-            ORDER BY p.nom
-            LIMIT 10
-        ");
-        $stmt->bindValue(':search', '%' . $search_term . '%');
-        $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    } catch (PDOException $e) {
-        error_log("Erreur rechercherProduit: " . $e->getMessage());
-        return [];
-    }
-}
-
-function getProduitByCode($db, $code)
-{
-    try {
-        $stmt = $db->prepare("
-            SELECT 
-                p.id,
-                p.reference,
-                p.nom,
-                p.description,
-                p.prix_vente as prix_vente_ht,
-                COALESCE(p.taux_tva, 0) as taux_tva,
-                (p.prix_vente * (1 + COALESCE(p.taux_tva, 0)/100)) as prix_ttc,
-                COALESCE(SUM(s.quantite_actuelle), 0) as stock,
-                c.nom as categorie_nom,
-                f.nom_societe as fournisseur_nom,
-                -- Prix en devises
-                COALESCE(pp.prix_fc, p.prix_vente) as prix_fc,
-                COALESCE(pp.prix_usd, p.prix_vente / 2500) as prix_usd,
-                COALESCE(pp.taux_conversion, 2500) as taux_conversion
-            FROM produits p
-            LEFT JOIN stocks s ON p.id = s.produit_id AND s.statut = 'en_stock'
-            LEFT JOIN categories c ON p.categorie_id = c.id
-            LEFT JOIN fournisseurs f ON p.fournisseur_id = f.id
-            LEFT JOIN prix_vente pp ON p.id = pp.produit_id AND pp.date_fin IS NULL
-            WHERE p.reference = :code
-            AND p.statut = 'actif'
-            GROUP BY p.id, p.reference, p.nom, p.description, p.prix_vente, p.taux_tva,
-                     c.nom, f.nom_societe, pp.prix_fc, pp.prix_usd, pp.taux_conversion
-            HAVING stock > 0
-        ");
-        $stmt->bindParam(':code', $code);
-        $stmt->execute();
-        return $stmt->fetch(PDO::FETCH_ASSOC);
-    } catch (PDOException $e) {
-        error_log("Erreur getProduitByCode: " . $e->getMessage());
-        return null;
-    }
-}
-
-function getProduitById($db, $id)
-{
-    try {
-        $stmt = $db->prepare("
-            SELECT 
-                p.id,
-                p.reference,
-                p.nom,
-                p.description,
-                p.prix_vente as prix_vente_ht,
-                COALESCE(p.taux_tva, 0) as taux_tva,
-                (p.prix_vente * (1 + COALESCE(p.taux_tva, 0)/100)) as prix_ttc,
-                COALESCE(SUM(s.quantite_actuelle), 0) as stock,
-                c.nom as categorie_nom,
-                f.nom_societe as fournisseur_nom,
-                -- Prix en devises
-                COALESCE(pp.prix_fc, p.prix_vente) as prix_fc,
-                COALESCE(pp.prix_usd, p.prix_vente / 2500) as prix_usd,
-                COALESCE(pp.taux_conversion, 2500) as taux_conversion
-            FROM produits p
-            LEFT JOIN stocks s ON p.id = s.produit_id AND s.statut = 'en_stock'
-            LEFT JOIN categories c ON p.categorie_id = c.id
-            LEFT JOIN fournisseurs f ON p.fournisseur_id = f.id
-            LEFT JOIN prix_vente pp ON p.id = pp.produit_id AND pp.date_fin IS NULL
-            WHERE p.id = :id
-            AND p.statut = 'actif'
-            GROUP BY p.id, p.reference, p.nom, p.description, p.prix_vente, p.taux_tva,
-                     c.nom, f.nom_societe, pp.prix_fc, pp.prix_usd, pp.taux_conversion
-            HAVING stock > 0
-        ");
-        $stmt->bindParam(':id', $id);
-        $stmt->execute();
-        return $stmt->fetch(PDO::FETCH_ASSOC);
-    } catch (PDOException $e) {
-        error_log("Erreur getProduitById: " . $e->getMessage());
-        return null;
-    }
-}
-
-// ============================================================================
-// FONCTION POUR TRAITER UNE VENTE
-// ============================================================================
-
-function traiterVente($db, $panier, $mode_paiement, $montant_remise, $user_id)
-{
-    try {
-        $db->beginTransaction();
-
-        // Calcul des totaux
-        $total_ht = 0;
-        $total_tva = 0;
-
-        foreach ($panier as $item) {
-            $produit = getProduitById($db, $item['id']);
-            if (!$produit) {
-                throw new Exception("Produit non trouvé: " . $item['nom']);
-            }
-
-            $prix_ht = $produit['prix_vente_ht'] * $item['quantite'];
-            $tva = $prix_ht * ($produit['taux_tva'] / 100);
-            $total_ht += $prix_ht;
-            $total_tva += $tva;
-        }
-
-        $total_ttc = $total_ht + $total_tva - $montant_remise;
-
-        // Créer la référence de vente
-        $reference = 'V' . date('YmdHis');
-
-        // Insérer la vente
-        $stmt = $db->prepare("
-            INSERT INTO ventes (reference, caissier_id, total_ht, total_tva, total_ttc, 
-                              montant_remise, mode_paiement, date_vente)
-            VALUES (:reference, :caissier_id, :total_ht, :total_tva, :total_ttc, 
-                   :montant_remise, :mode_paiement, NOW())
-        ");
-        $stmt->bindParam(':reference', $reference);
-        $stmt->bindParam(':caissier_id', $user_id);
-        $stmt->bindParam(':total_ht', $total_ht);
-        $stmt->bindParam(':total_tva', $total_tva);
-        $stmt->bindParam(':total_ttc', $total_ttc);
-        $stmt->bindParam(':montant_remise', $montant_remise);
-        $stmt->bindParam(':mode_paiement', $mode_paiement);
-        $stmt->execute();
-
-        $vente_id = $db->lastInsertId();
-
-        // Insérer les détails de vente et mettre à jour les stocks
-        foreach ($panier as $item) {
-            $produit = getProduitById($db, $item['id']);
-
-            // Insérer détail vente
-            $stmt = $db->prepare("
-                INSERT INTO vente_details (vente_id, produit_id, quantite, prix_vente_ht, taux_tva)
-                VALUES (:vente_id, :produit_id, :quantite, :prix_vente_ht, :taux_tva)
-            ");
-            $stmt->bindParam(':vente_id', $vente_id);
-            $stmt->bindParam(':produit_id', $item['id']);
-            $stmt->bindParam(':quantite', $item['quantite']);
-            $stmt->bindParam(':prix_vente_ht', $produit['prix_vente_ht']);
-            $stmt->bindParam(':taux_tva', $produit['taux_tva']);
-            $stmt->execute();
-
-            // Mettre à jour le stock (méthode FIFO)
-            $stmt = $db->prepare("
-                UPDATE stocks 
-                SET quantite_actuelle = quantite_actuelle - :quantite
-                WHERE produit_id = :produit_id 
-                AND quantite_actuelle > 0
-                AND statut = 'en_stock'
-                ORDER BY date_reception ASC
-                LIMIT 1
-            ");
-            $stmt->bindParam(':quantite', $item['quantite']);
-            $stmt->bindParam(':produit_id', $item['id']);
-            $stmt->execute();
-
-            // Vérifier si la mise à jour a fonctionné
-            if ($stmt->rowCount() === 0) {
-                throw new Exception("Stock insuffisant pour: " . $item['nom']);
-            }
-        }
-
-        $db->commit();
-        return [
-            'success' => true,
-            'reference' => $reference,
-            'total_ttc' => $total_ttc,
-            'vente_id' => $vente_id
-        ];
-
-    } catch (Exception $e) {
-        $db->rollBack();
-        error_log("Erreur traiterVente: " . $e->getMessage());
-        return ['success' => false, 'message' => $e->getMessage()];
-    }
-}
-
-// ============================================================================
-// RÉCUPÉRATION DES DONNÉES
-// ============================================================================
-
-$taux_change = getTauxChange();
-$prix_produits = getPrixProduits($db);
-$historique_prix = getHistoriquePrix($db);
-$commandes_attente = getCommandesEnAttente($db, $user_id);
-$stats_transactions = getStatsTransactionsTempsReel($db, $user_id);
-
-// ============================================================================
-// TRAITEMENT DES ACTIONS POST
-// ============================================================================
+// ============================================
+// GESTION DES TRANSACTIONS (Traitement POST)
+// ============================================
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    try {
-        // Mise à jour des prix
-        if (isset($_POST['update_prix'])) {
-            $produit_id = (int) $_POST['produit_id'];
-            $prix_fc = floatval($_POST['prix_fc']);
-            $prix_usd = floatval($_POST['prix_usd']);
-            $taux_conversion = floatval($_POST['taux_conversion']);
+    if (isset($_POST['action'])) {
+        switch ($_POST['action']) {
 
-            if (updatePrixProduit($db, $produit_id, $prix_fc, $prix_usd, $taux_conversion, $user_id)) {
-                $_SESSION['success_message'] = "Prix mis à jour avec succès";
-            } else {
-                throw new Exception("Erreur lors de la mise à jour du prix");
-            }
+            // DÉFINIR LE PRIX D'UN PRODUIT
+            case 'definir_prix':
+                try {
+                    $pdo->beginTransaction();
+
+                    // Désactiver les anciens prix
+                    $stmt = $pdo->prepare("
+                        UPDATE prix_vente 
+                        SET date_fin = CURDATE() 
+                        WHERE produit_id = :produit_id AND date_fin IS NULL
+                    ");
+                    $stmt->execute([':produit_id' => intval($_POST['produit_id'] ?? 0)]);
+
+                    // Ajouter le nouveau prix
+                    $stmt = $pdo->prepare("
+                        INSERT INTO prix_vente (
+                            produit_id, prix_fc, prix_usd, taux_conversion, 
+                            date_debut, created_by
+                        ) VALUES (
+                            :produit_id, :prix_fc, :prix_usd, :taux_conversion,
+                            CURDATE(), :created_by
+                        )
+                    ");
+
+                    $stmt->execute([
+                        ':produit_id' => intval($_POST['produit_id'] ?? 0),
+                        ':prix_fc' => floatval($_POST['prix_fc'] ?? 0),
+                        ':prix_usd' => floatval($_POST['prix_usd'] ?? 0),
+                        ':taux_conversion' => floatval($_POST['taux_conversion'] ?? 1),
+                        ':created_by' => $_SESSION['user_id']
+                    ]);
+
+                    $pdo->commit();
+                    $message = "✅ Prix défini avec succès!";
+
+                } catch (Exception $e) {
+                    $pdo->rollBack();
+                    $error = "❌ Erreur lors de la définition du prix: " . $e->getMessage();
+                }
+                break;
+
+            // VALIDER UN PAIEMENT
+            case 'valider_paiement':
+                try {
+                    $pdo->beginTransaction();
+
+                    // Mettre à jour le statut de la commande
+                    $stmt = $pdo->prepare("
+                        UPDATE commandes 
+                        SET statut = 'paye', 
+                            mode_paiement = :mode_paiement,
+                            date_paiement = NOW(),
+                            caissier_id = :caissier_id
+                        WHERE id = :commande_id AND statut = 'en_attente'
+                    ");
+
+                    $stmt->execute([
+                        ':mode_paiement' => $_POST['mode_paiement'] ?? 'especes',
+                        ':caissier_id' => $_SESSION['user_id'],
+                        ':commande_id' => intval($_POST['commande_id'] ?? 0)
+                    ]);
+
+                    if ($stmt->rowCount() > 0) {
+                        // Mettre à jour les stocks
+                        $stmt = $pdo->prepare("
+                            UPDATE lots l
+                            JOIN commande_details cd ON l.id = cd.lot_id
+                            SET l.quantite_actuelle = l.quantite_actuelle - cd.quantite,
+                                l.statut = CASE 
+                                    WHEN (l.quantite_actuelle - cd.quantite) <= 0 THEN 'epuise'
+                                    ELSE l.statut
+                                END
+                            WHERE cd.commande_id = :commande_id
+                        ");
+                        $stmt->execute([':commande_id' => intval($_POST['commande_id'] ?? 0)]);
+
+                        // Enregistrer les mouvements de stock
+                        $stmt = $pdo->prepare("
+                            INSERT INTO mouvements_stock (
+                                produit_id, lot_id, type_mouvement, quantite,
+                                quantite_avant, quantite_apres, raison, created_by
+                            )
+                            SELECT 
+                                cd.produit_id,
+                                cd.lot_id,
+                                'sortie',
+                                cd.quantite,
+                                l.quantite_actuelle + cd.quantite,
+                                l.quantite_actuelle,
+                                'Vente commande #' || :commande_id,
+                                :created_by
+                            FROM commande_details cd
+                            JOIN lots l ON cd.lot_id = l.id
+                            WHERE cd.commande_id = :commande_id2
+                        ");
+                        $stmt->execute([
+                            ':commande_id' => intval($_POST['commande_id'] ?? 0),
+                            ':created_by' => $_SESSION['user_id'],
+                            ':commande_id2' => intval($_POST['commande_id'] ?? 0)
+                        ]);
+
+                        $pdo->commit();
+                        $message = "✅ Paiement validé avec succès!";
+                    } else {
+                        $pdo->rollBack();
+                        $error = "❌ La commande ne peut pas être payée (déjà payée ou non trouvée)";
+                    }
+
+                } catch (Exception $e) {
+                    $pdo->rollBack();
+                    $error = "❌ Erreur lors de la validation du paiement: " . $e->getMessage();
+                }
+                break;
+
+            // APPLIQUER UNE PROMOTION
+            case 'appliquer_promotion':
+                try {
+                    $pdo->beginTransaction();
+
+                    // Enregistrer la promotion
+                    $stmt = $pdo->prepare("
+                        INSERT INTO promotions (
+                            produit_id, type_promotion, valeur, date_debut, 
+                            date_fin, created_by
+                        ) VALUES (
+                            :produit_id, :type_promotion, :valeur, 
+                            :date_debut, :date_fin, :created_by
+                        )
+                    ");
+
+                    $stmt->execute([
+                        ':produit_id' => intval($_POST['produit_id'] ?? 0),
+                        ':type_promotion' => $_POST['type_promotion'] ?? 'pourcentage',
+                        ':valeur' => floatval($_POST['valeur'] ?? 0),
+                        ':date_debut' => $_POST['date_debut'] ?? date('Y-m-d'),
+                        ':date_fin' => $_POST['date_fin'] ?? null,
+                        ':created_by' => $_SESSION['user_id']
+                    ]);
+
+                    $pdo->commit();
+                    $message = "✅ Promotion appliquée avec succès!";
+
+                } catch (Exception $e) {
+                    $pdo->rollBack();
+                    $error = "❌ Erreur lors de l'application de la promotion: " . $e->getMessage();
+                }
+                break;
+
+            // GÉRER UN RETOUR
+            case 'gerer_retour':
+                try {
+                    $pdo->beginTransaction();
+
+                    // Mettre à jour le statut de la commande
+                    $stmt = $pdo->prepare("
+                        UPDATE commandes 
+                        SET statut = 'rembourse'
+                        WHERE id = :commande_id AND statut = 'paye'
+                    ");
+                    $stmt->execute([':commande_id' => intval($_POST['commande_id'] ?? 0)]);
+
+                    if ($stmt->rowCount() > 0) {
+                        // Restaurer les stocks
+                        $stmt = $pdo->prepare("
+                            UPDATE lots l
+                            JOIN commande_details cd ON l.id = cd.lot_id
+                            SET l.quantite_actuelle = l.quantite_actuelle + cd.quantite,
+                                l.statut = CASE 
+                                    WHEN l.quantite_actuelle > 0 THEN 'en_stock'
+                                    ELSE l.statut
+                                END
+                            WHERE cd.commande_id = :commande_id
+                        ");
+                        $stmt->execute([':commande_id' => intval($_POST['commande_id'] ?? 0)]);
+
+                        // Enregistrer le mouvement de stock
+                        $stmt = $pdo->prepare("
+                            INSERT INTO mouvements_stock (
+                                produit_id, lot_id, type_mouvement, quantite,
+                                quantite_avant, quantite_apres, raison, created_by
+                            )
+                            SELECT 
+                                cd.produit_id,
+                                cd.lot_id,
+                                'entree',
+                                cd.quantite,
+                                l.quantite_actuelle - cd.quantite,
+                                l.quantite_actuelle,
+                                'Retour commande #' || :commande_id,
+                                :created_by
+                            FROM commande_details cd
+                            JOIN lots l ON cd.lot_id = l.id
+                            WHERE cd.commande_id = :commande_id2
+                        ");
+                        $stmt->execute([
+                            ':commande_id' => intval($_POST['commande_id'] ?? 0),
+                            ':created_by' => $_SESSION['user_id'],
+                            ':commande_id2' => intval($_POST['commande_id'] ?? 0)
+                        ]);
+
+                        $pdo->commit();
+                        $message = "✅ Retour traité avec succès!";
+                    } else {
+                        $pdo->rollBack();
+                        $error = "❌ Le retour ne peut pas être traité (commande non payée ou non trouvée)";
+                    }
+
+                } catch (Exception $e) {
+                    $pdo->rollBack();
+                    $error = "❌ Erreur lors du traitement du retour: " . $e->getMessage();
+                }
+                break;
+
+            // AJUSTER LE TAUX DE CONVERSION
+            case 'ajuster_taux_conversion':
+                try {
+                    // Désactiver les anciens taux
+                    $stmt = $pdo->prepare("
+                        UPDATE taux_conversion 
+                        SET actif = 0 
+                        WHERE actif = 1
+                    ");
+                    $stmt->execute();
+
+                    // Ajouter le nouveau taux
+                    $stmt = $pdo->prepare("
+                        INSERT INTO taux_conversion (taux, created_by)
+                        VALUES (:taux, :created_by)
+                    ");
+
+                    $stmt->execute([
+                        ':taux' => floatval($_POST['taux'] ?? 1),
+                        ':created_by' => $_SESSION['user_id']
+                    ]);
+
+                    $message = "✅ Taux de conversion mis à jour avec succès!";
+
+                } catch (Exception $e) {
+                    $error = "❌ Erreur lors de la mise à jour du taux: " . $e->getMessage();
+                }
+                break;
         }
-
-        // Validation de commande
-        if (isset($_POST['valider_commande'])) {
-            $commande_id = (int) $_POST['commande_id'];
-            $mode_paiement = $_POST['mode_paiement'];
-
-            if (validerCommande($db, $commande_id, $mode_paiement, $user_id)) {
-                $_SESSION['success_message'] = "Commande validée avec succès";
-            } else {
-                throw new Exception("Erreur lors de la validation de la commande");
-            }
-        }
-
-        // Remboursement
-        if (isset($_POST['traiter_remboursement'])) {
-            $vente_id = (int) $_POST['vente_id'];
-            $motif = $_POST['motif_remboursement'];
-
-            if (traiterRemboursement($db, $vente_id, $motif, $user_id)) {
-                $_SESSION['success_message'] = "Remboursement traité avec succès";
-            } else {
-                throw new Exception("Erreur lors du remboursement");
-            }
-        }
-
-        // NOUVEAU: Traitement d'une vente
-        if (isset($_POST['process_vente'])) {
-            $panier_data = json_decode($_POST['panier_data'], true);
-            $mode_paiement = $_POST['mode_paiement'];
-            $montant_remise = floatval($_POST['montant_remise'] ?? 0);
-
-            if (empty($panier_data)) {
-                throw new Exception("Le panier est vide");
-            }
-
-            $resultat_vente = traiterVente($db, $panier_data, $mode_paiement, $montant_remise, $user_id);
-
-            if ($resultat_vente['success']) {
-                $_SESSION['vente_success'] = [
-                    'reference' => $resultat_vente['reference'],
-                    'total_ttc' => $resultat_vente['total_ttc'],
-                    'montant_remise' => $montant_remise
-                ];
-            } else {
-                throw new Exception($resultat_vente['message']);
-            }
-        }
-
-        header('Location: caisse.php');
-        exit;
-
-    } catch (Exception $e) {
-        $_SESSION['error_message'] = "Erreur: " . $e->getMessage();
-        header('Location: caisse.php');
-        exit;
     }
 }
 
-// ============================================================================
-// TRAITEMENT DES REQUÊTES AJAX
-// ============================================================================
+// ============================================
+// RÉCUPÉRATION DES DONNÉES
+// ============================================
 
-if (isset($_GET['search_product'])) {
-    header('Content-Type: application/json');
-    $results = rechercherProduit($db, $_GET['search_product']);
-    echo json_encode($results);
-    exit;
+// Récupérer les statistiques
+$stats = getDashboardStats($pdo, $_SESSION['user_id']);
+
+// Récupérer les produits actifs
+$produits = [];
+try {
+    $stmt = $pdo->query("
+        SELECT p.id, p.nom, p.code_barre, c.nom as categorie_nom,
+               pv.prix_fc, pv.prix_usd, pv.taux_conversion
+        FROM produits p
+        LEFT JOIN categories c ON p.categorie_id = c.id
+        LEFT JOIN prix_vente pv ON p.id = pv.produit_id AND pv.date_fin IS NULL
+        WHERE p.statut = 'actif'
+        ORDER BY p.nom
+        LIMIT 100
+    ");
+    $produits = $stmt->fetchAll();
+} catch (Exception $e) {
+    $error = "Erreur lors du chargement des produits: " . $e->getMessage();
 }
 
-if (isset($_GET['get_product'])) {
-    header('Content-Type: application/json');
-    $product = getProduitByCode($db, $_GET['get_product']);
-    echo json_encode($product ?: []);
-    exit;
-}
-if (isset($_GET['get_product_by_id'])) {
-    header('Content-Type: application/json');
-    $product = getProduitById($db, (int) $_GET['get_product_by_id']);
-    echo json_encode($product ?: []);
-    exit;
+// Récupérer les commandes selon la page
+$commandes_attente = [];
+$transactions_recentes = [];
+$liste_promotions = [];
+$retours_en_attente = [];
+
+switch ($current_page) {
+    case 'commandes_attente':
+        try {
+            $stmt = $pdo->prepare("
+                SELECT c.*, u.nom as client_nom, u.telephone,
+                       COUNT(cd.id) as nombre_produits
+                FROM commandes c
+                JOIN utilisateurs u ON c.client_id = u.id
+                LEFT JOIN commande_details cd ON c.id = cd.commande_id
+                WHERE c.statut = 'en_attente'
+                GROUP BY c.id
+                ORDER BY c.date_commande ASC
+                LIMIT 50
+            ");
+            $stmt->execute();
+            $commandes_attente = $stmt->fetchAll();
+        } catch (Exception $e) {
+            $error = "Erreur lors du chargement des commandes: " . $e->getMessage();
+        }
+        break;
+
+    case 'transactions':
+        try {
+            $stmt = $pdo->prepare("
+                SELECT c.*, u.nom as client_nom,
+                       COUNT(cd.id) as nombre_produits
+                FROM commandes c
+                JOIN utilisateurs u ON c.client_id = u.id
+                LEFT JOIN commande_details cd ON c.id = cd.commande_id
+                WHERE c.caissier_id = :caissier_id 
+                AND c.statut = 'paye'
+                GROUP BY c.id
+                ORDER BY c.date_paiement DESC
+                LIMIT 30
+            ");
+            $stmt->execute([':caissier_id' => $_SESSION['user_id']]);
+            $transactions_recentes = $stmt->fetchAll();
+        } catch (Exception $e) {
+            $error = "Erreur lors du chargement des transactions: " . $e->getMessage();
+        }
+        break;
+
+    case 'promotions':
+        try {
+            $stmt = $pdo->query("
+                SELECT p.*, pr.nom as produit_nom,
+                       pr.prix_fc as prix_original_fc,
+                       CASE 
+                           WHEN p.type_promotion = 'pourcentage' 
+                           THEN pr.prix_fc * (1 - p.valeur/100)
+                           ELSE pr.prix_fc - p.valeur
+                       END as prix_promotion_fc
+                FROM promotions p
+                JOIN produits pr ON p.produit_id = pr.id
+                WHERE (p.date_fin IS NULL OR p.date_fin >= CURDATE())
+                AND p.date_debut <= CURDATE()
+                ORDER BY p.date_debut DESC
+            ");
+            $liste_promotions = $stmt->fetchAll();
+        } catch (Exception $e) {
+            $error = "Erreur lors du chargement des promotions: " . $e->getMessage();
+        }
+        break;
+
+    case 'retours':
+        try {
+            $stmt = $pdo->query("
+                SELECT c.*, u.nom as client_nom, u.telephone,
+                       COUNT(cd.id) as nombre_produits
+                FROM commandes c
+                JOIN utilisateurs u ON c.client_id = u.id
+                LEFT JOIN commande_details cd ON c.id = cd.commande_id
+                WHERE c.statut = 'rembourse'
+                GROUP BY c.id
+                ORDER BY c.date_commande DESC
+                LIMIT 20
+            ");
+            $retours_en_attente = $stmt->fetchAll();
+        } catch (Exception $e) {
+            $error = "Erreur lors du chargement des retours: " . $e->getMessage();
+        }
+        break;
+
+    case 'produits_sans_prix':
+        try {
+            $stmt = $pdo->query("
+                SELECT p.*, c.nom as categorie_nom, f.nom_societe as fournisseur_nom
+                FROM produits p
+                LEFT JOIN categories c ON p.categorie_id = c.id
+                LEFT JOIN fournisseurs f ON p.fournisseur_id = f.id
+                LEFT JOIN prix_vente pv ON p.id = pv.produit_id AND pv.date_fin IS NULL
+                WHERE p.statut = 'actif' AND pv.id IS NULL
+                ORDER BY p.nom
+            ");
+            $produits_sans_prix = $stmt->fetchAll();
+        } catch (Exception $e) {
+            $error = "Erreur lors du chargement des produits sans prix: " . $e->getMessage();
+        }
+        break;
 }
 
-if (isset($_GET['get_commande_details'])) {
-    header('Content-Type: application/json');
-    $details = getDetailsCommande($db, (int) $_GET['get_commande_details']);
-    echo json_encode(['details' => $details]);
-    exit;
-}
-
-if (isset($_GET['get_stats_temps_reel'])) {
-    header('Content-Type: application/json');
-    $stats = getStatsTransactionsTempsReel($db, $user_id);
-    echo json_encode($stats);
-    exit;
-}
-
-if (isset($_GET['action']) && $_GET['action'] === 'actualiser_taux') {
-    header('Content-Type: application/json');
-    $nouveau_taux = getTauxChange();
-    echo json_encode(['success' => true, 'taux' => $nouveau_taux]);
-    exit;
-}
-
-// Fonction pour formater les dates
-function formatDate($date)
-{
-    if (empty($date))
-        return 'Non définie';
-    return date('d/m/Y H:i', strtotime($date));
+// Récupérer les transactions en temps réel
+$transactions_temps_reel = [];
+try {
+    $stmt = $pdo->prepare("
+        SELECT c.id, c.numero_commande, c.montant_total, c.mode_paiement,
+               c.date_commande, u.nom as client_nom
+        FROM commandes c
+        JOIN utilisateurs u ON c.client_id = u.id
+        WHERE c.caissier_id = :caissier_id 
+        AND DATE(c.date_commande) = CURDATE()
+        AND c.statut = 'paye'
+        ORDER BY c.date_commande DESC
+        LIMIT 10
+    ");
+    $stmt->execute([':caissier_id' => $_SESSION['user_id']]);
+    $transactions_temps_reel = $stmt->fetchAll();
+} catch (Exception $e) {
+    error_log("Erreur chargement transactions temps réel: " . $e->getMessage());
 }
 ?>
 
@@ -700,1337 +515,1011 @@ function formatDate($date)
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard Caissier - Pharma Management</title>
+    <title>NAGEX Pharma - Dashboard Caissier</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&display=swap"
         rel="stylesheet">
+    <!-- Styles CSS pour le sidebar -->
     <style>
-        .sidebar {
-            transition: all 0.3s ease;
+        .menu-item {
+            position: relative;
+            overflow: hidden;
+            border-radius: 8px;
+            margin: 2px 0;
+            transition: all 0.2s ease;
         }
 
-        .active {
+        .menu-item::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 100%;
+            width: 4px;
+            background: #10B981;
+            transform: scaleY(0);
+            transition: transform 0.2s ease;
+        }
+
+        .menu-item:hover::before {
+            transform: scaleY(1);
+        }
+
+        .active-menu::before {
+            transform: scaleY(1);
+        }
+
+        .active-menu {
+            background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+            color: white !important;
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+
+        .section-title {
+            position: relative;
+            padding-left: 20px;
+            margin-top: 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .section-title::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 8px;
+            height: 8px;
+            background: #10B981;
+            border-radius: 50%;
+        }
+
+        .badge-danger {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
             color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 700;
+            min-width: 20px;
+            text-align: center;
+            display: inline-block;
         }
 
-        .section {
-            display: none;
+        .badge-warning {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 700;
+            min-width: 20px;
+            text-align: center;
+            display: inline-block;
         }
 
-        .section.active {
-            display: block;
+        .menu-item:hover {
+            transform: translateX(2px);
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.15);
         }
 
-        .fade-in {
-            animation: fadeIn 0.3s ease-in;
+        .badge-danger,
+        .badge-warning {
+            animation: pulse 2s infinite;
         }
 
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(-10px);
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
             }
 
-            to {
-                opacity: 1;
-                transform: translateY(0);
+            50% {
+                transform: scale(1.05);
+            }
+
+            100% {
+                transform: scale(1);
             }
         }
     </style>
 </head>
 
 <body class="bg-gray-100" style="font-family: 'Montserrat', sans-serif;">
-    <!-- Sidebar -->
-    <div class="sidebar fixed inset-y-0 left-0 z-40 w-64 bg-white shadow-lg">
-        <!-- Logo -->
-        <div class="flex items-center justify-center p-6 border-b">
-            <div class="flex items-center space-x-3">
-                <div class="w-10 h-10 bg-green-600 rounded-full flex items-center justify-center">
-                    <i class="fas fa-cash-register text-white text-lg"></i>
-                </div>
-                <div>
-                    <h1 class="text-xl font-bold text-gray-800">NAGEX Pharma</h1>
-                    <p class="text-xs text-green-600">Dashboard Caissier</p>
-                </div>
-            </div>
-        </div>
 
-        <!-- Navigation -->
-        <nav class="mt-6 ">
-            <div class="px-4 space-y-2">
-                <!-- Tableau de bord -->
-                <a href="#dashboard" data-section="dashboard"
-                    class="active flex items-center px-4 py-3 text-gray-700 rounded-lg transition-colors">
-                    <i class="fas fa-tachometer-alt w-6"></i>
-                    <span class="ml-3 font-medium">Tableau de bord</span>
-                </a>
 
-                <!-- Gestion des prix -->
-                <div class="mt-4">
-                    <p class="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Gestion des prix
-                    </p>
-                    <a href="#prix" data-section="prix"
-                        class="flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-green-50 transition-colors">
-                        <i class="fas fa-tags w-6 text-purple-500"></i>
-                        <span class="ml-3 font-medium">Prix & Devises</span>
-                    </a>
-                    <a href="#historique-prix" data-section="historique-prix"
-                        class="flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-green-50 transition-colors">
-                        <i class="fas fa-history w-6 text-blue-500"></i>
-                        <span class="ml-3 font-medium">Historique Prix</span>
-                    </a>
-                </div>
 
-                <!-- Traitement commandes -->
-                <div class="mt-4">
-                    <p class="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Traitement
-                        commandes</p>
-                    <a href="#commandes" data-section="commandes"
-                        class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-green-50 transition-colors">
-                        <div class="flex items-center">
-                            <i class="fas fa-shopping-cart w-6 text-orange-500"></i>
-                            <span class="ml-3 font-medium">Commandes en attente</span>
-                        </div>
-                        <span
-                            class="bg-orange-500 text-white text-xs px-2 py-1 rounded-full"><?php echo count($commandes_attente); ?></span>
-                    </a>
-                </div>
-
-                <!-- Transactions -->
-                <div class="mt-4">
-                    <p class="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Transactions</p>
-                    <a href="#caisse" data-section="caisse"
-                        class="flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-green-50 transition-colors">
-                        <i class="fas fa-cash-register w-6 text-green-500"></i>
-                        <span class="ml-3 font-medium">Nouvelle Vente</span>
-                    </a>
-                    <a href="#remboursements" data-section="remboursements"
-                        class="flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-green-50 transition-colors">
-                        <i class="fas fa-undo w-6 text-red-500"></i>
-                        <span class="ml-3 font-medium">Remboursements</span>
-                    </a>
-                </div>
-            </div>
-        </nav>
-
-        <!-- User Profile -->
-        <div class="absolute bottom-0 left-0 right-0 p-4 border-t">
-            <div class="flex items-center space-x-3">
-                <div class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
-                    <i class="fas fa-cash-register text-green-600"></i>
-                </div>
-                <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-gray-900 truncate"><?php echo htmlspecialchars($user_name); ?>
-                    </p>
-                    <p class="text-xs text-green-600 truncate">Caissier</p>
-                </div>
-                <a href="../utilisateurs/logout.php" class="text-gray-400 hover:text-red-500 transition-colors"
-                    title="Déconnexion">
-                    <i class="fas fa-sign-out-alt"></i>
-                </a>
-            </div>
-        </div>
-    </div>
-
-    <!-- Main Content -->
-    <div class="ml-64">
-        <!-- Header -->
-        <header class="bg-white shadow-sm">
-            <div class="flex items-center justify-between px-8 py-4">
-                <div>
-                    <h2 class="text-2xl font-bold text-gray-800" id="pageTitle">Tableau de bord Caissier</h2>
-                    <p class="text-gray-600">Gestion des prix, commandes et transactions</p>
-                </div>
-                <div class="flex items-center space-x-4">
-                    <div class="text-sm text-gray-600">
-                        <i class="fas fa-user-circle mr-2"></i>
-                        Connecté en tant que <span
-                            class="font-semibold"><?php echo htmlspecialchars($user_role); ?></span>
+    <div class="flex">
+        <!-- Sidebar -->
+        <div class="sidebar w-64 bg-white shadow-lg min-h-screen">
+            <!-- Logo Section avec fond dégradé -->
+            <div class="flex items-center justify-center p-6 border-b bg-gradient-to-r from-emerald-50 to-green-50">
+                <div class="flex items-center space-x-3">
+                    <div
+                        class="w-12 h-12 bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl flex items-center justify-center shadow-lg">
+                        <i class="fas fa-capsules text-white text-xl"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold text-gray-800">NAGEX Pharma</h1>
+                        <p class="text-xs text-green-600 font-medium">Caissier Dashboard</p>
                     </div>
                 </div>
             </div>
-        </header>
 
-        <!-- Main Content Area -->
-        <main class="p-8">
+            <nav class="flex-1 p-4 overflow-y-auto">
+                <!-- Dashboard -->
+                <div class="mb-6">
+                    <a href="?page=dashboard"
+                        class="menu-item block py-3 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'dashboard' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
+                        <i class="fas fa-home mr-3 w-5 text-center"></i>
+                        <span class="font-medium">Tableau de bord</span>
+                    </a>
+                </div>
+
+                <!-- Commandes -->
+                <div class="mb-6">
+                    <div class="section-title text-xs text-gray-500 font-semibold uppercase tracking-wider mb-2">
+                        <i class="fas fa-shopping-cart mr-2"></i>Commandes
+                    </div>
+                    <div class="space-y-1">
+                        <a href="?page=commandes_attente"
+                            class="menu-item block py-2.5 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'commandes_attente' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
+                            <i class="fas fa-clock mr-3 w-5 text-center"></i>
+                            <span class="flex-1">En attente</span>
+                            <?php if (isset($stats['commandes_attente']) && $stats['commandes_attente'] > 0): ?>
+                                <span class="badge-danger text-xs font-bold px-2 py-1 min-w-[24px] text-center">
+                                    <?php echo $stats['commandes_attente']; ?>
+                                </span>
+                            <?php endif; ?>
+                        </a>
+                        <a href="?page=transactions"
+                            class="menu-item block py-2.5 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'transactions' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
+                            <i class="fas fa-history mr-3 w-5 text-center"></i>
+                            <span>Historique</span>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Prix & Promotions -->
+                <div class="mb-6">
+                    <div class="section-title text-xs text-gray-500 font-semibold uppercase tracking-wider mb-2">
+                        <i class="fas fa-tags mr-2"></i>Prix & Promotions
+                    </div>
+                    <div class="space-y-1">
+                        <a href="?page=gestion_prix"
+                            class="menu-item block py-2.5 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'gestion_prix' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
+                            <i class="fas fa-dollar-sign mr-3 w-5 text-center"></i>
+                            <span>Gestion des prix</span>
+                        </a>
+                        <a href="?page=produits_sans_prix"
+                            class="menu-item block py-2.5 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'produits_sans_prix' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
+                            <i class="fas fa-exclamation-circle mr-3 w-5 text-center"></i>
+                            <span class="flex-1">Sans prix</span>
+                            <?php if (isset($stats['produits_sans_prix']) && $stats['produits_sans_prix'] > 0): ?>
+                                <span class="badge-warning text-xs font-bold px-2 py-1 min-w-[24px] text-center">
+                                    <?php echo $stats['produits_sans_prix']; ?>
+                                </span>
+                            <?php endif; ?>
+                        </a>
+                        <a href="?page=promotions"
+                            class="menu-item block py-2.5 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'promotions' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
+                            <i class="fas fa-percent mr-3 w-5 text-center"></i>
+                            <span>Promotions</span>
+                        </a>
+                        <a href="?page=taux_conversion"
+                            class="menu-item block py-2.5 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'taux_conversion' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
+                            <i class="fas fa-exchange-alt mr-3 w-5 text-center"></i>
+                            <span>Taux de change</span>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Retours -->
+                <div class="mb-6">
+                    <div class="section-title text-xs text-gray-500 font-semibold uppercase tracking-wider mb-2">
+                        <i class="fas fa-undo mr-2"></i>Retours
+                    </div>
+                    <a href="?page=retours"
+                        class="menu-item block py-2.5 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'retours' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
+                        <i class="fas fa-undo-alt mr-3 w-5 text-center"></i>
+                        <span>Gestion retours</span>
+                    </a>
+                </div>
+
+                <!-- Dashboard -->
+                <div class="mb-6">
+                    <div class="section-title text-xs text-gray-500 font-semibold uppercase tracking-wider mb-2">
+                        <i class="fas fa-chart-line mr-2"></i>Dashboard
+                    </div>
+                    <a href="?page=temps_reel"
+                        class="menu-item block py-2.5 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'temps_reel' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
+                        <i class="fas fa-chart-bar mr-3 w-5 text-center"></i>
+                        <span>Temps réel</span>
+                    </a>
+                </div>
+            </nav>
+
+
+        </div>
+
+        <!-- Contenu principal -->
+        <div class="flex-1 p-6">
             <!-- Messages d'alerte -->
-            <?php if (isset($_SESSION['success_message'])): ?>
-                <div class="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
-                    <div class="flex items-center">
-                        <i class="fas fa-check-circle text-green-600 mr-2"></i>
-                        <span class="text-green-800"><?php echo $_SESSION['success_message']; ?></span>
-                    </div>
+            <?php if ($message): ?>
+                <div class="mb-4 p-4 bg-green-100 text-green-700 rounded-lg border border-green-300">
+                    <?php echo $message; ?>
                 </div>
-                <?php unset($_SESSION['success_message']); ?>
             <?php endif; ?>
 
-            <?php if (isset($_SESSION['error_message'])): ?>
-                <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-                    <div class="flex items-center">
-                        <i class="fas fa-exclamation-triangle text-red-600 mr-2"></i>
-                        <span class="text-red-800"><?php echo $_SESSION['error_message']; ?></span>
-                    </div>
+            <?php if ($error): ?>
+                <div class="mb-4 p-4 bg-red-100 text-red-700 rounded-lg border border-red-300">
+                    <?php echo $error; ?>
                 </div>
-                <?php unset($_SESSION['error_message']); ?>
             <?php endif; ?>
 
-            <!-- Section Tableau de bord -->
-            <div id="dashboard" class="section active">
-                <!-- Stats Cards -->
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                    <!-- Commandes en attente -->
-                    <div class="bg-white rounded-2xl shadow-sm p-6 border-l-4 border-orange-500">
-                        <div class="flex items-center justify-between">
+            <!-- Contenu selon la page -->
+            <?php if ($current_page == 'dashboard'): ?>
+                <!-- ========== DASHBOARD CAISSIER ========== -->
+                <div class="mb-8">
+                    <!-- En-tête -->
+                    <div class="flex items-center justify-between mb-8">
+                        <div class="flex items-center">
+                            <div class="p-3 bg-gradient-to-br from-emerald-100 to-emerald-200 rounded-xl shadow-sm mr-4">
+                                <i class="fas fa-cash-register text-emerald-600 text-xl"></i>
+                            </div>
                             <div>
-                                <p class="text-sm text-gray-600">Commandes en attente</p>
-                                <p class="text-2xl font-bold text-gray-900"><?php echo count($commandes_attente); ?></p>
+                                <h1 class="text-2xl font-bold text-gray-800">Tableau de bord Caissier</h1>
+                                <p class="text-gray-600 mt-1">Gestion des transactions et des prix</p>
                             </div>
-                            <div class="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center">
-                                <i class="fas fa-shopping-cart text-orange-600 text-xl"></i>
-                            </div>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <span
+                                class="px-3 py-1 bg-gradient-to-r from-emerald-100 to-emerald-50 text-emerald-800 rounded-full text-sm font-semibold border border-emerald-200">
+                                <i class="fas fa-sync-alt mr-1"></i>Mis à jour à l'instant
+                            </span>
                         </div>
                     </div>
 
-                    <!-- Chiffre d'affaires -->
-                    <div class="bg-white rounded-2xl shadow-sm p-6 border-l-4 border-green-500">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-sm text-gray-600">CA aujourd'hui</p>
-                                <p class="text-2xl font-bold text-gray-900">
-                                    <?php echo number_format($stats_transactions['ca_jour'] ?? 0, 2, ',', ' '); ?> FC
-                                </p>
-                            </div>
-                            <div class="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
-                                <i class="fas fa-chart-line text-green-600 text-xl"></i>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Ventes aujourd'hui -->
-                    <div class="bg-white rounded-2xl shadow-sm p-6 border-l-4 border-blue-500">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-sm text-gray-600">Ventes aujourd'hui</p>
-                                <p class="text-2xl font-bold text-gray-900">
-                                    <?php echo $stats_transactions['total_ventes_jour'] ?? 0; ?>
-                                </p>
-                            </div>
-                            <div class="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                                <i class="fas fa-receipt text-blue-600 text-xl"></i>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Taux de change -->
-                    <div class="bg-white rounded-2xl shadow-sm p-6 border-l-4 border-purple-500">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-sm text-gray-600">Taux de change</p>
-                                <p class="text-2xl font-bold text-gray-900">
-                                    <?php echo number_format($taux_change, 2, ',', ' '); ?>
-                                </p>
-                            </div>
-                            <div class="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center">
-                                <i class="fas fa-exchange-alt text-purple-600 text-xl"></i>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Actions rapides -->
-                <div class="bg-white rounded-2xl shadow-sm p-6">
-                    <h3 class="text-lg font-semibold text-gray-900 mb-6">Actions rapides</h3>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <a href="#prix" onclick="showSection('prix')"
-                            class="flex flex-col items-center p-4 bg-purple-50 rounded-lg hover:bg-purple-100 transition-colors text-center">
-                            <i class="fas fa-tags text-purple-600 text-2xl mb-2"></i>
-                            <span class="font-medium text-sm text-gray-700">Gérer les prix</span>
-                        </a>
-
-                        <a href="#commandes" onclick="showSection('commandes')"
-                            class="flex flex-col items-center p-4 bg-orange-50 rounded-lg hover:bg-orange-100 transition-colors text-center">
-                            <i class="fas fa-shopping-cart text-orange-600 text-2xl mb-2"></i>
-                            <span class="font-medium text-sm text-gray-700">Commandes</span>
-                        </a>
-
-                        <a href="#caisse" onclick="showSection('caisse')"
-                            class="flex flex-col items-center p-4 bg-green-50 rounded-lg hover:bg-green-100 transition-colors text-center">
-                            <i class="fas fa-cash-register text-green-600 text-2xl mb-2"></i>
-                            <span class="font-medium text-sm text-gray-700">Nouvelle vente</span>
-                        </a>
-
-                        <a href="#remboursements" onclick="showSection('remboursements')"
-                            class="flex flex-col items-center p-4 bg-red-50 rounded-lg hover:bg-red-100 transition-colors text-center">
-                            <i class="fas fa-undo text-red-600 text-2xl mb-2"></i>
-                            <span class="font-medium text-sm text-gray-700">Remboursements</span>
-                        </a>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Section Gestion des Prix -->
-            <div id="prix" class="section">
-                <div class="bg-white rounded-2xl shadow-sm">
-                    <div class="px-6 py-4 border-b">
-                        <h3 class="text-xl font-semibold text-gray-900">Gestion des Prix et Devises</h3>
-                    </div>
-                    <div class="p-6">
-                        <!-- Taux de change -->
-                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-                            <div class="flex items-center justify-between">
-                                <div>
-                                    <h4 class="font-semibold text-blue-800">Taux de change actuel</h4>
-                                    <p class="text-blue-600">1 USD =
-                                        <?php echo number_format($taux_change, 2, ',', ' '); ?> CDF
-                                    </p>
+                    <!-- Cartes de statistiques -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                        <!-- Commandes en attente -->
+                        <div
+                            class="stat-card group bg-gradient-to-br from-white to-blue-50 p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 border border-blue-100 hover:border-blue-200 relative overflow-hidden">
+                            <div class="relative z-10">
+                                <div class="flex items-center mb-2">
+                                    <div
+                                        class="stat-icon p-3 bg-gradient-to-br from-blue-100 to-blue-200 rounded-xl shadow-inner group-hover:scale-110 transition-transform duration-300">
+                                        <i class="fas fa-clock text-blue-600 text-xl"></i>
+                                    </div>
+                                    <div class="ml-4">
+                                        <p class="text-gray-600 text-sm font-medium">Commandes en attente</p>
+                                        <p class="text-2xl font-bold text-gray-800 mt-1">
+                                            <?php echo $stats['commandes_attente'] ?? 0; ?></p>
+                                    </div>
                                 </div>
-                                <button onclick="actualiserTauxChange()"
-                                    class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm">
-                                    <i class="fas fa-sync-alt mr-2"></i>Actualiser
-                                </button>
+                                <p class="text-xs text-blue-600 font-medium mt-2">
+                                    <i class="fas fa-hourglass-half mr-1"></i>À traiter
+                                </p>
+                            </div>
+                            <div class="absolute bottom-0 right-0 opacity-10">
+                                <i class="fas fa-clock text-blue-400 text-5xl"></i>
                             </div>
                         </div>
 
-                        <!-- Liste des produits avec prix -->
-                        <div class="overflow-x-auto">
-                            <table class="w-full text-sm">
-                                <thead class="bg-gray-50">
-                                    <tr>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                            Produit</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Prix
-                                            FC</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Prix
-                                            USD</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Taux
-                                        </th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                            Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="bg-white divide-y divide-gray-200">
-                                    <?php foreach ($prix_produits as $produit): ?>
-                                        <tr class="hover:bg-gray-50">
-                                            <td class="px-4 py-3 whitespace-nowrap">
-                                                <div class="font-medium text-gray-900">
-                                                    <?php echo htmlspecialchars($produit['nom']); ?>
-                                                </div>
-                                                <div class="text-xs text-gray-500">
-                                                    <?php echo htmlspecialchars($produit['reference']); ?>
-                                                </div>
-                                            </td>
-                                            <td class="px-4 py-3 whitespace-nowrap">
-                                                <input type="number" id="prix_fc_<?php echo $produit['id']; ?>"
-                                                    value="<?php echo number_format($produit['prix_fc'], 2, '.', ''); ?>"
-                                                    step="0.01"
-                                                    class="w-24 border border-gray-300 rounded px-2 py-1 text-sm">
-                                            </td>
-                                            <td class="px-4 py-3 whitespace-nowrap">
-                                                <input type="number" id="prix_usd_<?php echo $produit['id']; ?>"
-                                                    value="<?php echo number_format($produit['prix_usd'], 2, '.', ''); ?>"
-                                                    step="0.01"
-                                                    class="w-24 border border-gray-300 rounded px-2 py-1 text-sm">
-                                            </td>
-                                            <td class="px-4 py-3 whitespace-nowrap">
-                                                <input type="number" id="taux_<?php echo $produit['id']; ?>"
-                                                    value="<?php echo number_format($produit['taux_conversion'], 2, '.', ''); ?>"
-                                                    step="0.01"
-                                                    class="w-24 border border-gray-300 rounded px-2 py-1 text-sm">
-                                            </td>
-                                            <td class="px-4 py-3 whitespace-nowrap">
-                                                <button onclick="updatePrix(<?php echo $produit['id']; ?>)"
-                                                    class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm">
-                                                    <i class="fas fa-save mr-1"></i>Mettre à jour
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
+                        <!-- Chiffre d'affaires -->
+                        <div
+                            class="stat-card group bg-gradient-to-br from-white to-green-50 p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 border border-green-100 hover:border-green-200 relative overflow-hidden">
+                            <div class="relative z-10">
+                                <div class="flex items-center mb-2">
+                                    <div
+                                        class="stat-icon p-3 bg-gradient-to-br from-green-100 to-green-200 rounded-xl shadow-inner group-hover:scale-110 transition-transform duration-300">
+                                        <i class="fas fa-chart-line text-green-600 text-xl"></i>
+                                    </div>
+                                    <div class="ml-4">
+                                        <p class="text-gray-600 text-sm font-medium">Chiffre d'affaires</p>
+                                        <p class="text-2xl font-bold text-gray-800 mt-1">
+                                            <?php echo formatMontant((float) ($stats['chiffre_affaires'] ?? 0)); ?>
+                                        </p>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-green-600 font-medium mt-2">
+                                    <i class="fas fa-money-bill-wave mr-1"></i>Aujourd'hui
+                                </p>
+                            </div>
+                            <div class="absolute bottom-0 right-0 opacity-10">
+                                <i class="fas fa-chart-line text-green-400 text-5xl"></i>
+                            </div>
+                        </div>
+
+                        <!-- Produits sans prix -->
+                        <div
+                            class="stat-card group bg-gradient-to-br from-white to-yellow-50 p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 border border-yellow-100 hover:border-yellow-200 relative overflow-hidden">
+                            <div class="relative z-10">
+                                <div class="flex items-center mb-2">
+                                    <div
+                                        class="stat-icon p-3 bg-gradient-to-br from-yellow-100 to-yellow-200 rounded-xl shadow-inner group-hover:scale-110 transition-transform duration-300">
+                                        <i class="fas fa-exclamation-circle text-yellow-600 text-xl"></i>
+                                    </div>
+                                    <div class="ml-4">
+                                        <p class="text-gray-600 text-sm font-medium">Produits sans prix</p>
+                                        <p class="text-2xl font-bold text-gray-800 mt-1">
+                                            <?php echo $stats['produits_sans_prix'] ?? 0; ?></p>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-yellow-600 font-medium mt-2">
+                                    <i class="fas fa-dollar-sign mr-1"></i>À définir
+                                </p>
+                            </div>
+                            <div class="absolute bottom-0 right-0 opacity-10">
+                                <i class="fas fa-exclamation-circle text-yellow-400 text-5xl"></i>
+                            </div>
+                        </div>
+
+                        <!-- Transactions aujourd'hui -->
+                        <div
+                            class="stat-card group bg-gradient-to-br from-white to-purple-50 p-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 border border-purple-100 hover:border-purple-200 relative overflow-hidden">
+                            <div class="relative z-10">
+                                <div class="flex items-center mb-2">
+                                    <div
+                                        class="stat-icon p-3 bg-gradient-to-br from-purple-100 to-purple-200 rounded-xl shadow-inner group-hover:scale-110 transition-transform duration-300">
+                                        <i class="fas fa-sync-alt text-purple-600 text-xl"></i>
+                                    </div>
+                                    <div class="ml-4">
+                                        <p class="text-gray-600 text-sm font-medium">Transactions</p>
+                                        <p class="text-2xl font-bold text-gray-800 mt-1">
+                                            <?php echo $stats['transactions_aujourdhui'] ?? 0; ?></p>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-purple-600 font-medium mt-2">
+                                    <i class="fas fa-calendar-day mr-1"></i>Aujourd'hui
+                                </p>
+                            </div>
+                            <div class="absolute bottom-0 right-0 opacity-10">
+                                <i class="fas fa-sync-alt text-purple-400 text-5xl"></i>
+                            </div>
                         </div>
                     </div>
-                </div>
-            </div>
 
-            <!-- Section Historique des Prix -->
-            <div id="historique-prix" class="section">
-                <div class="bg-white rounded-2xl shadow-sm">
-                    <div class="px-6 py-4 border-b">
-                        <h3 class="text-xl font-semibold text-gray-900">Historique des modifications de prix</h3>
-                    </div>
-                    <div class="p-6">
-                        <div class="overflow-x-auto">
-                            <table class="w-full text-sm">
-                                <thead class="bg-gray-50">
-                                    <tr>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                            Produit</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Prix
-                                            FC</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Prix
-                                            USD</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Taux
-                                        </th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                            Période</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                            Modifié par</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="bg-white divide-y divide-gray-200">
-                                    <?php foreach ($historique_prix as $historique): ?>
-                                        <tr class="hover:bg-gray-50">
-                                            <td class="px-4 py-3 whitespace-nowrap font-medium text-gray-900">
-                                                <?php echo htmlspecialchars($historique['produit_nom']); ?>
-                                            </td>
-                                            <td class="px-4 py-3 whitespace-nowrap text-gray-500">
-                                                <?php echo number_format($historique['prix_fc'], 2, ',', ' '); ?> FC
-                                            </td>
-                                            <td class="px-4 py-3 whitespace-nowrap text-gray-500">
-                                                <?php echo number_format($historique['prix_usd'], 2, ',', ' '); ?> $
-                                            </td>
-                                            <td class="px-4 py-3 whitespace-nowrap text-gray-500">
-                                                <?php echo number_format($historique['taux_conversion'], 2, ',', ' '); ?>
-                                            </td>
-                                            <td class="px-4 py-3 whitespace-nowrap text-gray-500">
-                                                <?php echo formatDate($historique['date_debut']); ?>
-                                                <?php if ($historique['date_fin']): ?>
-                                                    <br>au <?php echo formatDate($historique['date_fin']); ?>
-                                                <?php else: ?>
-                                                    <br><span class="text-green-600">En cours</span>
-                                                <?php endif; ?>
-                                            </td>
-                                            <td class="px-4 py-3 whitespace-nowrap text-gray-500">
-                                                <?php echo htmlspecialchars($historique['caissier_nom']); ?>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
+                    <!-- Transactions récentes & Actions rapides -->
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                        <!-- Transactions récentes -->
+                        <div
+                            class="bg-gradient-to-br from-white to-blue-50 rounded-xl shadow-lg p-6 border border-blue-200">
+                            <div class="flex items-center justify-between mb-6">
+                                <div class="flex items-center">
+                                    <div class="p-3 bg-gradient-to-br from-blue-100 to-blue-200 rounded-xl shadow-sm mr-3">
+                                        <i class="fas fa-history text-blue-600"></i>
+                                    </div>
+                                    <h2 class="text-xl font-bold text-gray-800">Transactions récentes</h2>
+                                </div>
+                                <a href="?page=transactions"
+                                    class="text-sm text-emerald-600 hover:text-emerald-700 font-medium flex items-center">
+                                    Voir toutes
+                                    <i class="fas fa-arrow-right ml-1 text-xs"></i>
+                                </a>
+                            </div>
 
-            <!-- Section Commandes en attente -->
-            <div id="commandes" class="section">
-                <div class="bg-white rounded-2xl shadow-sm">
-                    <div class="px-6 py-4 border-b">
-                        <h3 class="text-xl font-semibold text-gray-900">Commandes en attente de paiement</h3>
-                    </div>
-                    <div class="p-6">
-                        <?php if (!empty($commandes_attente)): ?>
-                            <div class="space-y-4">
-                                <?php foreach ($commandes_attente as $commande): ?>
-                                    <div class="border border-orange-200 rounded-lg p-4 bg-orange-50">
-                                        <div class="flex items-center justify-between mb-3">
-                                            <div>
-                                                <h4 class="font-semibold text-orange-800">Commande
-                                                    #<?php echo $commande['numero_commande']; ?></h4>
-                                                <p class="text-orange-600">Client:
-                                                    <?php echo htmlspecialchars($commande['client_nom'] . ' ' . $commande['client_prenom']); ?>
-                                                </p>
+                            <?php if (isset($transactions_temps_reel) && count($transactions_temps_reel) > 0): ?>
+                                <div class="space-y-4">
+                                    <?php foreach ($transactions_temps_reel as $transaction): ?>
+                                        <div
+                                            class="group flex justify-between items-center p-4 bg-white rounded-xl border border-gray-200 hover:shadow-lg hover:border-blue-300 transition-all duration-200">
+                                            <div class="flex items-center">
+                                                <div
+                                                    class="p-2 bg-gradient-to-br from-green-50 to-green-100 rounded-lg mr-3 border border-green-200">
+                                                    <i class="fas fa-receipt text-green-600 text-sm"></i>
+                                                </div>
+                                                <div>
+                                                    <div
+                                                        class="font-semibold text-gray-900 group-hover:text-blue-700 transition-colors">
+                                                        #<?php echo htmlspecialchars($transaction['numero_commande']); ?>
+                                                    </div>
+                                                    <div class="text-sm text-gray-600 mt-1">
+                                                        <i class="fas fa-user mr-1 text-xs"></i>
+                                                        <?php echo htmlspecialchars($transaction['client_nom']); ?>
+                                                    </div>
+                                                </div>
                                             </div>
                                             <div class="text-right">
-                                                <div class="text-lg font-bold text-orange-700">
-                                                    <?php echo number_format($commande['montant_total'], 2, ',', ' '); ?> FC
+                                                <div class="text-lg font-bold text-green-700">
+                                                    <?php echo formatMontant($transaction['montant_total']); ?>
                                                 </div>
-                                                <div class="text-sm text-orange-600">
-                                                    <?php echo $commande['nb_produits']; ?> produits
+                                                <div class="text-sm text-gray-500 mt-1">
+                                                    <i class="fas fa-clock mr-1 text-xs"></i>
+                                                    <?php echo date('H:i', strtotime($transaction['date_commande'])); ?>
                                                 </div>
                                             </div>
                                         </div>
-                                        <div class="flex items-center justify-between">
-                                            <div class="text-sm text-orange-600">
-                                                Créée le <?php echo formatDate($commande['date_commande']); ?>
-                                            </div>
-                                            <div class="flex space-x-2">
-                                                <button onclick="voirDetailsCommande(<?php echo $commande['id']; ?>)"
-                                                    class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
-                                                    <i class="fas fa-eye mr-1"></i>Détails
-                                                </button>
-                                                <button onclick="validerPaiement(<?php echo $commande['id']; ?>)"
-                                                    class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm">
-                                                    <i class="fas fa-check mr-1"></i>Valider paiement
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                <?php endforeach; ?>
-                            </div>
-                        <?php else: ?>
-                            <div class="text-center py-8 text-gray-500">
-                                <i class="fas fa-check-circle text-green-500 text-3xl mb-2"></i>
-                                <p>Aucune commande en attente</p>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Section Caisse (Nouvelle vente) -->
-            <div id="caisse" class="section">
-                <div class="">
-                    <div class="px-6 py-4 border-b border-gray-200">
-                        <h2 class="text-lg font-semibold text-gray-900">Nouvelle vente</h2>
-                    </div>
-                    <div class="p-6">
-                        <!-- Recherche produit -->
-                        <div class="mb-6">
-                            <label class="block text-sm font-medium text-gray-700 mb-2">
-                                <i class="fas fa-barcode mr-2"></i>Sélectionner un produit
-                            </label>
-                            <div class="flex space-x-2 mb-4">
-                                <input type="text" id="search-product"
-                                    class="flex-1 px-4 py-3 border border-gray-300 text-gray-700 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-lg"
-                                    placeholder="Rechercher par nom, référence ou catégorie..."
-                                    onkeyup="filterProducts()">
-                                <button onclick="clearSearch()"
-                                    class="bg-gray-500 hover:bg-gray-600 text-white px-6 py-3 rounded-lg">
-                                    <i class="fas fa-times"></i>
-                                </button>
-                            </div>
-                            <!-- Sélection des produits -->
-                            <div class="border border-gray-300 rounded-lg max-h-80 overflow-y-auto">
-                                <div id="products-list" class="divide-y divide-gray-200">
-                                    <?php if (!empty($all_produits)): ?>
-                                        <?php foreach ($all_produits as $produit): ?>
-                                            <div class="product-item p-4 hover:bg-gray-50 cursor-pointer transition-colors"
-                                                data-name="<?php echo htmlspecialchars(strtolower($produit['nom'])); ?>"
-                                                data-reference="<?php echo htmlspecialchars(strtolower($produit['reference'])); ?>"
-                                                data-category="<?php echo htmlspecialchars(strtolower($produit['categorie_nom'])); ?>"
-                                                onclick="addToCart(<?php echo $produit['id']; ?>)">
-                                                <div class="flex items-center justify-between">
-                                                    <div class="flex-1">
-                                                        <div class="flex items-center space-x-3">
-                                                            <div
-                                                                class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                                                                <i class="fas fa-pills text-blue-600"></i>
-                                                            </div>
-                                                            <div>
-                                                                <div class="font-semibold text-gray-900">
-                                                                    <?php echo htmlspecialchars($produit['nom']); ?>
-                                                                </div>
-                                                                <div class="text-sm text-gray-500">
-                                                                    <?php echo htmlspecialchars($produit['reference']); ?>
-                                                                    <?php if ($produit['categorie_nom']): ?>
-                                                                        • <?php echo htmlspecialchars($produit['categorie_nom']); ?>
-                                                                    <?php endif; ?>
-                                                                </div>
-                                                                <?php if ($produit['description']): ?>
-                                                                    <div class="text-xs text-gray-400 mt-1">
-                                                                        <?php echo htmlspecialchars(substr($produit['description'], 0, 60)); ?>
-                                                                        <?php if (strlen($produit['description']) > 60): ?>...<?php endif; ?>
-                                                                    </div>
-                                                                <?php endif; ?>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    <div class="text-right">
-                                                        <div class="flex items-center space-x-4">
-                                                            <!-- Informations stock -->
-                                                            <div class="text-sm text-gray-600 text-center">
-                                                                <div class="font-semibold"><?php echo $produit['stock']; ?>
-                                                                </div>
-                                                                <div class="text-xs">en stock</div>
-                                                            </div>
-
-                                                            <!-- Prix -->
-                                                            <div>
-                                                                <div class="font-bold text-green-600 text-lg">
-                                                                    <?php echo number_format($produit['prix_fc'], 0, ',', ' '); ?>
-                                                                    FC
-                                                                </div>
-                                                                <div class="text-xs text-gray-500">
-                                                                    <?php echo number_format($produit['prix_usd'], 2, ',', ' '); ?>
-                                                                    $
-                                                                </div>
-                                                                <div class="text-xs text-blue-500">
-                                                                    HT:
-                                                                    <?php echo number_format($produit['prix_vente_ht'], 0, ',', ' '); ?>
-                                                                    FC
-                                                                </div>
-                                                                <?php if ($produit['taux_tva'] > 0): ?>
-                                                                    <div class="text-xs text-orange-500">
-                                                                        TVA: <?php echo $produit['taux_tva']; ?>%
-                                                                    </div>
-                                                                <?php endif; ?>
-                                                            </div>
-
-                                                            <!-- Bouton ajouter -->
-                                                            <button
-                                                                class="bg-green-500 hover:bg-green-600 text-white p-2 rounded-lg transition-colors"
-                                                                onclick="event.stopPropagation(); addToCart(<?php echo $produit['id']; ?>)">
-                                                                <i class="fas fa-plus"></i>
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        <?php endforeach; ?>
-                                    <?php else: ?>
-                                        <div class="text-center py-8 text-gray-500 text-red-700">
-                                            <i class="fas fa-box-open text-3xl mb-2"></i>
-                                            <p>Aucun produit disponible</p>
-                                            <p class="text-sm">Tous les produits sont en rupture de stock</p>
-                                        </div>
-                                    <?php endif; ?>
+                                    <?php endforeach; ?>
                                 </div>
-                            </div>
-
-                            <!-- Statistiques produits -->
-                            <?php if (!empty($all_produits)): ?>
-                                <div class="mt-3 flex items-center justify-between text-xs text-gray-500">
-                                    <span><?php echo count($all_produits); ?> produit(s) disponible(s)</span>
-                                    <span>Stock total: <?php echo array_sum(array_column($all_produits, 'stock')); ?>
-                                        unités</span>
+                            <?php else: ?>
+                                <div class="text-center py-10">
+                                    <div
+                                        class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gradient-to-r from-gray-100 to-gray-200 mb-4 shadow-sm">
+                                        <i class="fas fa-receipt text-gray-400 text-2xl"></i>
+                                    </div>
+                                    <h3 class="text-lg font-medium text-gray-700 mb-2">Aucune transaction</h3>
+                                    <p class="text-gray-500 text-sm">Aucune transaction aujourd'hui</p>
                                 </div>
                             <?php endif; ?>
                         </div>
-                        <div id="search-results" class="mt-2 hidden"></div>
-                    </div>
 
-                    <!-- Panier -->
-                    <div class="mb-6">
-                        <h3 class="text-md font-semibold text-gray-900 mb-3">Panier</h3>
-                        <div id="cart" class="space-y-2 max-h-96 overflow-y-auto">
-                            <div class="text-center text-gray-500 py-8">
-                                <i class="fas fa-shopping-cart text-3xl mb-2"></i>
-                                <p>Panier vide</p>
-                                <p class="text-sm">Scannez ou recherchez des produits</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Total et réduction -->
-                    <div class="border-t border-gray-200 pt-4">
-                        <div class="grid grid-cols-2 gap-4 mb-4">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">Remise</label>
-                                <div class="flex space-x-2">
-                                    <input type="number" id="discount-amount" min="0" step="0.01"
-                                        class="flex-1 px-3 py-2 border border-gray-300 rounded text-sm text-gray-700"
-                                        placeholder="Montant FC" onchange="updateTotals()">
-                                    <button onclick="applyDiscount()"
-                                        class="bg-gray-500 hover:bg-gray-600 text-white px-3 py-2 rounded text-sm">
-                                        Appliquer
-                                    </button>
+                        <!-- Actions rapides -->
+                        <div
+                            class="bg-gradient-to-br from-white to-emerald-50 rounded-xl shadow-lg p-6 border border-emerald-200">
+                            <div class="flex items-center mb-6">
+                                <div
+                                    class="p-3 bg-gradient-to-br from-emerald-100 to-emerald-200 rounded-xl shadow-sm mr-3">
+                                    <i class="fas fa-bolt text-emerald-600"></i>
                                 </div>
+                                <h2 class="text-xl font-bold text-gray-800">Actions rapides</h2>
                             </div>
-                            <div class="text-right">
-                                <div class="text-sm text-gray-600">Sous-total:</div>
-                                <div id="subtotal-amount" class="text-xl font-bold text-gray-900">0,00 FC</div>
-                                <div id="subtotal-usd" class="text-sm text-gray-500">0,00 $</div>
+
+                            <div class="space-y-4">
+                                <!-- Valider les paiements -->
+                                <a href="?page=commandes_attente"
+                                    class="group flex items-center justify-between p-5 bg-gradient-to-br from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 rounded-xl border border-blue-200 hover:shadow-lg transition-all duration-200">
+                                    <div class="flex items-center">
+                                        <div
+                                            class="p-3 bg-gradient-to-br from-white to-blue-50 rounded-lg mr-4 shadow-sm group-hover:shadow transition-shadow">
+                                            <i class="fas fa-check-circle text-blue-600 text-xl"></i>
+                                        </div>
+                                        <div>
+                                            <h3 class="font-semibold text-blue-700">Valider les paiements</h3>
+                                            <p class="text-sm text-blue-600 opacity-80 mt-1">
+                                                <?php echo $stats['commandes_attente'] ?? 0; ?> commandes en attente
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <i
+                                        class="fas fa-chevron-right text-blue-400 text-lg group-hover:translate-x-1 transition-transform"></i>
+                                </a>
+
+                                <!-- Définir les prix -->
+                                <a href="?page=produits_sans_prix"
+                                    class="group flex items-center justify-between p-5 bg-gradient-to-br from-yellow-50 to-yellow-100 hover:from-yellow-100 hover:to-yellow-200 rounded-xl border border-yellow-200 hover:shadow-lg transition-all duration-200">
+                                    <div class="flex items-center">
+                                        <div
+                                            class="p-3 bg-gradient-to-br from-white to-yellow-50 rounded-lg mr-4 shadow-sm group-hover:shadow transition-shadow">
+                                            <i class="fas fa-dollar-sign text-yellow-600 text-xl"></i>
+                                        </div>
+                                        <div>
+                                            <h3 class="font-semibold text-yellow-700">Définir les prix</h3>
+                                            <p class="text-sm text-yellow-600 opacity-80 mt-1">
+                                                <?php echo $stats['produits_sans_prix'] ?? 0; ?> produits sans prix
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <i
+                                        class="fas fa-chevron-right text-yellow-400 text-lg group-hover:translate-x-1 transition-transform"></i>
+                                </a>
+
+                                <!-- Mettre à jour taux -->
+                                <a href="?page=taux_conversion"
+                                    class="group flex items-center justify-between p-5 bg-gradient-to-br from-purple-50 to-purple-100 hover:from-purple-100 hover:to-purple-200 rounded-xl border border-purple-200 hover:shadow-lg transition-all duration-200">
+                                    <div class="flex items-center">
+                                        <div
+                                            class="p-3 bg-gradient-to-br from-white to-purple-50 rounded-lg mr-4 shadow-sm group-hover:shadow transition-shadow">
+                                            <i class="fas fa-exchange-alt text-purple-600 text-xl"></i>
+                                        </div>
+                                        <div>
+                                            <h3 class="font-semibold text-purple-700">Mettre à jour taux</h3>
+                                            <p class="text-sm text-purple-600 opacity-80 mt-1">
+                                                Taux de conversion FC/USD
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <i
+                                        class="fas fa-chevron-right text-purple-400 text-lg group-hover:translate-x-1 transition-transform"></i>
+                                </a>
                             </div>
-                        </div>
-
-                        <div class="flex justify-between items-center mb-4">
-                            <span class="text-lg font-semibold text-gray-700">Total à payer:</span>
-                            <div class="text-right">
-                                <span id="total-amount" class="text-3xl font-bold text-green-600">0,00 FC</span>
-                                <div id="total-usd" class="text-sm text-gray-500">0,00 $</div>
-                            </div>
-                        </div>
-
-
-
-                        <div class="flex space-x-3">
-                            <button onclick="imprimerTicket()"
-                                class="flex-1 bg-blue-500 hover:bg-blue-600 text-white py-4 rounded-lg font-semibold text-lg">
-                                <i class="fas fa-print mr-2"></i>Imprimer ticket
-                            </button>
-                            <button onclick="finaliserVente()"
-                                class="flex-1 bg-green-500 hover:bg-green-600 text-white py-4 rounded-lg font-semibold text-lg">
-                                <i class="fas fa-credit-card mr-2"></i>Finaliser vente
-                            </button>
                         </div>
                     </div>
                 </div>
-            </div>
-    </div>
 
+            <?php elseif ($current_page == 'commandes_attente'): ?>
+                <!-- ========== COMMANDES EN ATTENTE ========== -->
+                <div class="mb-6">
+                    <h1 class="text-2xl font-bold text-gray-800">Commandes en attente de paiement</h1>
+                    <p class="text-gray-600">Validez les paiements des clients</p>
+                </div>
 
-    <!-- Section Remboursements - Version compacte -->
-    <div id="remboursements" class="section">
-        <div class="bg-white rounded-2xl shadow-sm">
-            <div class="px-6 py-4 border-b">
-                <h3 class="text-xl font-semibold text-gray-900 text-center">Gestion des remboursements</h3>
-            </div>
-            <div class="p-6">
-                
-                <div class="flex flex-col items-center"> 
-                    <div class="bg-red-50 border border-red-200 rounded-lg p-8 mb-8 w-full max-w-2xl text-center">
-                        
-                        <h4 class="font-semibold text-red-800 mb-6 text-lg">
-                            <i class="fas fa-undo mr-2"></i>Effectuer un remboursement
+                <?php if (count($commandes_attente) > 0): ?>
+                    <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Commande
+                                        </th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Client</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Montant</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Produits
+                                        </th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200">
+                                    <?php foreach ($commandes_attente as $commande): ?>
+                                        <tr>
+                                            <td class="px-6 py-4">
+                                                <p class="font-bold text-gray-900">#<?php echo e($commande['numero_commande']); ?>
+                                                </p>
+                                            </td>
+                                            <td class="px-6 py-4">
+                                                <p class="font-semibold"><?php echo e($commande['client_nom']); ?></p>
+                                                <p class="text-sm text-gray-500"><?php echo e($commande['telephone']); ?></p>
+                                            </td>
+                                            <td class="px-6 py-4">
+                                                <p class="font-bold text-green-600">
+                                                    <?php echo formatMontant($commande['montant_total']); ?>
+                                                </p>
+                                            </td>
+                                            <td class="px-6 py-4 text-sm text-gray-500">
+                                                <?php echo date('d/m/Y H:i', strtotime($commande['date_commande'])); ?>
+                                            </td>
+                                            <td class="px-6 py-4">
+                                                <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm">
+                                                    <?php echo $commande['nombre_produits']; ?> produits
+                                                </span>
+                                            </td>
+                                            <td class="px-6 py-4">
+                                                <button onclick="validerPaiement(<?php echo $commande['id']; ?>)"
+                                                    class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm mr-2">
+                                                    <i class="fas fa-check mr-1"></i>Valider
+                                                </button>
+                                                <button onclick="voirDetails(<?php echo $commande['id']; ?>)"
+                                                    class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
+                                                    <i class="fas fa-eye mr-1"></i>Détails
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                <?php else: ?>
+                    <div class="bg-white rounded-lg shadow-md p-12 text-center">
+                        <i class="fas fa-check-circle text-green-500 text-5xl mb-4"></i>
+                        <h3 class="text-xl font-semibold text-gray-800 mb-2">Aucune commande en attente</h3>
+                        <p class="text-gray-600">Toutes les commandes sont traitées.</p>
+                    </div>
+                <?php endif; ?>
+
+            <?php elseif ($current_page == 'gestion_prix'): ?>
+                <!-- ========== GESTION DES PRIX ========== -->
+                <div class="mb-6 flex justify-between items-center">
+                    <div>
+                        <h1 class="text-2xl font-bold text-gray-800">Gestion des prix</h1>
+                        <p class="text-gray-600">Définissez les prix des produits en FC et USD</p>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow-md overflow-hidden mb-6">
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Produit</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code barre
+                                    </th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Catégorie
+                                    </th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Prix FC</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Prix USD
+                                    </th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Taux</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                <?php foreach ($produits as $produit): ?>
+                                    <tr>
+                                        <td class="px-6 py-4 font-semibold"><?php echo e($produit['nom']); ?></td>
+                                        <td class="px-6 py-4 text-sm text-gray-500"><?php echo e($produit['code_barre']); ?>
+                                        </td>
+                                        <td class="px-6 py-4 text-sm text-gray-500"><?php echo e($produit['categorie_nom']); ?>
+                                        </td>
+                                        <td class="px-6 py-4">
+                                            <?php if ($produit['prix_fc']): ?>
+                                                <span
+                                                    class="font-bold text-green-600"><?php echo formatMontant($produit['prix_fc']); ?></span>
+                                            <?php else: ?>
+                                                <span class="text-red-500 text-sm">Non défini</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="px-6 py-4">
+                                            <?php if ($produit['prix_usd']): ?>
+                                                <span
+                                                    class="font-bold text-blue-600">$<?php echo number_format($produit['prix_usd'], 2); ?></span>
+                                            <?php else: ?>
+                                                <span class="text-red-500 text-sm">Non défini</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="px-6 py-4 text-sm text-gray-500">
+                                            <?php echo number_format($produit['taux_conversion'] ?? 1, 4); ?>
+                                        </td>
+                                        <td class="px-6 py-4">
+                                            <button
+                                                onclick="modifierPrix(<?php echo $produit['id']; ?>, '<?php echo e($produit['nom']); ?>', <?php echo $produit['prix_fc'] ?? 0; ?>, <?php echo $produit['prix_usd'] ?? 0; ?>)"
+                                                class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
+                                                <i class="fas fa-edit mr-1"></i>Modifier
+                                            </button>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+            <?php elseif ($current_page == 'produits_sans_prix'): ?>
+                <!-- ========== PRODUITS SANS PRIX ========== -->
+                <div class="mb-6">
+                    <h1 class="text-2xl font-bold text-gray-800">Produits sans prix défini</h1>
+                    <p class="text-gray-600">Ces produits ne peuvent pas être vendus sans prix</p>
+                </div>
+
+                <?php if (isset($produits_sans_prix) && count($produits_sans_prix) > 0): ?>
+                    <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Produit</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Catégorie
+                                        </th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Fournisseur
+                                        </th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200">
+                                    <?php foreach ($produits_sans_prix as $produit): ?>
+                                        <tr>
+                                            <td class="px-6 py-4 text-sm font-medium text-gray-900">#<?php echo $produit['id']; ?>
+                                            </td>
+                                            <td class="px-6 py-4 font-semibold"><?php echo e($produit['nom']); ?></td>
+                                            <td class="px-6 py-4 text-sm text-gray-500"><?php echo e($produit['categorie_nom']); ?>
+                                            </td>
+                                            <td class="px-6 py-4 text-sm text-gray-500">
+                                                <?php echo e($produit['fournisseur_nom']); ?>
+                                            </td>
+                                            <td class="px-6 py-4">
+                                                <button
+                                                    onclick="definirPrix(<?php echo $produit['id']; ?>, '<?php echo e($produit['nom']); ?>')"
+                                                    class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm">
+                                                    <i class="fas fa-dollar-sign mr-1"></i>Définir prix
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                <?php else: ?>
+                    <div class="bg-white rounded-lg shadow-md p-12 text-center">
+                        <i class="fas fa-check-circle text-green-500 text-5xl mb-4"></i>
+                        <h3 class="text-xl font-semibold text-gray-800 mb-2">Tous les produits ont un prix</h3>
+                        <p class="text-gray-600">Aucun produit sans prix défini.</p>
+                    </div>
+                <?php endif; ?>
+
+            <?php elseif ($current_page == 'transactions'): ?>
+                <!-- ========== HISTORIQUE DES TRANSACTIONS ========== -->
+                <div class="mb-6">
+                    <h1 class="text-2xl font-bold text-gray-800">Historique des transactions</h1>
+                    <p class="text-gray-600">Vos transactions validées</p>
+                </div>
+
+                <?php if (count($transactions_recentes) > 0): ?>
+                    <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                        <div class="overflow-x-auto">
+                            <table class="min-w-full divide-y divide-gray-200">
+                                <thead class="bg-gray-50">
+                                    <tr>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Commande
+                                        </th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Client</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Montant</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Paiement
+                                        </th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Produits
+                                        </th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200">
+                                    <?php foreach ($transactions_recentes as $transaction): ?>
+                                        <tr>
+                                            <td class="px-6 py-4">
+                                                <p class="font-bold text-gray-900">
+                                                    #<?php echo e($transaction['numero_commande']); ?></p>
+                                            </td>
+                                            <td class="px-6 py-4">
+                                                <p class="font-semibold"><?php echo e($transaction['client_nom']); ?></p>
+                                            </td>
+                                            <td class="px-6 py-4">
+                                                <p class="font-bold text-green-600">
+                                                    <?php echo formatMontant($transaction['montant_total']); ?>
+                                                </p>
+                                            </td>
+                                            <td class="px-6 py-4">
+                                                <?php if ($transaction['mode_paiement'] == 'especes'): ?>
+                                                    <span class="badge badge-success">Espèces</span>
+                                                <?php elseif ($transaction['mode_paiement'] == 'carte'): ?>
+                                                    <span class="badge badge-info">Carte</span>
+                                                <?php else: ?>
+                                                    <span class="badge badge-purple">Mobile</span>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td class="px-6 py-4 text-sm text-gray-500">
+                                                <?php echo date('d/m/Y H:i', strtotime($transaction['date_commande'])); ?>
+                                            </td>
+                                            <td class="px-6 py-4">
+                                                <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm">
+                                                    <?php echo $transaction['nombre_produits']; ?> produits
+                                                </span>
+                                            </td>
+                                            <td class="px-6 py-4">
+                                                <button onclick="voirDetails(<?php echo $transaction['id']; ?>)"
+                                                    class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm mr-2">
+                                                    <i class="fas fa-eye mr-1"></i>Détails
+                                                </button>
+                                                <button onclick="imprimerTicket(<?php echo $transaction['id']; ?>)"
+                                                    class="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded text-sm">
+                                                    <i class="fas fa-print mr-1"></i>Ticket
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                <?php else: ?>
+                    <div class="bg-white rounded-lg shadow-md p-12 text-center">
+                        <i class="fas fa-history text-gray-400 text-5xl mb-4"></i>
+                        <h3 class="text-xl font-semibold text-gray-800 mb-2">Aucune transaction</h3>
+                        <p class="text-gray-600">Vous n'avez pas encore effectué de transactions.</p>
+                    </div>
+                <?php endif; ?>
+
+            <?php elseif ($current_page == 'taux_conversion'): ?>
+                <!-- ========== TAUX DE CONVERSION ========== -->
+                <div class="mb-6">
+                    <h1 class="text-2xl font-bold text-gray-800">Taux de conversion FC/USD</h1>
+                    <p class="text-gray-600">Mettez à jour le taux de change</p>
+                </div>
+
+                <div class="bg-white rounded-lg shadow-md p-6 max-w-md mx-auto">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-4">Modifier le taux de conversion</h3>
+                    <form method="POST" action="">
+                        <input type="hidden" name="action" value="ajuster_taux_conversion">
+
+                        <div class="mb-6">
+                            <label class="block text-gray-700 text-sm font-bold mb-2" for="taux">
+                                Taux actuel (1 USD = ? FC)
+                            </label>
+                            <input type="number" id="taux" name="taux" step="0.0001" min="0.0001" required
+                                class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                placeholder="Ex: 2500.75">
+                            <p class="text-sm text-gray-500 mt-1">Le taux utilisé pour convertir USD en Francs Congolais</p>
+                        </div>
+
+                        <div class="flex justify-end space-x-4">
+                            <button type="submit" class="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+                                <i class="fas fa-sync-alt mr-2"></i>Mettre à jour
+                            </button>
+                        </div>
+                    </form>
+
+                    <div class="mt-8 p-4 bg-gray-50 rounded-lg">
+                        <h4 class="font-semibold text-gray-700 mb-2">
+                            <i class="fas fa-info-circle mr-2"></i>Comment ça marche
                         </h4>
-
-                        <form method="POST" class="space-y-6"> 
-                            <div class="flex flex-col md:flex-row gap-6 items-center justify-center">
-                                <div class="w-full md:w-64"> 
-                                    <label class="block text-sm font-medium text-red-700 mb-2">
-                                        Numéro de vente
-                                    </label>
-                                    <input type="text" name="vente_id" required
-                                        class="w-full border border-red-300 rounded-lg px-4 py-3 text-sm text-center focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                                        placeholder="Ex: V202401150001">
-                                </div>
-
-                                <div class="w-full md:w-64"> 
-                                    <label class="block text-sm font-medium text-red-700 mb-2">
-                                        Motif du remboursement
-                                    </label>
-                                    <select name="motif_remboursement" required
-                                        class="w-full border border-red-300 rounded-lg px-4 py-3 text-sm text-gray-700 text-left focus:ring-2 focus:ring-red-500 focus:border-transparent">
-                                        <option value="">Sélectionnez un motif</option>
-                                        <option value="retour_client">Retour client</option>
-                                        <option value="erreur_caisse">Erreur de caisse</option>
-                                        <option value="produit_defectueux">Produit défectueux</option>
-                                        <option value="autre">Autre raison</option>
-                                    </select>
-                                </div>
-                            </div>
-
-                            <div class="flex justify-center">
-                                <button type="submit" name="traiter_remboursement"
-                                    class="bg-red-600 hover:bg-red-700 text-white py-3 px-8 rounded-lg text-sm font-medium transition-colors duration-200 w-64">
-                                    <!-- Largeur fixe -->
-                                    <i class="fas fa-undo mr-2"></i>Traiter le remboursement
-                                </button>
-                            </div>
-                        </form>
+                        <ul class="text-sm text-gray-600 space-y-1">
+                            <li>• Le taux définit la valeur de 1 USD en Francs Congolais</li>
+                            <li>• Les prix en USD sont automatiquement convertis en FC</li>
+                            <li>• Tous les nouveaux prix utiliseront ce taux</li>
+                            <li>• Les anciennes transactions conservent leur taux original</li>
+                        </ul>
                     </div>
                 </div>
 
-                <!-- Statistiques remboursements -->
-                <div class="flex justify-center">
-                    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 w-full max-w-4xl">
-                        <div class="bg-white border border-gray-200 rounded-lg p-6 text-center shadow-sm">
-                            <div class="text-3xl font-bold text-red-600 mb-2">
-                                <?php echo $stats_transactions['remboursements_jour'] ?? 0; ?>
-                            </div>
-                            <div class="text-sm text-gray-600 font-medium">Remboursements aujourd'hui</div>
+            <?php else: ?>
+                <!-- ========== PAGE NON TROUVÉE ========== -->
+                <div class="bg-white rounded-lg shadow-md p-12 text-center">
+                    <i class="fas fa-exclamation-circle text-red-500 text-5xl mb-4"></i>
+                    <h3 class="text-xl font-semibold text-gray-800 mb-2">Page non trouvée</h3>
+                    <p class="text-gray-600 mb-6">La page que vous cherchez n'existe pas.</p>
+                    <a href="?page=dashboard" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg">
+                        <i class="fas fa-home mr-2"></i>Retour au dashboard
+                    </a>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div id="modalPrix" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50">
+        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div class="mt-3">
+                <h3 id="modalTitre" class="text-lg font-semibold text-gray-800 mb-4"></h3>
+                <form method="POST" action="" id="formPrix">
+                    <input type="hidden" name="action" value="definir_prix">
+                    <input type="hidden" id="modalProduitId" name="produit_id">
+
+                    <div class="mb-4">
+                        <label class="block text-gray-700 text-sm font-bold mb-2" for="prix_fc">
+                            Prix en Francs Congolais (FC) *
+                        </label>
+                        <input type="number" id="prix_fc" name="prix_fc" step="0.01" min="0" required
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500">
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="block text-gray-700 text-sm font-bold mb-2" for="prix_usd">
+                            Prix en USD *
+                        </label>
+                        <input type="number" id="prix_usd" name="prix_usd" step="0.01" min="0" required
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500">
+                    </div>
+
+                    <div class="mb-6">
+                        <label class="block text-gray-700 text-sm font-bold mb-2" for="taux_conversion">
+                            Taux de conversion (1 USD = ? FC)
+                        </label>
+                        <input type="number" id="taux_conversion" name="taux_conversion" step="0.0001" min="0.0001"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500">
+                        <p class="text-sm text-gray-500 mt-1">Laissé vide pour calcul automatique</p>
+                    </div>
+
+                    <div class="flex justify-end space-x-4">
+                        <button type="button" onclick="fermerModal()"
+                            class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+                            Annuler
+                        </button>
+                        <button type="submit" class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                            <i class="fas fa-save mr-2"></i>Enregistrer
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="modalPaiement" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50">
+        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div class="mt-3">
+                <h3 class="text-lg font-semibold text-gray-800 mb-4">Valider le paiement</h3>
+                <form method="POST" action="" id="formPaiement">
+                    <input type="hidden" name="action" value="valider_paiement">
+                    <input type="hidden" id="modalCommandeId" name="commande_id">
+
+                    <div class="mb-6">
+                        <label class="block text-gray-700 text-sm font-bold mb-2">
+                            Mode de paiement *
+                        </label>
+                        <div class="space-y-2">
+                            <label class="flex items-center">
+                                <input type="radio" name="mode_paiement" value="especes" checked class="mr-2">
+                                <span>Espèces</span>
+                            </label>
+                            <label class="flex items-center">
+                                <input type="radio" name="mode_paiement" value="carte" class="mr-2">
+                                <span>Carte bancaire</span>
+                            </label>
+                            <label class="flex items-center">
+                                <input type="radio" name="mode_paiement" value="mobile" class="mr-2">
+                                <span>Paiement mobile</span>
+                            </label>
                         </div>
                     </div>
-                </div>
+
+                    <div class="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                        <p class="text-sm text-yellow-800">
+                            <i class="fas fa-exclamation-triangle mr-1"></i>
+                            Cette action va valider le paiement et mettre à jour les stocks automatiquement.
+                        </p>
+                    </div>
+
+                    <div class="flex justify-end space-x-4">
+                        <button type="button" onclick="fermerModalPaiement()"
+                            class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+                            Annuler
+                        </button>
+                        <button type="submit" class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+                            <i class="fas fa-check mr-2"></i>Valider le paiement
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
-    </main>
-    </div>
 
+    <!-- Scripts JavaScript -->
     <script>
-        let cart = [];
-        let currentPaymentMethod = null;
-        let discountAmount = 0;
-        const tauxChange = <?php echo $taux_change; ?>;
-
-        // Navigation entre sections
-        function showSection(sectionId, event) {
-            if (event) {
-                event.preventDefault();
-                event.stopPropagation();
-            }
-
-            // Masquer toutes les sections
-            document.querySelectorAll('.section').forEach(section => {
-                section.classList.remove('active');
-            });
-
-            // Afficher la section sélectionnée
-            const targetSection = document.getElementById(sectionId);
-            if (targetSection) {
-                targetSection.classList.add('active');
-            }
-
-            // Mettre à jour le titre de la page
-            const titles = {
-                'dashboard': 'Tableau de bord Caissier',
-                'prix': 'Gestion des Prix et Devises',
-                'historique-prix': 'Historique des Prix',
-                'commandes': 'Commandes en Attente',
-                'caisse': 'Nouvelle Vente',
-                'remboursements': 'Gestion des Remboursements'
-            };
-
-            const pageTitle = document.getElementById('pageTitle');
-            if (pageTitle) {
-                pageTitle.textContent = titles[sectionId] || 'Tableau de bord Caissier';
-            }
-
-            // Mettre à jour la navigation active
-            document.querySelectorAll('nav a').forEach(link => {
-                link.classList.remove('active');
-            });
-
-            const activeLink = document.querySelector(`nav a[href="#${sectionId}"]`);
-            if (activeLink) {
-                activeLink.classList.add('active');
-            }
+        // Fonction pour ouvrir le modal de définition de prix
+        function definirPrix(produitId, produitNom) {
+            document.getElementById('modalTitre').textContent = 'Définir prix pour: ' + produitNom;
+            document.getElementById('modalProduitId').value = produitId;
+            document.getElementById('prix_fc').value = '';
+            document.getElementById('prix_usd').value = '';
+            document.getElementById('taux_conversion').value = '';
+            document.getElementById('modalPrix').classList.remove('hidden');
         }
 
-        // Gestion des prix
-        function updatePrix(produitId) {
-            const prixFc = document.getElementById('prix_fc_' + produitId).value;
-            const prixUsd = document.getElementById('prix_usd_' + produitId).value;
-            const taux = document.getElementById('taux_' + produitId).value;
-
-            const formData = new FormData();
-            formData.append('update_prix', 'true');
-            formData.append('produit_id', produitId);
-            formData.append('prix_fc', prixFc);
-            formData.append('prix_usd', prixUsd);
-            formData.append('taux_conversion', taux);
-
-            fetch('', {
-                method: 'POST',
-                body: formData
-            })
-                .then(response => {
-                    if (response.ok) {
-                        alert('Prix mis à jour avec succès');
-                        location.reload();
-                    } else {
-                        alert('Erreur lors de la mise à jour');
-                    }
-                })
-                .catch(error => {
-                    console.error('Erreur:', error);
-                    alert('Erreur lors de la mise à jour');
-                });
+        // Fonction pour modifier le prix existant
+        function modifierPrix(produitId, produitNom, prixFc, prixUsd) {
+            document.getElementById('modalTitre').textContent = 'Modifier prix: ' + produitNom;
+            document.getElementById('modalProduitId').value = produitId;
+            document.getElementById('prix_fc').value = prixFc || '';
+            document.getElementById('prix_usd').value = prixUsd || '';
+            document.getElementById('modalPrix').classList.remove('hidden');
         }
 
-        // Actualiser le taux de change
-        function actualiserTauxChange() {
-            fetch('?action=actualiser_taux')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        alert('Taux de change actualisé: ' + data.taux + ' CDF pour 1 USD');
-                        location.reload();
-                    } else {
-                        alert('Erreur lors de l\'actualisation');
-                    }
-                })
-                .catch(error => {
-                    console.error('Erreur:', error);
-                    alert('Erreur de connexion');
-                });
-        }
-
-        // Validation de commande
+        // Fonction pour valider un paiement
         function validerPaiement(commandeId) {
-            const modePaiement = prompt('Mode de paiement (especes/carte/mobile):');
+            document.getElementById('modalCommandeId').value = commandeId;
+            document.getElementById('modalPaiement').classList.remove('hidden');
+        }
 
-            if (modePaiement && ['especes', 'carte', 'mobile'].includes(modePaiement)) {
-                const formData = new FormData();
-                formData.append('valider_commande', 'true');
-                formData.append('commande_id', commandeId);
-                formData.append('mode_paiement', modePaiement);
+        // Fonction pour voir les détails d'une commande
+        function voirDetails(commandeId) {
+            window.open('commande_details.php?id=' + commandeId, '_blank');
+        }
 
-                fetch('', {
-                    method: 'POST',
-                    body: formData
-                })
-                    .then(response => {
-                        if (response.ok) {
-                            alert('Commande validée avec succès');
-                            location.reload();
-                        } else {
-                            alert('Erreur lors de la validation');
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Erreur:', error);
-                        alert('Erreur lors de la validation');
-                    });
+        // Fonction pour imprimer un ticket
+        function imprimerTicket(commandeId) {
+            alert('Impression du ticket pour la commande #' + commandeId + ' - Fonctionnalité à implémenter');
+        }
+
+        // Fonction pour fermer les modals
+        function fermerModal() {
+            document.getElementById('modalPrix').classList.add('hidden');
+        }
+
+        function fermerModalPaiement() {
+            document.getElementById('modalPaiement').classList.add('hidden');
+        }
+
+        // Calcul automatique du taux de conversion
+        document.getElementById('prix_fc')?.addEventListener('input', function () {
+            const prixFc = parseFloat(this.value) || 0;
+            const prixUsd = parseFloat(document.getElementById('prix_usd').value) || 0;
+
+            if (prixFc > 0 && prixUsd > 0) {
+                const taux = prixFc / prixUsd;
+                document.getElementById('taux_conversion').value = taux.toFixed(4);
             }
-        }
-
-        // Voir détails commande
-        function voirDetailsCommande(commandeId) {
-            fetch('?get_commande_details=' + commandeId)
-                .then(response => response.json())
-                .then(data => {
-                    let detailsHtml = '<div class="space-y-2">';
-                    data.details.forEach(detail => {
-                        detailsHtml += `
-                            <div class="flex justify-between border-b pb-2">
-                                <div>${detail.produit_nom}</div>
-                                <div>${detail.quantite} x ${detail.prix_unitaire} FC</div>
-                                <div class="font-semibold">${detail.sous_total} FC</div>
-                            </div>
-                        `;
-                    });
-                    detailsHtml += '</div>';
-
-                    // Afficher dans un modal
-                    alert('Détails de la commande:\n' + detailsHtml);
-                })
-                .catch(error => {
-                    console.error('Erreur:', error);
-                    alert('Erreur lors du chargement des détails');
-                });
-        }
-
-        // Fonctions pour la caisse
-        function handleSearchKeypress(event) {
-            if (event.key === 'Enter') {
-                searchProduct();
-            }
-        }
-
-        function searchProduct() {
-            const searchTerm = document.getElementById('search-product').value.trim();
-            if (searchTerm.length === 0) return;
-
-            fetch(`?search_product=${encodeURIComponent(searchTerm)}`)
-                .then(response => response.json())
-                .then(products => {
-                    displaySearchResults(products);
-                })
-                .catch(error => {
-                    console.error('Erreur recherche:', error);
-                });
-        }
-
-        function displaySearchResults(products) {
-            const resultsDiv = document.getElementById('search-results');
-
-            if (products.length === 0) {
-                resultsDiv.innerHTML = '<div class="text-red-500 text-sm p-2">Aucun produit trouvé</div>';
-                resultsDiv.classList.remove('hidden');
-                return;
-            }
-
-            resultsDiv.innerHTML = products.map(product => `
-        <div class="flex items-center justify-between p-3 border border-gray-200 rounded-lg mb-2 hover:bg-gray-50 cursor-pointer"
-             onclick="addToCart(${product.id})">
-            <div class="flex-1">
-                <div class="font-medium">${product.nom}</div>
-                <div class="text-sm text-gray-500">
-                    ${product.reference} 
-                    ${product.categorie_nom ? '• ' + product.categorie_nom : ''}
-                    ${product.fournisseur_nom ? '• ' + product.fournisseur_nom : ''}
-                </div>
-                <div class="text-xs text-gray-400 mt-1">
-                    Stock: ${product.stock} unités
-                    ${product.description ? '• ' + product.description.substring(0, 50) + '...' : ''}
-                </div>
-            </div>
-            <div class="text-right">
-                <div class="font-semibold text-green-600">${parseFloat(product.prix_fc).toFixed(2)} FC</div>
-                <div class="text-xs text-gray-500">${parseFloat(product.prix_usd).toFixed(2)} $</div>
-                <div class="text-xs text-blue-500">HT: ${parseFloat(product.prix_vente_ht).toFixed(2)} FC</div>
-                ${product.taux_tva > 0 ?
-                    `<div class="text-xs text-orange-500">TVA: ${parseFloat(product.taux_tva).toFixed(2)}%</div>` :
-                    ''
-                }
-            </div>
-        </div>
-    `).join('');
-
-            resultsDiv.classList.remove('hidden');
-        }
-
-
-        function addToCart(productId) {
-            fetch(`?get_product_by_id=${productId}`)
-                .then(response => response.json())
-                .then(product => {
-                    if (!product) {
-                        alert('Produit non trouvé');
-                        return;
-                    }
-
-                    const existingItem = cart.find(item => item.id === product.id);
-                    if (existingItem) {
-                        if (existingItem.quantite >= product.stock) {
-                            alert('Stock insuffisant pour ce produit');
-                            return;
-                        }
-                        existingItem.quantite += 1;
-                    } else {
-                        if (product.stock < 1) {
-                            alert('Stock insuffisant pour ce produit');
-                            return;
-                        }
-                        cart.push({
-                            id: product.id,
-                            reference: product.reference,
-                            nom: product.nom,
-                            prix_fc: parseFloat(product.prix_fc),
-                            prix_usd: parseFloat(product.prix_usd),
-                            prix_vente_ht: parseFloat(product.prix_vente_ht),
-                            taux_tva: parseFloat(product.taux_tva),
-                            quantite: 1,
-                            stock: parseInt(product.stock)
-                        });
-                    }
-
-                    updateCartDisplay();
-                    document.getElementById('search-product').value = '';
-                    document.getElementById('search-results').classList.add('hidden');
-                    document.getElementById('search-product').focus();
-                })
-                .catch(error => {
-                    console.error('Erreur:', error);
-                    alert('Erreur lors de l\'ajout au panier');
-                });
-        }
-
-        function showAddToCartFeedback(productName) {
-            // Créer un toast de confirmation
-            const toast = document.createElement('div');
-            toast.className = 'fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50 animate-fade-in';
-            toast.innerHTML = `
-        <div class="flex items-center space-x-2">
-            <i class="fas fa-check-circle"></i>
-            <span>${productName} ajouté au panier</span>
-        </div>
-    `;
-
-            document.body.appendChild(toast);
-
-            // Supprimer le toast après 3 secondes
-            setTimeout(() => {
-                toast.remove();
-            }, 3000);
-        }
-
-        // Initialisation
-        document.addEventListener('DOMContentLoaded', function () {
-            // Focus sur la recherche au chargement
-            const searchInput = document.getElementById('search-product');
-            if (searchInput) {
-                searchInput.focus();
-            }
-
-            // Ajouter le CSS pour l'animation
-            const style = document.createElement('style');
-            style.textContent = `
-        @keyframes fade-in {
-            from { opacity: 0; transform: translateY(-10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .animate-fade-in {
-            animation: fade-in 0.3s ease-out;
-        }
-        .product-item:hover {
-            background-color: #f9fafb;
-        }
-    `;
-            document.head.appendChild(style);
         });
 
+        document.getElementById('prix_usd')?.addEventListener('input', function () {
+            const prixUsd = parseFloat(this.value) || 0;
+            const prixFc = parseFloat(document.getElementById('prix_fc').value) || 0;
 
-        function updateCartDisplay() {
-            const cartElement = document.getElementById('cart');
-
-            if (cart.length === 0) {
-                cartElement.innerHTML = `
-            <div class="text-center text-gray-500 py-8">
-                <i class="fas fa-shopping-cart text-3xl mb-2"></i>
-                <p>Panier vide</p>
-                <p class="text-sm">Scannez ou recherchez des produits</p>
-            </div>`;
-            } else {
-                cartElement.innerHTML = cart.map((item, index) => `
-            <div class="cart-item fade-in flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div class="flex-1">
-                    <div class="font-medium text-sm">${item.nom}</div>
-                    <div class="text-xs text-gray-500">${item.reference}</div>
-                    <div class="flex items-center space-x-2 mt-1">
-                        <button onclick="updateQuantity(${index}, -1)" 
-                                class="w-6 h-6 bg-gray-300 rounded text-xs hover:bg-gray-400">-</button>
-                        <span class="text-sm font-medium w-8 text-center">${item.quantite}</span>
-                        <button onclick="updateQuantity(${index}, 1)" 
-                                ${item.quantite >= item.stock ? 'disabled' : ''} 
-                                class="w-6 h-6 bg-gray-300 rounded text-xs hover:bg-gray-400 ${item.quantite >= item.stock ? 'opacity-50 cursor-not-allowed' : ''}">+</button>
-                    </div>
-                </div>
-                <div class="text-right">
-                    <div class="font-semibold text-green-600">${(item.prix_fc * item.quantite).toFixed(2)} FC</div>
-                    <div class="text-xs text-gray-500">${item.prix_fc} FC/u</div>
-                    ${item.taux_tva > 0 ?
-                        `<div class="text-xs text-orange-500">TVA incluse</div>` :
-                        `<div class="text-xs text-blue-500">HT: ${(item.prix_vente_ht * item.quantite).toFixed(2)} FC</div>`
-                    }
-                    <button onclick="removeFromCart(${index})" 
-                            class="text-red-500 hover:text-red-700 text-xs mt-1">
-                        <i class="fas fa-trash"></i> Supprimer
-                    </button>
-                </div>
-            </div>
-        `).join('');
+            if (prixFc > 0 && prixUsd > 0) {
+                const taux = prixFc / prixUsd;
+                document.getElementById('taux_conversion').value = taux.toFixed(4);
             }
-
-            updateTotals();
-        }
-
-        function updateQuantity(index, change) {
-            const item = cart[index];
-            const newQuantity = item.quantite + change;
-
-            if (newQuantity < 1) {
-                removeFromCart(index);
-                return;
-            }
-
-            if (newQuantity > item.stock) {
-                alert('Stock insuffisant pour ' + item.nom);
-                return;
-            }
-
-            item.quantite = newQuantity;
-            updateCartDisplay();
-        }
-
-        function removeFromCart(index) {
-            cart.splice(index, 1);
-            updateCartDisplay();
-        }
-        function clearSearch() {
-            document.getElementById('search-product').value = '';
-            filterProducts();
-            document.getElementById('search-product').focus();
-        }
-
-        function applyDiscount() {
-            discountAmount = parseFloat(document.getElementById('discount-amount').value) || 0;
-            updateTotals();
-        }
-
-        function updateTotals() {
-            const subtotalFC = cart.reduce((total, item) => total + (item.prix_fc * item.quantite), 0);
-            const totalFC = Math.max(0, subtotalFC - discountAmount);
-            const totalUSD = totalFC / tauxChange;
-
-            document.getElementById('subtotal-amount').textContent = subtotalFC.toFixed(2) + ' FC';
-            document.getElementById('subtotal-usd').textContent = (subtotalFC / tauxChange).toFixed(2) + ' $';
-            document.getElementById('total-amount').textContent = totalFC.toFixed(2) + ' FC';
-            document.getElementById('total-usd').textContent = totalUSD.toFixed(2) + ' $';
-        }
-
-        function setPaymentMethod(method) {
-            currentPaymentMethod = method;
-
-            // Mettre à jour l'interface
-            document.querySelectorAll('.payment-method').forEach(btn => {
-                btn.classList.remove('active');
-                btn.classList.remove('bg-green-600');
-            });
-
-            event.target.classList.add('active', 'bg-green-600');
-        }
-
-        // Fonctions pour la recherche et filtrage des produits
-        function filterProducts() {
-            const searchTerm = document.getElementById('search-product').value.toLowerCase().trim();
-            const productItems = document.querySelectorAll('.product-item');
-
-            let visibleCount = 0;
-
-            productItems.forEach(item => {
-                const productName = item.getAttribute('data-name');
-                const productReference = item.getAttribute('data-reference');
-                const productCategory = item.getAttribute('data-category');
-
-                const matchesSearch = !searchTerm ||
-                    productName.includes(searchTerm) ||
-                    productReference.includes(searchTerm) ||
-                    productCategory.includes(searchTerm);
-
-                if (matchesSearch) {
-                    item.style.display = 'block';
-                    visibleCount++;
-                } else {
-                    item.style.display = 'none';
-                }
-            });
-
-            // Afficher un message si aucun résultat
-            const productList = document.getElementById('products-list');
-            let noResultsMsg = productList.querySelector('.no-results-message');
-
-            if (visibleCount === 0 && searchTerm) {
-                if (!noResultsMsg) {
-                    noResultsMsg = document.createElement('div');
-                    noResultsMsg.className = 'no-results-message text-center py-8 text-gray-500';
-                    noResultsMsg.innerHTML = `
-                <i class="fas fa-search text-3xl mb-2"></i>
-                <p>Aucun produit trouvé</p>
-                <p class="text-sm">Essayez avec d'autres termes de recherche</p>
-            `;
-                    productList.appendChild(noResultsMsg);
-                }
-            } else if (noResultsMsg) {
-                noResultsMsg.remove();
-            }
-        }
-
-        function imprimerTicket() {
-            if (cart.length === 0) {
-                alert('Le panier est vide');
-                return;
-            }
-
-            const subtotalFC = cart.reduce((total, item) => total + (item.prix_fc * item.quantite), 0);
-            const totalFC = Math.max(0, subtotalFC - discountAmount);
-            const totalUSD = totalFC / tauxChange;
-
-            const ticketContent = `
-                <div style="font-family: Arial, sans-serif; font-size: 12px; text-align: center;">
-                    <h3>NAGEX PHARMA</h3>
-                    <p>Ticket de caisse</p>
-                    <p>Date: ${new Date().toLocaleString()}</p>
-                    <hr>
-                    <div style="text-align: left;">
-                        ${cart.map(item => `
-                            <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                                <span>${item.nom}</span>
-                                <span>${item.quantite} x ${item.prix_fc} FC</span>
-                            </div>
-                        `).join('')}
-                    </div>
-                    <hr>
-                    <div style="display: flex; justify-content: space-between; font-weight: bold;">
-                        <span>Total FC:</span>
-                        <span>${totalFC.toFixed(2)} FC</span>
-                    </div>
-                    <div style="display: flex; justify-content: space-between;">
-                        <span>Total USD:</span>
-                        <span>${totalUSD.toFixed(2)} $</span>
-                    </div>
-                    <hr>
-                    <p>Merci de votre visite !</p>
-                </div>
-            `;
-
-            const printWindow = window.open('', '_blank');
-            printWindow.document.write(ticketContent);
-            printWindow.document.close();
-            printWindow.print();
-        }
-
-        function finaliserVente() {
-            if (cart.length === 0) {
-                alert('Le panier est vide');
-                return;
-            }
-
-            if (!currentPaymentMethod) {
-                alert('Veuillez sélectionner un mode de paiement');
-                return;
-            }
-
-            const formData = new FormData();
-            formData.append('process_vente', 'true');
-            formData.append('panier_data', JSON.stringify(cart));
-            formData.append('mode_paiement', currentPaymentMethod);
-            formData.append('montant_remise', discountAmount);
-
-            fetch('', {
-                method: 'POST',
-                body: formData
-            })
-                .then(response => {
-                    if (response.ok) {
-                        return response;
-                    }
-                    throw new Error('Erreur lors de la finalisation de la vente');
-                })
-                .then(() => {
-                    // Réinitialiser le panier après succès
-                    cart = [];
-                    discountAmount = 0;
-                    currentPaymentMethod = null;
-                    updateCartDisplay();
-                    updateTotals();
-
-                    // Le message de succès sera affiché via la redirection PHP
-                })
-                .catch(error => {
-                    console.error('Erreur:', error);
-                    alert('Erreur lors de la finalisation de la vente: ' + error.message);
-                });
-        }
-
-        // Initialisation
-        document.addEventListener('DOMContentLoaded', function () {
-            // Ajouter les écouteurs d'événements à tous les liens de navigation
-            document.querySelectorAll('nav a[href^="#"]').forEach(link => {
-                link.addEventListener('click', function (event) {
-                    event.preventDefault();
-                    const sectionId = this.getAttribute('href').substring(1);
-                    showSection(sectionId, event);
-                });
-            });
-
-            // Actualisation automatique du taux de change toutes les heures
-            setInterval(actualiserTauxChange, 3600000);
-
-            // Mise à jour en temps réel des statistiques
-            setInterval(() => {
-                fetch('?get_stats_temps_reel')
-                    .then(response => response.json())
-                    .then(data => {
-                        // Mettre à jour les indicateurs du dashboard si nécessaire
-                        console.log('Stats temps réel:', data);
-                    });
-            }, 30000);
-
-            // Afficher la section dashboard par défaut
-            showSection('dashboard');
         });
+
+        // Auto-dismiss les messages d'alerte après 5 secondes
+        setTimeout(function () {
+            let alerts = document.querySelectorAll('.bg-green-100, .bg-red-100');
+            alerts.forEach(function (alert) {
+                alert.style.transition = 'opacity 0.5s ease';
+                alert.style.opacity = '0';
+                setTimeout(() => alert.remove(), 500);
+            });
+        }, 5000);
     </script>
-
-    <style>
-        /* Ajouter dans la balise style existante */
-        .products-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 1rem;
-        }
-
-        .product-card {
-            border: 1px solid #e5e7eb;
-            border-radius: 0.5rem;
-            padding: 1rem;
-            transition: all 0.3s ease;
-            cursor: pointer;
-        }
-
-        .product-card:hover {
-            border-color: #10b981;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        }
-
-        .stock-badge {
-            font-size: 0.75rem;
-            padding: 0.25rem 0.5rem;
-            border-radius: 0.375rem;
-            font-weight: 600;
-        }
-
-        .stock-high {
-            background-color: #d1fae5;
-            color: #065f46;
-        }
-
-        .stock-medium {
-            background-color: #fef3c7;
-            color: #92400e;
-        }
-
-        .stock-low {
-            background-color: #fee2e2;
-            color: #991b1b;
-        }
-    </style>
 </body>
 
 </html>
