@@ -722,6 +722,232 @@ switch ($current_page) {
             transition: transform 0.2s ease;
         }
 
+        /* Styles pour les pop-ups */
+        .popup-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .popup-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .popup-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            width: 90%;
+            max-width: 500px;
+            transform: translateY(-20px);
+            transition: transform 0.3s ease;
+            overflow: hidden;
+        }
+
+        .popup-overlay.active .popup-container {
+            transform: translateY(0);
+        }
+
+        .popup-header {
+            background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+            color: white;
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .popup-header h3 {
+            margin: 0;
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .popup-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.2s;
+        }
+
+        .popup-close:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .popup-content {
+            padding: 30px;
+        }
+
+        .popup-form-group {
+            margin-bottom: 20px;
+        }
+
+        .popup-form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #374151;
+            font-size: 0.875rem;
+        }
+
+        .popup-form-group input,
+        .popup-form-group select,
+        .popup-form-group textarea {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid #D1D5DB;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            transition: all 0.2s;
+        }
+
+        .popup-form-group input:focus,
+        .popup-form-group select:focus,
+        .popup-form-group textarea:focus {
+            outline: none;
+            border-color: #10B981;
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
+        }
+
+        .popup-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #E5E7EB;
+        }
+
+        .popup-btn {
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 500;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .popup-btn-cancel {
+            background-color: #F3F4F6;
+            color: #374151;
+            border: 1px solid #D1D5DB;
+        }
+
+        .popup-btn-cancel:hover {
+            background-color: #E5E7EB;
+        }
+
+        .popup-btn-submit {
+            background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+            color: white;
+            border: none;
+        }
+
+        .popup-btn-submit:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
+        /* Styles pour les boutons d'action dans le tableau */
+        .btn-action-group {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-action {
+            position: relative;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-weight: 500;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            min-width: 100px;
+        }
+
+        .btn-action:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-action-adjust {
+            background: linear-gradient(135deg, #3B82F6 0%, #1D4ED8 100%);
+            color: white;
+        }
+
+        .btn-action-adjust:hover:not(:disabled) {
+            background: linear-gradient(135deg, #2563EB 0%, #1E40AF 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+
+        .btn-action-modify {
+            background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+            color: white;
+        }
+
+        .btn-action-modify:hover:not(:disabled) {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+
+        .btn-action-details {
+            background: linear-gradient(135deg, #6B7280 0%, #4B5563 100%);
+            color: white;
+        }
+
+        .btn-action-details:hover:not(:disabled) {
+            background: linear-gradient(135deg, #4B5563 0%, #374151 100%);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(107, 114, 128, 0.3);
+        }
+
+        .btn-action i {
+            font-size: 0.875rem;
+        }
+
+        /* Animation de chargement */
+        .loading-spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
         /* Effet de profondeur au survol */
         .menu-item:hover {
             transform: translateX(2px);
@@ -928,7 +1154,10 @@ switch ($current_page) {
                                     <div class="ml-4">
                                         <p class="text-gray-600 text-sm font-medium">Total en stock</p>
                                         <p class="text-2xl font-bold text-gray-800 mt-1">
-                                            <?php echo number_format($stats['total_stock']); ?>
+                                            <?php
+                                            $total = isset($stats['total_stock']) ? $stats['total_stock'] : 0;
+                                            echo is_numeric($total) ? number_format(floatval($total), 0) : '0';
+                                            ?>
                                         </p>
                                     </div>
                                 </div>
@@ -1191,8 +1420,8 @@ switch ($current_page) {
                                                     <td class="px-6 py-4">
                                                         <code
                                                             class="text-sm text-gray-900 bg-gray-50 px-2 py-1 rounded font-mono border border-gray-200">
-                                                                                                                                                                                            <?php echo htmlspecialchars($produit['code_barre']); ?>
-                                                                                                                                                                                        </code>
+                                                                                                                                                                                                                                                                                                            <?php echo htmlspecialchars($produit['code_barre']); ?>
+                                                                                                                                                                                                                                                                                                        </code>
                                                     </td>
                                                     <td class="px-6 py-4">
                                                         <div class="flex items-center">
@@ -1372,12 +1601,7 @@ switch ($current_page) {
                                                     <i class="fas fa-dollar-sign mr-2 text-gray-400"></i> Prix d'achat
                                                 </div>
                                             </th>
-                                            <th
-                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                                                <div class="flex items-center">
-                                                    <i class="fas fa-cogs mr-2 text-gray-400"></i> Actions
-                                                </div>
-                                            </th>
+                                           
                                         </tr>
                                     </thead>
                                     <tbody class="bg-white divide-y divide-gray-200">
@@ -1414,8 +1638,8 @@ switch ($current_page) {
                                                         </div>
                                                         <div>
                                                             <code class="text-sm font-medium text-gray-900 font-mono">
-                                                                                                                                                <?php echo htmlspecialchars($lot['numero_lot']); ?>
-                                                                                                                                            </code>
+                                                                                                                                                                                                                                    <?php echo htmlspecialchars($lot['numero_lot']); ?>
+                                                                                                                                                                                                                                </code>
                                                             <div class="text-xs text-gray-500 mt-1">
                                                                 <i class="fas fa-calendar-plus mr-1"></i>
                                                                 <?php echo formatDate($lot['date_reception']); ?>
@@ -1502,7 +1726,13 @@ switch ($current_page) {
                                                 <!-- Prix d'achat -->
                                                 <td class="px-6 py-4">
                                                     <div class="text-sm font-bold text-gray-900">
-                                                        <?php echo number_format($lot['prix_achat'], 2); ?> $
+                                                        <?php
+                                                        $prix = $lot['prix_achat'];
+                                                        // Nettoyer la valeur (enlever les espaces, virgules, etc.)
+                                                        $prix = str_replace(',', '.', $prix);
+                                                        $prix = preg_replace('/[^0-9.]/', '', $prix);
+                                                        echo number_format(floatval($prix), 2);
+                                                        ?> $
                                                     </div>
                                                     <div class="text-xs text-gray-500">
                                                         Unitaire:
@@ -1511,32 +1741,7 @@ switch ($current_page) {
                                                     </div>
                                                 </td>
 
-                                                <!-- Actions -->
-                                                <td class="px-6 py-4">
-                                                    <div class="flex items-center space-x-2">
-                                                        <button
-                                                            onclick="ajusterStock(<?php echo $lot['id']; ?>, <?php echo $lot['quantite_actuelle']; ?>, '<?php echo htmlspecialchars(addslashes($lot['produit_nom'])); ?>')"
-                                                            class="p-2 bg-gradient-to-br from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-600 rounded-lg border border-blue-200 hover:shadow-sm transition-all duration-200 group/adjust"
-                                                            title="Ajuster stock">
-                                                            <i
-                                                                class="fas fa-sliders-h text-sm group-hover/adjust:scale-110 transition-transform"></i>
-                                                        </button>
-
-                                                        <a href="?page=modifier_lot&id=<?php echo $lot['id']; ?>"
-                                                            class="p-2 bg-gradient-to-br from-emerald-50 to-emerald-100 hover:from-emerald-100 hover:to-emerald-200 text-emerald-600 rounded-lg border border-emerald-200 hover:shadow-sm transition-all duration-200 group/edit"
-                                                            title="Modifier">
-                                                            <i
-                                                                class="fas fa-pencil-alt text-sm group-hover/edit:scale-110 transition-transform"></i>
-                                                        </a>
-
-                                                        <a href="?page=lot_details&id=<?php echo $lot['id']; ?>"
-                                                            class="p-2 bg-gradient-to-br from-gray-50 to-gray-100 hover:from-gray-100 hover:to-gray-200 text-gray-600 rounded-lg border border-gray-200 hover:shadow-sm transition-all duration-200 group/view"
-                                                            title="Voir détails">
-                                                            <i
-                                                                class="fas fa-eye text-sm group-hover/view:scale-110 transition-transform"></i>
-                                                        </a>
-                                                    </div>
-                                                </td>
+                                               
                                             </tr>
                                         <?php endforeach; ?>
                                     </tbody>
@@ -2599,8 +2804,8 @@ switch ($current_page) {
                                                 <td class="px-6 py-4">
                                                     <code
                                                         class="text-sm text-gray-900 bg-gray-50 px-2 py-1 rounded font-mono border border-gray-200">
-                                                                                        <?php echo htmlspecialchars($mouvement['numero_lot']); ?>
-                                                                                    </code>
+                                                                                                                                                                            <?php echo htmlspecialchars($mouvement['numero_lot']); ?>
+                                                                                                                                                                        </code>
                                                 </td>
 
                                                 <!-- Type -->
@@ -2949,8 +3154,8 @@ switch ($current_page) {
                                                 <td class="px-6 py-4">
                                                     <code
                                                         class="text-sm text-gray-900 bg-gray-50 px-2 py-1 rounded font-mono border border-gray-200">
-                                                                            <?php echo htmlspecialchars($produit['code_barre']); ?>
-                                                                        </code>
+                                                                                                                                                                <?php echo htmlspecialchars($produit['code_barre']); ?>
+                                                                                                                                                            </code>
                                                 </td>
 
                                                 <!-- Stock système -->
@@ -3742,6 +3947,130 @@ switch ($current_page) {
             <?php endif; ?>
         </div>
     </div>
+    <!-- Pop-up pour ajuster le stock -->
+    <div id="adjustStockPopup" class="popup-overlay">
+        <div class="popup-container">
+            <div class="popup-header">
+                <h3>Ajuster le stock</h3>
+                <button class="popup-close" onclick="closePopup('adjustStockPopup')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="popup-content">
+                <form id="adjustStockForm" method="POST" action="">
+                    <input type="hidden" name="action" value="ajuster_stock">
+                    <input type="hidden" id="adjust_lot_id" name="lot_id" value="">
+
+                    <div class="popup-form-group">
+                        <label>Produit</label>
+                        <input type="text" id="adjust_product_name" class="bg-gray-50" readonly>
+                    </div>
+
+                    <div class="popup-form-group">
+                        <label>Numéro de lot</label>
+                        <input type="text" id="adjust_lot_number" class="bg-gray-50" readonly>
+                    </div>
+
+                    <div class="popup-form-group">
+                        <label>Quantité actuelle</label>
+                        <input type="number" id="adjust_current_qty" class="bg-gray-50" readonly>
+                    </div>
+
+                    <div class="popup-form-group">
+                        <label for="adjust_new_qty">Nouvelle quantité *</label>
+                        <input type="number" id="adjust_new_qty" name="nouvelle_quantite" min="0" required
+                            class="border-emerald-300">
+                        <div class="text-xs text-gray-500 mt-1">Entrez la quantité réelle après comptage physique</div>
+                    </div>
+
+                    <div class="popup-form-group">
+                        <label for="adjust_reason">Raison de l'ajustement *</label>
+                        <select id="adjust_reason" name="raison" required class="border-emerald-300">
+                            <option value="">Sélectionnez une raison</option>
+                            <option value="Ajustement inventaire">Ajustement inventaire</option>
+                            <option value="Correction d'erreur">Correction d'erreur</option>
+                            <option value="Perte/dégât">Perte/dégât</option>
+                            <option value="Vol">Vol</option>
+                            <option value="Autre">Autre</option>
+                        </select>
+                    </div>
+
+                    <div class="popup-form-group">
+                        <label for="adjust_notes">Notes supplémentaires</label>
+                        <textarea id="adjust_notes" name="notes" rows="3" placeholder="Informations complémentaires..."
+                            class="border-emerald-300"></textarea>
+                    </div>
+
+                    <div class="popup-actions">
+                        <button type="button" class="popup-btn popup-btn-cancel"
+                            onclick="closePopup('adjustStockPopup')">
+                            Annuler
+                        </button>
+                        <button type="submit" class="popup-btn popup-btn-submit">
+                            Enregistrer l'ajustement
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pop-up pour modifier un lot -->
+    <div id="modifyLotPopup" class="popup-overlay">
+        <div class="popup-container">
+            <div class="popup-header">
+                <h3>Modifier le lot</h3>
+                <button class="popup-close" onclick="closePopup('modifyLotPopup')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="popup-content">
+                <form id="modifyLotForm" method="POST" action="">
+                    <input type="hidden" name="action" value="modifier_lot">
+                    <input type="hidden" id="modify_lot_id" name="lot_id" value="">
+
+                    <!-- Le contenu de ce formulaire sera chargé dynamiquement -->
+                    <div id="modifyLotContent" class="text-center py-8">
+                        <div class="loading-spinner mx-auto mb-4"></div>
+                        <p>Chargement des informations du lot...</p>
+                    </div>
+
+                    <div class="popup-actions" style="display: none;" id="modifyLotActions">
+                        <button type="button" class="popup-btn popup-btn-cancel" onclick="closePopup('modifyLotPopup')">
+                            Annuler
+                        </button>
+                        <button type="submit" class="popup-btn popup-btn-submit">
+                            Enregistrer les modifications
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pop-up pour les détails du lot -->
+    <div id="lotDetailsPopup" class="popup-overlay">
+        <div class="popup-container" style="max-width: 600px;">
+            <div class="popup-header">
+                <h3>Détails du lot</h3>
+                <button class="popup-close" onclick="closePopup('lotDetailsPopup')">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="popup-content">
+                <div id="lotDetailsContent" class="text-center py-8">
+                    <div class="loading-spinner mx-auto mb-4"></div>
+                    <p>Chargement des détails...</p>
+                </div>
+
+                <div class="popup-actions">
+                    <button type="button" class="popup-btn popup-btn-cancel" onclick="closePopup('lotDetailsPopup')">
+                        Fermer
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Scripts JavaScript -->
     <script>
@@ -3786,6 +4115,116 @@ switch ($current_page) {
                 }
             }
         }
+
+        // Fonctions pour gérer les pop-ups
+        function openPopup(popupId) {
+            const popup = document.getElementById(popupId);
+            popup.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closePopup(popupId) {
+            const popup = document.getElementById(popupId);
+            popup.classList.remove('active');
+            document.body.style.overflow = 'auto';
+        }
+
+        // Fermer les pop-ups en cliquant à l'extérieur
+        document.addEventListener('DOMContentLoaded', function () {
+            document.querySelectorAll('.popup-overlay').forEach(popup => {
+                popup.addEventListener('click', function (e) {
+                    if (e.target === this) {
+                        this.classList.remove('active');
+                        document.body.style.overflow = 'auto';
+                    }
+                });
+            });
+
+            // Empêcher la fermeture en cliquant à l'intérieur du contenu
+            document.querySelectorAll('.popup-container').forEach(container => {
+                container.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                });
+            });
+        });
+
+        // Fonction pour ajuster le stock avec pop-up
+        function openAdjustStockPopup(lotId, productName, lotNumber, currentQty) {
+            document.getElementById('adjust_lot_id').value = lotId;
+            document.getElementById('adjust_product_name').value = productName;
+            document.getElementById('adjust_lot_number').value = lotNumber;
+            document.getElementById('adjust_current_qty').value = currentQty;
+            document.getElementById('adjust_new_qty').value = currentQty;
+            document.getElementById('adjust_new_qty').focus();
+            document.getElementById('adjust_reason').value = '';
+            document.getElementById('adjust_notes').value = '';
+
+            openPopup('adjustStockPopup');
+        }
+
+        // Fonction pour modifier un lot
+        function openModifyLotPopup(lotId) {
+            document.getElementById('modify_lot_id').value = lotId;
+            openPopup('modifyLotPopup');
+
+            // Charger les données du lot via AJAX
+            fetch(`get_lot_details.php?id=${lotId}`)
+                .then(response => response.text())
+                .then(html => {
+                    document.getElementById('modifyLotContent').innerHTML = html;
+                    document.getElementById('modifyLotActions').style.display = 'flex';
+                })
+                .catch(error => {
+                    document.getElementById('modifyLotContent').innerHTML =
+                        '<div class="text-red-600"><i class="fas fa-exclamation-circle"></i> Erreur de chargement</div>';
+                });
+        }
+
+        // Fonction pour voir les détails du lot
+        function openLotDetailsPopup(lotId) {
+            openPopup('lotDetailsPopup');
+
+            // Charger les détails via AJAX
+            fetch(`get_lot_full_details.php?id=${lotId}`)
+                .then(response => response.text())
+                .then(html => {
+                    document.getElementById('lotDetailsContent').innerHTML = html;
+                })
+                .catch(error => {
+                    document.getElementById('lotDetailsContent').innerHTML =
+                        '<div class="text-red-600"><i class="fas fa-exclamation-circle"></i> Erreur de chargement</div>';
+                });
+        }
+
+        // Gérer la soumission du formulaire d'ajustement
+        document.getElementById('adjustStockForm').addEventListener('submit', function (e) {
+            e.preventDefault();
+
+            const formData = new FormData(this);
+            const submitBtn = this.querySelector('.popup-btn-submit');
+            const originalText = submitBtn.innerHTML;
+
+            // Afficher l'indicateur de chargement
+            submitBtn.innerHTML = '<div class="loading-spinner mr-2"></div> Traitement...';
+            submitBtn.disabled = true;
+
+            fetch('', {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => response.text())
+                .then(html => {
+                    // Traiter la réponse (vous devrez adapter cela selon votre structure)
+                    closePopup('adjustStockPopup');
+                    location.reload(); // Rafraîchir la page pour voir les changements
+                })
+                .catch(error => {
+                    console.error('Erreur:', error);
+                    submitBtn.innerHTML = originalText;
+                    submitBtn.disabled = false;
+                    alert('Une erreur est survenue. Veuillez réessayer.');
+                });
+        });
 
         // Auto-dismiss les messages d'alerte après 5 secondes
         setTimeout(function () {

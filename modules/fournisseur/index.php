@@ -36,20 +36,62 @@ try {
     die("Erreur de connexion à la base de données. Veuillez contacter l'administrateur.");
 }
 
-// Récupérer l'ID du fournisseur connecté
+// Récupérer l'ID du fournisseur connecté AVEC CRÉATION AUTOMATIQUE
 $fournisseur_id = null;
 try {
     $stmt = $pdo->prepare("SELECT id FROM fournisseurs WHERE user_id = :user_id");
     $stmt->execute([':user_id' => $_SESSION['user_id']]);
     $fournisseur = $stmt->fetch();
     $fournisseur_id = $fournisseur['id'] ?? null;
+
+    // Si aucun fournisseur n'existe, en créer un automatiquement
+    if (!$fournisseur_id) {
+        // Récupérer les infos de l'utilisateur
+        $stmt = $pdo->prepare("SELECT nom, email, telephone FROM utilisateurs WHERE id = :user_id");
+        $stmt->execute([':user_id' => $_SESSION['user_id']]);
+        $user = $stmt->fetch();
+
+        // Déterminer le nom de la société
+        $nom_societe = $user['nom'] ? $user['nom'] . ' - Société' : 'Fournisseur ' . $_SESSION['user_id'];
+        $contact_principal = $user['nom'] ?: 'Contact';
+
+
+        // Créer le profil fournisseur
+        $stmt = $pdo->prepare("
+            INSERT INTO fournisseurs (
+                user_id, 
+                nom_societe, 
+                contact_principal,
+                note_qualite,
+                updated_at
+            ) VALUES (
+                :user_id, 
+                :nom_societe, 
+                :contact_principal,
+                0.0,
+                NOW()
+            )
+        ");
+
+        $stmt->execute([
+            ':user_id' => $_SESSION['user_id'],
+            ':nom_societe' => $nom_societe,
+            ':contact_principal' => $contact_principal,
+
+        ]);
+
+        $fournisseur_id = $pdo->lastInsertId();
+
+        // Message d'information
+        $message = "✅ Votre profil fournisseur a été créé automatiquement. Veuillez compléter vos informations dans l'onglet 'Mon profil'.";
+    }
+
 } catch (Exception $e) {
-    $error = "Erreur lors de la récupération du profil fournisseur: " . $e->getMessage();
+    $error = "Erreur lors de la récupération/création du profil fournisseur: " . $e->getMessage();
+    error_log("Erreur détaillée: " . $e->getMessage());
 }
 
-if (!$fournisseur_id) {
-    die("Erreur: Aucun profil fournisseur associé à votre compte.");
-}
+// Note: On ne tue plus le script si $fournisseur_id est null, car on le crée automatiquement
 
 // ============================================
 // FONCTIONS UTILITAIRES
@@ -58,13 +100,15 @@ if (!$fournisseur_id) {
 /**
  * Récupère les statistiques du dashboard fournisseur
  */
-function getDashboardStats(PDO $pdo, int $fournisseur_id): array
+function getDashboardStats(PDO $pdo, int|string $fournisseur_id): array
 {
+    // Convertir en int pour les requêtes SQL si nécessaire
+    $fournisseur_id_int = (int) $fournisseur_id;
     $stats = [];
 
     // Nombre de produits fournis
     $stmt = $pdo->prepare("SELECT COUNT(*) as total FROM produits WHERE fournisseur_id = :fournisseur_id");
-    $stmt->execute([':fournisseur_id' => $fournisseur_id]);
+    $stmt->execute([':fournisseur_id' => $fournisseur_id_int]);
     $stats['total_produits'] = $stmt->fetch()['total'] ?? 0;
 
     // Produits actifs
@@ -107,11 +151,11 @@ function getDashboardStats(PDO $pdo, int $fournisseur_id): array
 /**
  * Formate le montant avec devise
  */
-
-function formatMontant($montant, string $devise = 'CDF'): string {
+function formatMontant($montant, string $devise = 'CDF'): string
+{
     // Convertir en float si c'est une chaîne
     $montant_float = is_numeric($montant) ? floatval($montant) : 0.0;
-    
+
     if ($devise === 'USD') {
         return '$' . number_format($montant_float, 2, '.', ',');
     }
@@ -219,23 +263,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // METTRE À JOUR LA DISPONIBILITÉ
             case 'update_disponibilite':
                 try {
-                    $stmt = $pdo->prepare("
-                        UPDATE produits_fournisseur 
-                        SET disponible = :disponible, 
-                            delai_livraison = :delai_livraison,
-                            prix_achat = :prix_achat
-                        WHERE id = :id AND fournisseur_id = :fournisseur_id
-                    ");
+                    // Vérifier d'abord si la table produits_fournisseur existe
+                    $stmt = $pdo->prepare("SHOW TABLES LIKE 'produits_fournisseur'");
+                    $stmt->execute();
 
-                    $stmt->execute([
-                        ':disponible' => isset($_POST['disponible']) ? 1 : 0,
-                        ':delai_livraison' => intval($_POST['delai_livraison'] ?? 0),
-                        ':prix_achat' => floatval($_POST['prix_achat'] ?? 0),
-                        ':id' => intval($_POST['produit_id'] ?? 0),
-                        ':fournisseur_id' => $fournisseur_id
-                    ]);
+                    if ($stmt->fetch()) {
+                        $stmt = $pdo->prepare("
+                            UPDATE produits_fournisseur 
+                            SET disponible = :disponible, 
+                                delai_livraison = :delai_livraison,
+                                prix_achat = :prix_achat
+                            WHERE id = :id AND fournisseur_id = :fournisseur_id
+                        ");
 
-                    $message = "✅ Disponibilité mise à jour avec succès!";
+                        $stmt->execute([
+                            ':disponible' => isset($_POST['disponible']) ? 1 : 0,
+                            ':delai_livraison' => intval($_POST['delai_livraison'] ?? 0),
+                            ':prix_achat' => floatval($_POST['prix_achat'] ?? 0),
+                            ':id' => intval($_POST['produit_id'] ?? 0),
+                            ':fournisseur_id' => $fournisseur_id
+                        ]);
+
+                        $message = "✅ Disponibilité mise à jour avec succès!";
+                    } else {
+                        $error = "❌ La table 'produits_fournisseur' n'existe pas.";
+                    }
 
                 } catch (Exception $e) {
                     $error = "❌ Erreur lors de la mise à jour: " . $e->getMessage();
@@ -245,22 +297,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // ENVOYER UN MESSAGE
             case 'envoyer_message':
                 try {
-                    $stmt = $pdo->prepare("
-                        INSERT INTO messages_fournisseur (
-                            fournisseur_id, sujet, message, type, statut
-                        ) VALUES (
-                            :fournisseur_id, :sujet, :message, :type, 'envoye'
-                        )
-                    ");
+                    // Vérifier si la table messages_fournisseur existe
+                    $stmt = $pdo->prepare("SHOW TABLES LIKE 'messages_fournisseur'");
+                    $stmt->execute();
 
-                    $stmt->execute([
-                        ':fournisseur_id' => $fournisseur_id,
-                        ':sujet' => $_POST['sujet'] ?? '',
-                        ':message' => $_POST['message'] ?? '',
-                        ':type' => $_POST['type'] ?? 'information'
-                    ]);
+                    if ($stmt->fetch()) {
+                        $stmt = $pdo->prepare("
+                            INSERT INTO messages_fournisseur (
+                                fournisseur_id, sujet, message, type, statut
+                            ) VALUES (
+                                :fournisseur_id, :sujet, :message, :type, 'envoye'
+                            )
+                        ");
 
-                    $message = "✅ Message envoyé avec succès!";
+                        $stmt->execute([
+                            ':fournisseur_id' => $fournisseur_id,
+                            ':sujet' => $_POST['sujet'] ?? '',
+                            ':message' => $_POST['message'] ?? '',
+                            ':type' => $_POST['type'] ?? 'information'
+                        ]);
+
+                        $message = "✅ Message envoyé avec succès!";
+                    } else {
+                        $error = "❌ La table 'messages_fournisseur' n'existe pas.";
+                    }
 
                 } catch (Exception $e) {
                     $error = "❌ Erreur lors de l'envoi du message: " . $e->getMessage();
@@ -278,7 +338,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $infos_fournisseur = [];
 try {
     $stmt = $pdo->prepare("
-        SELECT f.*, u.email, u.telephone
+        SELECT f.*, u.email as user_email, u.telephone as user_telephone
         FROM fournisseurs f
         LEFT JOIN utilisateurs u ON f.user_id = u.id
         WHERE f.id = :id
@@ -289,8 +349,18 @@ try {
     $error = "Erreur lors du chargement des informations: " . $e->getMessage();
 }
 
-// Récupérer les statistiques
-$stats = getDashboardStats($pdo, $fournisseur_id);
+// Récupérer les statistiques (si $fournisseur_id existe)
+if ($fournisseur_id) {
+    $stats = getDashboardStats($pdo, $fournisseur_id);
+} else {
+    $stats = [
+        'total_produits' => 0,
+        'produits_actifs' => 0,
+        'commandes_attente' => 0,
+        'ventes_totales' => 0,
+        'note_qualite' => 0
+    ];
+}
 
 // Récupérer les catégories
 $categories = [];
@@ -308,136 +378,137 @@ $historique_commandes = [];
 $evaluations = [];
 $messages = [];
 
-switch ($current_page) {
-    case 'produits':
-        try {
-            $stmt = $pdo->prepare("
-                SELECT p.*, c.nom as categorie_nom, 
-                       pv.prix_fc, pv.prix_usd,
-                       COUNT(cd.id) as ventes_total
-                FROM produits p
-                LEFT JOIN categories c ON p.categorie_id = c.id
-                LEFT JOIN prix_vente pv ON p.id = pv.produit_id AND pv.date_fin IS NULL
-                LEFT JOIN commande_details cd ON p.id = cd.produit_id
-                WHERE p.fournisseur_id = :fournisseur_id
-                GROUP BY p.id
-                ORDER BY p.created_at DESC
-            ");
-            $stmt->execute([':fournisseur_id' => $fournisseur_id]);
-            $produits_fournis = $stmt->fetchAll();
-        } catch (Exception $e) {
-            $error = "Erreur lors du chargement des produits: " . $e->getMessage();
-        }
-        break;
+if ($fournisseur_id) {
+    switch ($current_page) {
+        case 'produits':
+            try {
+                $stmt = $pdo->prepare("
+                    SELECT p.*, c.nom as categorie_nom, 
+                        pv.prix_fc, pv.prix_usd,
+                        (SELECT COUNT(*) FROM commande_details cd2 WHERE cd2.produit_id = p.id) as ventes_total
+                    FROM produits p
+                    LEFT JOIN categories c ON p.categorie_id = c.id
+                    LEFT JOIN prix_vente pv ON p.id = pv.produit_id AND pv.date_fin IS NULL
+                    WHERE p.fournisseur_id = :fournisseur_id
+                    ORDER BY p.created_at DESC
+                ");
+                $stmt->execute([':fournisseur_id' => $fournisseur_id]);
+                $produits_fournis = $stmt->fetchAll();
+            } catch (Exception $e) {
+                $error = "Erreur lors du chargement des produits: " . $e->getMessage();
+            }
+            break;
 
-    case 'commandes':
-        try {
-            $stmt = $pdo->prepare("
-                SELECT c.*, u.nom as client_nom, 
-                       COUNT(cd.id) as nombre_produits,
-                       SUM(CASE WHEN p.fournisseur_id = :fournisseur_id THEN cd.sous_total ELSE 0 END) as montant_fournisseur
-                FROM commandes c
-                JOIN utilisateurs u ON c.client_id = u.id
-                JOIN commande_details cd ON c.id = cd.commande_id
-                JOIN produits p ON cd.produit_id = p.id
-                WHERE p.fournisseur_id = :fournisseur_id2
-                AND c.statut IN ('en_attente', 'paye')
-                GROUP BY c.id
-                ORDER BY c.date_commande DESC
-                LIMIT 50
-            ");
-            $stmt->execute([
-                ':fournisseur_id' => $fournisseur_id,
-                ':fournisseur_id2' => $fournisseur_id
-            ]);
-            $commandes_en_cours = $stmt->fetchAll();
-        } catch (Exception $e) {
-            $error = "Erreur lors du chargement des commandes: " . $e->getMessage();
-        }
-        break;
+        case 'commandes':
+            try {
+                $stmt = $pdo->prepare("
+                    SELECT c.*, u.nom as client_nom, 
+                           COUNT(cd.id) as nombre_produits,
+                           SUM(CASE WHEN p.fournisseur_id = :fournisseur_id THEN cd.sous_total ELSE 0 END) as montant_fournisseur
+                    FROM commandes c
+                    JOIN utilisateurs u ON c.client_id = u.id
+                    JOIN commande_details cd ON c.id = cd.commande_id
+                    JOIN produits p ON cd.produit_id = p.id
+                    WHERE p.fournisseur_id = :fournisseur_id2
+                    AND c.statut IN ('en_attente', 'paye')
+                    GROUP BY c.id
+                    ORDER BY c.date_commande DESC
+                    LIMIT 50
+                ");
+                $stmt->execute([
+                    ':fournisseur_id' => $fournisseur_id,
+                    ':fournisseur_id2' => $fournisseur_id
+                ]);
+                $commandes_en_cours = $stmt->fetchAll();
+            } catch (Exception $e) {
+                $error = "Erreur lors du chargement des commandes: " . $e->getMessage();
+            }
+            break;
 
-    case 'historique':
-        try {
-            $stmt = $pdo->prepare("
-                SELECT c.*, u.nom as client_nom,
-                       COUNT(cd.id) as nombre_produits,
-                       SUM(cd.sous_total) as montant_total
-                FROM commandes c
-                JOIN utilisateurs u ON c.client_id = u.id
-                JOIN commande_details cd ON c.id = cd.commande_id
-                JOIN produits p ON cd.produit_id = p.id
-                WHERE p.fournisseur_id = :fournisseur_id
-                AND c.statut = 'paye'
-                AND c.date_commande >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-                GROUP BY c.id
-                ORDER BY c.date_commande DESC
-            ");
-            $stmt->execute([':fournisseur_id' => $fournisseur_id]);
-            $historique_commandes = $stmt->fetchAll();
-        } catch (Exception $e) {
-            $error = "Erreur lors du chargement de l'historique: " . $e->getMessage();
-        }
-        break;
+        case 'historique':
+            try {
+                $stmt = $pdo->prepare("
+                    SELECT c.*, u.nom as client_nom,
+                           COUNT(cd.id) as nombre_produits,
+                           SUM(cd.sous_total) as montant_total
+                    FROM commandes c
+                    JOIN utilisateurs u ON c.client_id = u.id
+                    JOIN commande_details cd ON c.id = cd.commande_id
+                    JOIN produits p ON cd.produit_id = p.id
+                    WHERE p.fournisseur_id = :fournisseur_id
+                    AND c.statut = 'paye'
+                    AND c.date_commande >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                    GROUP BY c.id
+                    ORDER BY c.date_commande DESC
+                ");
+                $stmt->execute([':fournisseur_id' => $fournisseur_id]);
+                $historique_commandes = $stmt->fetchAll();
+            } catch (Exception $e) {
+                $error = "Erreur lors du chargement de l'historique: " . $e->getMessage();
+            }
+            break;
 
-    case 'evaluations':
-        try {
-            $stmt = $pdo->prepare("
-                SELECT e.*, p.nom as produit_nom,
-                       u.nom as evaluateur_nom
-                FROM evaluations_fournisseur e
-                JOIN produits p ON e.produit_id = p.id
-                JOIN utilisateurs u ON e.evaluateur_id = u.id
-                WHERE p.fournisseur_id = :fournisseur_id
-                ORDER BY e.created_at DESC
-                LIMIT 20
-            ");
-            $stmt->execute([':fournisseur_id' => $fournisseur_id]);
-            $evaluations = $stmt->fetchAll();
-        } catch (Exception $e) {
-            $error = "Erreur lors du chargement des évaluations: " . $e->getMessage();
-        }
-        break;
+        case 'evaluations':
+            try {
+                $stmt = $pdo->prepare("
+                    SELECT e.*, p.nom as produit_nom,
+                           u.nom as evaluateur_nom
+                    FROM evaluations_fournisseur e
+                    JOIN produits p ON e.produit_id = p.id
+                    JOIN utilisateurs u ON e.evaluateur_id = u.id
+                    WHERE p.fournisseur_id = :fournisseur_id
+                    ORDER BY e.created_at DESC
+                    LIMIT 20
+                ");
+                $stmt->execute([':fournisseur_id' => $fournisseur_id]);
+                $evaluations = $stmt->fetchAll();
+            } catch (Exception $e) {
+                $error = "Erreur lors du chargement des évaluations: " . $e->getMessage();
+            }
+            break;
 
-    case 'messages':
-        try {
-            $stmt = $pdo->prepare("
-                SELECT * FROM messages_fournisseur
-                WHERE fournisseur_id = :fournisseur_id
-                ORDER BY created_at DESC
-                LIMIT 20
-            ");
-            $stmt->execute([':fournisseur_id' => $fournisseur_id]);
-            $messages = $stmt->fetchAll();
-        } catch (Exception $e) {
-            $error = "Erreur lors du chargement des messages: " . $e->getMessage();
-        }
-        break;
+        case 'messages':
+            try {
+                $stmt = $pdo->prepare("
+                    SELECT * FROM messages_fournisseur
+                    WHERE fournisseur_id = :fournisseur_id
+                    ORDER BY created_at DESC
+                    LIMIT 20
+                ");
+                $stmt->execute([':fournisseur_id' => $fournisseur_id]);
+                $messages = $stmt->fetchAll();
+            } catch (Exception $e) {
+                $error = "Erreur lors du chargement des messages: " . $e->getMessage();
+            }
+            break;
+    }
 }
 
 // Récupérer les commandes récentes pour le dashboard
 $commandes_recentes = [];
-try {
-    $stmt = $pdo->prepare("
-        SELECT c.id, c.numero_commande, c.montant_total, c.statut,
-               c.date_commande, u.nom as client_nom,
-               COUNT(cd.id) as nombre_produits
-        FROM commandes c
-        JOIN utilisateurs u ON c.client_id = u.id
-        JOIN commande_details cd ON c.id = cd.commande_id
-        JOIN produits p ON cd.produit_id = p.id
-        WHERE p.fournisseur_id = :fournisseur_id
-        AND c.date_commande >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-        GROUP BY c.id
-        ORDER BY c.date_commande DESC
-        LIMIT 10
-    ");
-    $stmt->execute([':fournisseur_id' => $fournisseur_id]);
-    $commandes_recentes = $stmt->fetchAll();
-} catch (Exception $e) {
-    error_log("Erreur chargement commandes récentes: " . $e->getMessage());
+if ($fournisseur_id) {
+    try {
+        $stmt = $pdo->prepare("
+            SELECT c.id, c.numero_commande, c.montant_total, c.statut,
+                   c.date_commande, u.nom as client_nom,
+                   COUNT(cd.id) as nombre_produits
+            FROM commandes c
+            JOIN utilisateurs u ON c.client_id = u.id
+            JOIN commande_details cd ON c.id = cd.commande_id
+            JOIN produits p ON cd.produit_id = p.id
+            WHERE p.fournisseur_id = :fournisseur_id
+            AND c.date_commande >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+            GROUP BY c.id
+            ORDER BY c.date_commande DESC
+            LIMIT 10
+        ");
+        $stmt->execute([':fournisseur_id' => $fournisseur_id]);
+        $commandes_recentes = $stmt->fetchAll();
+    } catch (Exception $e) {
+        error_log("Erreur chargement commandes récentes: " . $e->getMessage());
+    }
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="fr">
 
@@ -447,160 +518,372 @@ try {
     <title>NAGEX Pharma - Portail Fournisseur</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&display=swap"
+        rel="stylesheet">
+    <!-- Styles spécifiques au sidebar -->
     <style>
         .sidebar {
+            background: linear-gradient(165deg, #ffffff 0%, #f8fafc 100%);
+            border-right: 1px solid rgba(16, 185, 129, 0.1);
+            transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            backdrop-filter: blur(10px);
+        }
+
+        /* Style des éléments de menu */
+        .menu-item {
+            position: relative;
+            overflow: hidden;
             transition: all 0.3s ease;
+            border: 1px solid transparent;
         }
 
-        .active-menu {
-            background-color: #8b5cf6;
-            color: white;
+        .menu-item:hover {
+            border-color: rgba(16, 185, 129, 0.2);
+            transform: translateX(4px);
         }
 
-        .stat-card {
-            transition: transform 0.2s ease;
+        .menu-item.active-menu {
+            border-color: rgba(16, 185, 129, 0.3);
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.25);
+
         }
 
-        .stat-card:hover {
-            transform: translateY(-2px);
+        /* Indicateur visuel actif */
+        .menu-item::after {
+            content: '';
+            position: absolute;
+            left: -100%;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(16, 185, 129, 0.1), transparent);
+            transition: left 0.6s ease;
         }
 
-        .badge {
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 600;
+        .menu-item:hover::after {
+            left: 100%;
         }
 
-        .badge-success {
-            background-color: #10b981;
-            color: white;
-        }
-
-        .badge-warning {
-            background-color: #f59e0b;
-            color: white;
+        /* Badges améliorés */
+        .badge-danger,
+        .badge-warning,
+        .badge-info {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            min-width: 24px;
+            height: 22px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
         }
 
         .badge-danger {
-            background-color: #ef4444;
-            color: white;
+            box-shadow: 0 2px 10px rgba(239, 68, 68, 0.4);
+        }
+
+        .badge-warning {
+            box-shadow: 0 2px 10px rgba(245, 158, 11, 0.4);
         }
 
         .badge-info {
-            background-color: #3b82f6;
-            color: white;
+            box-shadow: 0 2px 10px rgba(59, 130, 246, 0.4);
         }
 
-        .badge-purple {
-            background-color: #8b5cf6;
-            color: white;
+        /* Animation des icônes */
+        .menu-item i {
+            transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
         }
 
-        .note-etoile {
-            color: #f59e0b;
+        .menu-item:hover i {
+            transform: scale(1.2) rotate(5deg);
+        }
+
+        .menu-item.active-menu i {
+            transform: scale(1.15);
+            animation: iconBounce 0.5s ease;
+        }
+
+        @keyframes iconBounce {
+
+            0%,
+            100% {
+                transform: scale(1.15);
+            }
+
+            50% {
+                transform: scale(1.25);
+            }
+        }
+
+        /* Titres de section */
+        .section-title {
+            position: relative;
+            margin: 1.5rem 0 0.5rem;
+        }
+
+        .section-title div {
+            letter-spacing: 0.05em;
+            background: rgba(240, 253, 244, 0.7);
+            border-radius: 10px;
+            backdrop-filter: blur(5px);
+        }
+
+        /* Animation au chargement */
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .menu-item {
+            animation: slideIn 0.5s ease-out forwards;
+            opacity: 0;
+        }
+
+        .menu-item:nth-child(1) {
+            animation-delay: 0.1s;
+        }
+
+        .menu-item:nth-child(2) {
+            animation-delay: 0.15s;
+        }
+
+        .menu-item:nth-child(3) {
+            animation-delay: 0.2s;
+        }
+
+        .menu-item:nth-child(4) {
+            animation-delay: 0.25s;
+        }
+
+        .menu-item:nth-child(5) {
+            animation-delay: 0.3s;
+        }
+
+        .menu-item:nth-child(6) {
+            animation-delay: 0.35s;
+        }
+
+        .menu-item:nth-child(7) {
+            animation-delay: 0.4s;
+        }
+
+        .menu-item:nth-child(8) {
+            animation-delay: 0.45s;
+        }
+
+        /* Effet de brillance sur les éléments actifs */
+        .active-menu::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg,
+                    rgba(255, 255, 255, 0.3) 0%,
+                    rgba(255, 255, 255, 0.1) 50%,
+                    rgba(255, 255, 255, 0) 100%);
+            border-radius: inherit;
+            pointer-events: none;
+        }
+
+        /* Responsive design amélioré */
+        @media (max-width: 768px) {
+            .sidebar {
+                border-right: none;
+                border-bottom: 1px solid rgba(16, 185, 129, 0.1);
+                box-shadow: 0 4px 20px rgba(16, 185, 129, 0.1);
+            }
+
+            .menu-item {
+                padding: 0.875rem 1rem;
+                margin: 0.125rem 0;
+            }
+
+            .menu-item:hover {
+                transform: translateY(-2px);
+            }
+
+            .section-title div {
+                padding: 0.75rem 1rem;
+            }
+
+            .badge-danger,
+            .badge-warning,
+            .badge-info {
+                font-size: 0.65rem;
+                padding: 0.125rem 0.5rem;
+                min-width: 20px;
+                height: 18px;
+            }
+        }
+
+        /* Dark mode support (optionnel) */
+        @media (prefers-color-scheme: dark) {
+            .sidebar {
+                background: linear-gradient(165deg, #1a1a2e 0%, #16213e 100%);
+                border-right-color: rgba(16, 185, 129, 0.2);
+            }
+
+            .menu-item:not(.active-menu) {
+                color: #cbd5e1;
+            }
+
+            .menu-item:hover:not(.active-menu) {
+                background: linear-gradient(to right, rgba(16, 185, 129, 0.15), transparent);
+                color: #ffffff;
+            }
+
+            .section-title div {
+                background: rgba(16, 185, 129, 0.1);
+                color: #10b981;
+            }
         }
     </style>
+
+
 </head>
 
-<body class="bg-gray-100">
-
-    <!-- Navigation principale -->
-    <nav class="bg-purple-700 text-white shadow-lg">
-        <div class="container mx-auto px-4">
-            <div class="flex justify-between items-center py-4">
-                <div class="flex items-center space-x-2">
-                    <i class="fas fa-truck text-2xl"></i>
-                    <h1 class="text-xl font-bold">NAGEX Pharma - Portail Fournisseur</h1>
-                </div>
-                <div class="flex items-center space-x-4">
-                    <span class="text-sm">
-                        <i class="fas fa-building mr-1"></i>
-                        <?php echo e($infos_fournisseur['nom_societe'] ?? 'Fournisseur'); ?>
-                    </span>
-                    <a href="logout.php" class="bg-red-500 hover:bg-red-600 px-3 py-1 rounded text-sm">
-                        <i class="fas fa-sign-out-alt mr-1"></i>Déconnexion
-                    </a>
-                </div>
-            </div>
-        </div>
-    </nav>
+<body class="bg-gray-100" style="font-family: 'Montserrat', sans-serif;">
 
     <div class="flex">
-        <!-- Sidebar -->
-        <div class="sidebar w-64 bg-white shadow-lg min-h-screen">
-            <div class="p-4 border-b">
-                <h2 class="font-bold text-lg text-gray-700">
-                    <i class="fas fa-tachometer-alt mr-2"></i>Dashboard
-                </h2>
+        <!-- ========== SIDEBAR FOURNISSEUR - THÈME BLEU DE NUIT ========== -->
+        <div class="sidebar w-64 shadow-xl min-h-screen">
+            <!-- Logo Section avec effet premium nocturne -->
+            <div class="p-6 border-b border-green-800 bg-gradient-to-r from-green-900 via-green-800 to-green-900">
+                <div class="flex items-center space-x-3">
+                    <div class="relative">
+                        <div
+                            class="w-12 h-12 bg-gradient-to-br from-green-800 to-green-900 rounded-xl flex items-center justify-center shadow-lg border border-green-700">
+                            <i class="fas fa-capsules text-green-300 text-xl"></i>
+                        </div>
+                        <div
+                            class="absolute -top-1 -right-1 w-5 h-5 bg-gradient-to-br from-cyan-400 to-green-500 rounded-full flex items-center justify-center shadow-md border border-green-300">
+                            <i class="fas fa-check text-white text-xs"></i>
+                        </div>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold text-white tracking-tight">NAGEX Pharma</h1>
+                        <p class="text-xs text-green-200 font-medium opacity-90">Espace Fournisseur</p>
+                    </div>
+                </div>
+
+
             </div>
-            <nav class="mt-4">
+
+            <!-- Navigation -->
+            <nav class="mt-4 space-y-1 px-2">
+                <!-- Tableau de bord -->
                 <a href="?page=dashboard"
-                    class="block py-2 px-4 hover:bg-purple-50 <?php echo $current_page == 'dashboard' ? 'active-menu text-purple-600' : 'text-gray-700'; ?>">
-                    <i class="fas fa-home mr-2"></i>Tableau de bord
-                </a>
-
-                <div class="px-4 py-2 text-gray-500 text-sm font-semibold mt-4">
-                    <i class="fas fa-boxes mr-2"></i>Catalogue
-                </div>
-                <a href="?page=produits"
-                    class="block py-2 px-4 hover:bg-purple-50 <?php echo $current_page == 'produits' ? 'active-menu text-purple-600' : 'text-gray-700'; ?>">
-                    <i class="fas fa-list mr-2"></i>Mes produits
-                </a>
-                <a href="?page=ajouter_produit"
-                    class="block py-2 px-4 hover:bg-purple-50 <?php echo $current_page == 'ajouter_produit' ? 'active-menu text-purple-600' : 'text-gray-700'; ?>">
-                    <i class="fas fa-plus-circle mr-2"></i>Ajouter produit
-                </a>
-
-                <div class="px-4 py-2 text-gray-500 text-sm font-semibold mt-4">
-                    <i class="fas fa-shopping-cart mr-2"></i>Commandes
-                </div>
-                <a href="?page=commandes"
-                    class="block py-2 px-4 hover:bg-purple-50 <?php echo $current_page == 'commandes' ? 'active-menu text-purple-600' : 'text-gray-700'; ?>">
-                    <i class="fas fa-clipboard-list mr-2"></i>Commandes en cours
-                </a>
-                <a href="?page=historique"
-                    class="block py-2 px-4 hover:bg-purple-50 <?php echo $current_page == 'historique' ? 'active-menu text-purple-600' : 'text-gray-700'; ?>">
-                    <i class="fas fa-history mr-2"></i>Historique
-                </a>
-
-                <div class="px-4 py-2 text-gray-500 text-sm font-semibold mt-4">
-                    <i class="fas fa-chart-line mr-2"></i>Performance
-                </div>
-                <a href="?page=evaluations"
-                    class="block py-2 px-4 hover:bg-purple-50 <?php echo $current_page == 'evaluations' ? 'active-menu text-purple-600' : 'text-gray-700'; ?>">
-                    <i class="fas fa-star mr-2"></i>Évaluations
-                </a>
-                <a href="?page=statistiques"
-                    class="block py-2 px-4 hover:bg-purple-50 <?php echo $current_page == 'statistiques' ? 'active-menu text-purple-600' : 'text-gray-700'; ?>">
-                    <i class="fas fa-chart-bar mr-2"></i>Statistiques
-                </a>
-
-                <div class="px-4 py-2 text-gray-500 text-sm font-semibold mt-4">
-                    <i class="fas fa-comments mr-2"></i>Communication
-                </div>
-                <a href="?page=messages"
-                    class="block py-2 px-4 hover:bg-purple-50 <?php echo $current_page == 'messages' ? 'active-menu text-purple-600' : 'text-gray-700'; ?>">
-                    <i class="fas fa-envelope mr-2"></i>Messages
-                    <?php if (false): // Vous pouvez ajouter une logique pour compter les nouveaux messages ?>
-                        <span class="float-right bg-blue-500 text-white text-xs rounded-full px-2">
-                            3
-                        </span>
+                    class="menu-item group relative flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-300 ease-out <?php echo $current_page == 'dashboard' ? 'active-menu text-white' : 'text-gray-300 hover:text-white'; ?>">
+                    <div class="relative">
+                        <i
+                            class="fas fa-home w-5 h-5 mr-3 <?php echo $current_page == 'dashboard' ? 'text-white' : 'text-gray-400 group-hover:text-blue-300'; ?>"></i>
+                    </div>
+                    <span class="flex-1">Tableau de bord</span>
+                    <?php if ($current_page == 'dashboard'): ?>
+                        <div class="absolute -right-2 top-1/2 -translate-y-1/2 w-2 h-8 bg-blue-500 rounded-l-lg"></div>
                     <?php endif; ?>
                 </a>
-                <a href="?page=contact"
-                    class="block py-2 px-4 hover:bg-purple-50 <?php echo $current_page == 'contact' ? 'active-menu text-purple-600' : 'text-gray-700'; ?>">
-                    <i class="fas fa-phone-alt mr-2"></i>Contact
+
+                <!-- Section Catalogue -->
+                <div class="section-title">
+                    <div
+                        class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-blue-300 flex items-center">
+                        <div class="w-8 h-px bg-blue-700 mr-3"></div>
+                        <i class="fas fa-boxes text-blue-400 mr-2"></i>
+                        <span>Catalogue</span>
+                        <div class="flex-1 h-px bg-blue-700 ml-3"></div>
+                    </div>
+                </div>
+
+                <!-- Mes produits -->
+                <a href="?page=produits"
+                    class="menu-item group relative flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-300 ease-out <?php echo $current_page == 'produits' ? 'active-menu text-white' : 'text-gray-300 hover:text-white'; ?>">
+                    <div class="relative">
+                        <i
+                            class="fas fa-list w-5 h-5 mr-3 <?php echo $current_page == 'produits' ? 'text-white' : 'text-gray-400 group-hover:text-blue-300'; ?>"></i>
+                    </div>
+                    <span class="flex-1">Mes produits</span>
+                    <?php if (isset($stats['produits_total']) && $stats['produits_total'] > 0): ?>
+                        <span class="badge-success ml-auto text-white text-xs font-bold py-1 px-2.5 rounded-full shadow-sm">
+                            <?php echo $stats['produits_total']; ?>
+                        </span>
+                    <?php endif; ?>
+                    <?php if ($current_page == 'produits'): ?>
+                        <div class="absolute -right-2 top-1/2 -translate-y-1/2 w-2 h-8 bg-blue-500 rounded-l-lg"></div>
+                    <?php endif; ?>
                 </a>
 
-                <div class="px-4 py-2 text-gray-500 text-sm font-semibold mt-4">
-                    <i class="fas fa-user-circle mr-2"></i>Compte
-                </div>
-                <a href="?page=profil"
-                    class="block py-2 px-4 hover:bg-purple-50 <?php echo $current_page == 'profil' ? 'active-menu text-purple-600' : 'text-gray-700'; ?>">
-                    <i class="fas fa-user-edit mr-2"></i>Mon profil
+                <!-- Ajouter produit -->
+                <a href="?page=ajouter_produit"
+                    class="menu-item group relative flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-300 ease-out <?php echo $current_page == 'ajouter_produit' ? 'active-menu text-white' : 'text-gray-300 hover:text-white'; ?>">
+                    <div class="relative">
+                        <i
+                            class="fas fa-plus-circle w-5 h-5 mr-3 <?php echo $current_page == 'ajouter_produit' ? 'text-white' : 'text-gray-400 group-hover:text-blue-300'; ?>"></i>
+                    </div>
+                    <span class="flex-1">Ajouter produit</span>
+                    <div class="w-2 h-2 bg-blue-400 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
+                    </div>
+                    <?php if ($current_page == 'ajouter_produit'): ?>
+                        <div class="absolute -right-2 top-1/2 -translate-y-1/2 w-2 h-8 bg-blue-500 rounded-l-lg"></div>
+                    <?php endif; ?>
                 </a>
+
+                <!-- Section Commandes -->
+                <div class="section-title">
+                    <div
+                        class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-blue-300 flex items-center">
+                        <div class="w-8 h-px bg-blue-700 mr-3"></div>
+                        <i class="fas fa-shopping-cart text-blue-400 mr-2"></i>
+                        <span>Commandes</span>
+                        <div class="flex-1 h-px bg-blue-700 ml-3"></div>
+                    </div>
+                </div>
+
+                <!-- Commandes en cours -->
+                <a href="?page=commandes"
+                    class="menu-item group relative flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-300 ease-out <?php echo $current_page == 'commandes' ? 'active-menu text-white' : 'text-gray-300 hover:text-white'; ?>">
+                    <div class="relative">
+                        <i
+                            class="fas fa-clipboard-list w-5 h-5 mr-3 <?php echo $current_page == 'commandes' ? 'text-white' : 'text-gray-400 group-hover:text-blue-300'; ?>"></i>
+                    </div>
+                    <span class="flex-1">Commandes en cours</span>
+                    <?php if (isset($stats['commandes_encours']) && $stats['commandes_encours'] > 0): ?>
+                        <span
+                            class="badge-warning ml-auto text-white text-xs font-bold py-1 px-2.5 rounded-full shadow-sm animate-pulse">
+                            <?php echo $stats['commandes_encours']; ?>
+                        </span>
+                    <?php endif; ?>
+                    <?php if ($current_page == 'commandes'): ?>
+                        <div class="absolute -right-2 top-1/2 -translate-y-1/2 w-2 h-8 bg-blue-500 rounded-l-lg"></div>
+                    <?php endif; ?>
+                </a>
+
+                <!-- Historique -->
+                <a href="?page=historique"
+                    class="menu-item group relative flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-300 ease-out <?php echo $current_page == 'historique' ? 'active-menu text-white' : 'text-gray-300 hover:text-white'; ?>">
+                    <div class="relative">
+                        <i
+                            class="fas fa-history w-5 h-5 mr-3 <?php echo $current_page == 'historique' ? 'text-white' : 'text-gray-400 group-hover:text-blue-300'; ?>"></i>
+                    </div>
+                    <span class="flex-1">Historique</span>
+                    <?php if ($current_page == 'historique'): ?>
+                        <div class="absolute -right-2 top-1/2 -translate-y-1/2 w-2 h-8 bg-blue-500 rounded-l-lg"></div>
+                    <?php endif; ?>
+                </a>
+
             </nav>
+
+
         </div>
 
         <!-- Contenu principal -->
@@ -620,657 +903,1358 @@ try {
 
             <!-- Contenu selon la page -->
             <?php if ($current_page == 'dashboard'): ?>
-                <!-- ========== DASHBOARD ========== -->
-                <div class="mb-6">
-                    <h1 class="text-2xl font-bold text-gray-800">Tableau de bord Fournisseur</h1>
-                    <p class="text-gray-600">Bienvenue dans votre espace fournisseur</p>
-                </div>
-
-                <!-- Note de qualité -->
-                <div
-                    class="mb-8 bg-gradient-to-r from-purple-100 to-pink-100 rounded-lg shadow-md p-6 border border-purple-200">
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <h2 class="text-xl font-bold text-gray-800 mb-2">Votre note de qualité</h2>
-                            <div class="flex items-center">
-                                <?php
-                                // Convertir la note en float pour les calculs
-                                $note_qualite = floatval($stats['note_qualite'] ?? 0);
-                                $note_arrondie = floor($note_qualite);
-                                $has_demi = fmod($note_qualite, 1) > 0;
-
-                                for ($i = 1; $i <= 5; $i++): ?>
-                                    <?php if ($i <= $note_arrondie): ?>
-                                        <i class="fas fa-star text-yellow-500 text-2xl mr-1"></i>
-                                    <?php elseif ($i == $note_arrondie + 1 && $has_demi): ?>
-                                        <i class="fas fa-star-half-alt text-yellow-500 text-2xl mr-1"></i>
-                                    <?php else: ?>
-                                        <i class="far fa-star text-gray-400 text-2xl mr-1"></i>
-                                    <?php endif; ?>
-                                <?php endfor; ?>
-                                <span class="ml-3 text-2xl font-bold text-gray-800">
-                                    <?php echo number_format($note_qualite, 1); ?>/5
-                                </span>
+                <!-- ========== DASHBOARD FOURNISSEUR ========== -->
+                <div class="mb-8">
+                    <!-- En-tête avec identité fournisseur -->
+                    <div class="mb-8">
+                        <div class="flex flex-col lg:flex-row lg:items-center justify-between mb-6">
+                            <div class="mb-6 lg:mb-0">
+                                <div
+                                    class="inline-flex items-center px-4 py-2 bg-gradient-to-r from-amber-50 to-orange-50 rounded-2xl border border-amber-100 mb-4">
+                                    <i class="fas fa-truck text-amber-500 mr-2"></i>
+                                    <span class="text-sm font-medium text-amber-700">Espace Fournisseur Pro</span>
+                                </div>
+                                <h1 class="text-3xl lg:text-4xl font-bold text-gray-900 tracking-tight mb-2">Tableau de bord
+                                    Fournisseur</h1>
+                                <p class="text-gray-600 text-lg">
+                                    Bienvenue, <span class="font-semibold text-amber-600">
+                                        <?php
+                                        // Corrigé: Vérifier si $user_info existe et a les clés nécessaires
+                                        if (isset($user_info['nom_societe']) && !empty($user_info['nom_societe'])) {
+                                            echo htmlspecialchars($user_info['nom_societe'], ENT_QUOTES, 'UTF-8');
+                                        } elseif (isset($user_info['nom']) && !empty($user_info['nom'])) {
+                                            echo htmlspecialchars($user_info['nom'], ENT_QUOTES, 'UTF-8');
+                                        } elseif (isset($_SESSION['user_nom']) && !empty($_SESSION['user_nom'])) {
+                                            echo htmlspecialchars($_SESSION['user_nom'], ENT_QUOTES, 'UTF-8');
+                                        } else {
+                                            echo 'Fournisseur';
+                                        }
+                                        ?>
+                                    </span>
+                                    • Gestion et analyse de vos produits
+                                </p>
                             </div>
-                            <p class="text-gray-600 mt-2">Évaluation basée sur la qualité de vos produits et services</p>
-                        </div>
-                        <div class="text-right">
-                            <p class="text-4xl font-bold text-purple-600"><?php echo $stats['total_produits']; ?></p>
-                            <p class="text-gray-600">Produits fournis</p>
+
+
                         </div>
                     </div>
                 </div>
 
-                <!-- Cartes de statistiques -->
+                <!-- Bandeau note de qualité premium -->
+                <div class="mb-8 bg-gradient-to-r from-green-500 to-green-500 rounded-2xl shadow-xl overflow-hidden">
+                    <div class="relative p-6 lg:p-8">
+                        <!-- Effet de brillance -->
+                        <div
+                            class="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-white/10 to-transparent rounded-full -translate-y-32 translate-x-32">
+                        </div>
+
+                        <div class="relative grid grid-cols-1 lg:grid-cols-3 gap-6 items-center">
+                            <!-- Note et étoiles -->
+                            <div class="text-center lg:text-left">
+                                <h2 class="text-xl font-bold text-white mb-3">Votre note de qualité</h2>
+                                <div class="flex items-center justify-center lg:justify-start space-x-2 mb-2">
+                                    <?php
+                                    // Corrigé: Vérifier l'existence de $stats
+                                    $note_qualite = isset($stats['note_qualite']) ? floatval($stats['note_qualite']) : 0;
+                                    $note_arrondie = floor($note_qualite);
+                                    $has_demi = fmod($note_qualite, 1) > 0;
+
+                                    for ($i = 1; $i <= 5; $i++): ?>
+                                        <?php if ($i <= $note_arrondie): ?>
+                                            <i class="fas fa-star text-yellow-300 text-3xl"></i>
+                                        <?php elseif ($i == $note_arrondie + 1 && $has_demi): ?>
+                                            <i class="fas fa-star-half-alt text-yellow-300 text-3xl"></i>
+                                        <?php else: ?>
+                                            <i class="far fa-star text-white text-3xl"></i>
+                                        <?php endif; ?>
+                                    <?php endfor; ?>
+                                </div>
+                                <div class="flex items-center justify-center lg:justify-start">
+                                    <span
+                                        class="text-4xl font-bold text-white mr-3"><?php echo number_format($note_qualite, 1); ?></span>
+                                    <span class="text-white">/5</span>
+                                </div>
+                                <p class="text-white text-sm mt-2">
+                                    <?php
+                                    $appreciation = '';
+                                    if ($note_qualite >= 4.5)
+                                        $appreciation = 'Excellent ⭐';
+                                    elseif ($note_qualite >= 4.0)
+                                        $appreciation = 'Très bon';
+                                    elseif ($note_qualite >= 3.5)
+                                        $appreciation = 'Bon';
+                                    elseif ($note_qualite >= 3.0)
+                                        $appreciation = 'Satisfaisant';
+                                    else
+                                        $appreciation = 'À améliorer';
+                                    echo htmlspecialchars($appreciation, ENT_QUOTES, 'UTF-8');
+                                    ?>
+                                </p>
+                            </div>
+
+                            <!-- Statistique produits -->
+                            <div class="text-center lg:text-center">
+                                <div
+                                    class="inline-block bg-white/20 backdrop-blur-sm rounded-2xl p-6 border border-white/30">
+                                    <p class="text-5xl font-bold text-white mb-1">
+                                        <?php echo isset($stats['total_produits']) ? $stats['total_produits'] : 0; ?>
+                                    </p>
+                                    <p class="text-white text-sm font-medium">Produits fournis</p>
+                                    <div class="mt-3 flex justify-center space-x-2">
+                                        <span
+                                            class="inline-flex items-center px-2 py-1 bg-emerald-500/30 text-emerald-100 text-xs rounded-full">
+                                            <i class="fas fa-check-circle mr-1"></i>
+                                            <?php echo isset($stats['produits_actifs']) ? $stats['produits_actifs'] : 0; ?>
+                                            actifs
+                                        </span>
+                                        <?php if (isset($stats['produits_attente']) && $stats['produits_attente'] > 0): ?>
+                                            <span
+                                                class="inline-flex items-center px-2 py-1 bg-amber-500/30 text-amber-100 text-xs rounded-full">
+                                                <i class="fas fa-clock mr-1"></i>
+                                                <?php echo $stats['produits_attente']; ?> en attente
+                                            </span>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Progression et objectif -->
+                            <div class="text-center lg:text-right">
+                                <div class="bg-white/10 backdrop-blur-sm rounded-2xl p-5 border border-white/20">
+                                    <p class="text-white font-semibold mb-2">Objectif mensuel</p>
+                                    <div class="w-full bg-white/20 rounded-full h-3 mb-2 overflow-hidden">
+                                        <?php
+                                        $objectif = 1000000; // 1 million FC
+                                        $ventes_totales = isset($stats['ventes_totales']) ? $stats['ventes_totales'] : 0;
+                                        $progress = $objectif > 0 ? min(100, ($ventes_totales / $objectif) * 100) : 0;
+                                        ?>
+                                        <div class="h-3 bg-gradient-to-r from-emerald-400 to-cyan-400 rounded-full transition-all duration-1000"
+                                            style="width: <?php echo $progress; ?>%"></div>
+                                    </div>
+                                    <div class="flex justify-between text-sm">
+                                        <span
+                                            class="text-amber-100/80"><?php echo isset($stats['ventes_totales']) ? formatMontant($stats['ventes_totales']) : formatMontant(0); ?></span>
+                                        <span
+                                            class="text-white font-semibold"><?php echo number_format($progress, 1); ?>%</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Cartes de statistiques premium -->
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-                    <div class="stat-card bg-white p-6 rounded-lg shadow-md border border-gray-200">
-                        <div class="flex items-center">
-                            <div class="p-3 bg-green-100 rounded-lg">
-                                <i class="fas fa-check-circle text-green-600 text-xl"></i>
+                    <!-- Produits actifs -->
+                    <div
+                        class="stat-card group relative bg-gradient-to-br from-white to-gray-50 p-6 rounded-2xl shadow-lg border border-emerald-200 hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
+                        <div
+                            class="absolute inset-0 bg-gradient-to-br from-emerald-500/5 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                        </div>
+                        <div class="relative flex items-center">
+                            <div class="p-4 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl shadow-lg">
+                                <i class="fas fa-check-circle text-white text-2xl"></i>
                             </div>
-                            <div class="ml-4">
-                                <p class="text-gray-500 text-sm">Produits actifs</p>
-                                <p class="text-2xl font-bold"><?php echo $stats['produits_actifs']; ?></p>
+                            <div class="ml-5">
+                                <p class="text-gray-500 text-sm font-medium mb-1">Produits actifs</p>
+                                <p class="text-3xl font-bold text-gray-900">
+                                    <?php echo isset($stats['produits_actifs']) ? $stats['produits_actifs'] : 0; ?>
+                                </p>
+                                <div class="mt-2 text-xs text-emerald-600 font-semibold flex items-center">
+                                    <?php
+                                    $total_produits = isset($stats['total_produits']) ? $stats['total_produits'] : 1;
+                                    $pourcentage_actifs = $total_produits > 0 ? (isset($stats['produits_actifs']) ? ($stats['produits_actifs'] / $total_produits * 100) : 0) : 0;
+                                    ?>
+                                    <i
+                                        class="fas <?php echo $pourcentage_actifs >= 90 ? 'fa-trend-up' : 'fa-trend-down'; ?> mr-1"></i>
+                                    <?php echo round($pourcentage_actifs, 1); ?>% du catalogue
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    <div class="stat-card bg-white p-6 rounded-lg shadow-md border border-gray-200">
-                        <div class="flex items-center">
-                            <div class="p-3 bg-blue-100 rounded-lg">
-                                <i class="fas fa-shopping-cart text-blue-600 text-xl"></i>
+                    <!-- Commandes en attente -->
+                    <div
+                        class="stat-card group relative bg-gradient-to-br from-white to-gray-50 p-6 rounded-2xl shadow-lg border border-blue-200 hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
+                        <div
+                            class="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                        </div>
+                        <div class="relative flex items-center">
+                            <div class="p-4 bg-gradient-to-br from-blue-500 to-cyan-600 rounded-xl shadow-lg">
+                                <i class="fas fa-shopping-cart text-white text-2xl"></i>
                             </div>
-                            <div class="ml-4">
-                                <p class="text-gray-500 text-sm">Commandes en attente</p>
-                                <p class="text-2xl font-bold"><?php echo $stats['commandes_attente']; ?></p>
+                            <div class="ml-5">
+                                <p class="text-gray-500 text-sm font-medium mb-1">Commandes en attente</p>
+                                <p class="text-3xl font-bold text-gray-900">
+                                    <?php echo isset($stats['commandes_attente']) ? $stats['commandes_attente'] : 0; ?>
+                                </p>
+                                <div class="mt-2 text-xs text-blue-600 font-semibold flex items-center">
+                                    <?php if (isset($stats['commandes_attente']) && $stats['commandes_attente'] > 0): ?>
+                                        <i class="fas fa-clock mr-1 animate-pulse"></i>
+                                        Nécessite votre attention
+                                    <?php else: ?>
+                                        <i class="fas fa-check mr-1"></i>
+                                        À jour
+                                    <?php endif; ?>
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    <div class="stat-card bg-white p-6 rounded-lg shadow-md border border-gray-200">
-                        <div class="flex items-center">
-                            <div class="p-3 bg-purple-100 rounded-lg">
-                                <i class="fas fa-chart-line text-purple-600 text-xl"></i>
+                    <!-- Ventes totales -->
+                    <div
+                        class="stat-card group relative bg-gradient-to-br from-white to-gray-50 p-6 rounded-2xl shadow-lg border border-purple-200 hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
+                        <div
+                            class="absolute inset-0 bg-gradient-to-br from-purple-500/5 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                        </div>
+                        <div class="relative flex items-center">
+                            <div class="p-4 bg-gradient-to-br from-purple-500 to-violet-600 rounded-xl shadow-lg">
+                                <i class="fas fa-chart-line text-white text-2xl"></i>
                             </div>
-                            <div class="ml-4">
-                                <p class="text-gray-500 text-sm">Ventes totales</p>
-                                <p class="text-2xl font-bold"><?php echo formatMontant($stats['ventes_totales']); ?></p>
+                            <div class="ml-5">
+                                <p class="text-gray-500 text-sm font-medium mb-1">Ventes totales</p>
+                                <p class="text-3xl font-bold text-gray-900">
+                                    <?php echo isset($stats['ventes_totales']) ? formatMontant($stats['ventes_totales']) : formatMontant(0); ?>
+                                </p>
+                                <div class="mt-2 text-xs text-purple-600 font-semibold flex items-center">
+                                    <i class="fas fa-calendar-alt mr-1"></i>
+                                    <?php echo date('M Y'); ?>
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    <div class="stat-card bg-white p-6 rounded-lg shadow-md border border-gray-200">
-                        <div class="flex items-center">
-                            <div class="p-3 bg-yellow-100 rounded-lg">
-                                <i class="fas fa-truck-loading text-yellow-600 text-xl"></i>
+                    <!-- Taux de conversion -->
+                    <div
+                        class="stat-card group relative bg-gradient-to-br from-white to-gray-50 p-6 rounded-2xl shadow-lg border border-amber-200 hover:shadow-xl transition-all duration-300 hover:-translate-y-1">
+                        <div
+                            class="absolute inset-0 bg-gradient-to-br from-amber-500/5 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                        </div>
+                        <div class="relative flex items-center">
+                            <div class="p-4 bg-gradient-to-br from-amber-500 to-orange-600 rounded-xl shadow-lg">
+                                <i class="fas fa-percentage text-white text-2xl"></i>
                             </div>
-                            <div class="ml-4">
-                                <p class="text-gray-500 text-sm">Livraisons</p>
-                                <p class="text-2xl font-bold">-</p>
+                            <div class="ml-5">
+                                <p class="text-gray-500 text-sm font-medium mb-1">Taux de conversion</p>
+                                <p class="text-3xl font-bold text-gray-900">
+                                    <?php
+                                    $commandes_traitees = isset($stats['commandes_traitees']) ? $stats['commandes_traitees'] : 0;
+                                    $total_commandes = isset($stats['total_commandes']) ? $stats['total_commandes'] : 1;
+                                    $taux = $total_commandes > 0 ? ($commandes_traitees / $total_commandes * 100) : 0;
+                                    echo number_format($taux, 1);
+                                    ?>%
+                                </p>
+                                <div class="mt-2 text-xs text-amber-600 font-semibold flex items-center">
+                                    <i class="fas fa-chart-pie mr-1"></i>
+                                    Commandes traitées
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- Commandes récentes -->
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                    <div class="bg-white rounded-lg shadow-md p-6">
-                        <h2 class="text-xl font-bold text-gray-800 mb-4">
-                            <i class="fas fa-history mr-2"></i>Commandes récentes
-                        </h2>
-                        <?php if (count($commandes_recentes) > 0): ?>
-                            <div class="space-y-3">
-                                <?php foreach ($commandes_recentes as $commande): ?>
-                                    <div class="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-                                        <div>
-                                            <p class="font-semibold">#<?php echo e($commande['numero_commande']); ?></p>
-                                            <p class="text-sm text-gray-600"><?php echo e($commande['client_nom']); ?></p>
+                <!-- Grille principale : Commandes + Actions -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                    <!-- Commandes récentes -->
+                    <div
+                        class="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+                        <div class="p-6 border-b border-gray-100">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center">
+                                    <div class="p-3 bg-gradient-to-br from-blue-100 to-cyan-100 rounded-xl mr-4">
+                                        <i class="fas fa-history text-blue-600 text-xl"></i>
+                                    </div>
+                                    <div>
+                                        <h2 class="text-xl font-bold text-gray-900">Commandes récentes</h2>
+                                        <p class="text-sm text-gray-500">Les 5 dernières commandes à traiter</p>
+                                    </div>
+                                </div>
+                                <div class="text-xs font-semibold text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
+                                    <?php echo isset($commandes_recentes) ? count($commandes_recentes) : 0; ?> commandes
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="p-6">
+                            <?php if (isset($commandes_recentes) && count($commandes_recentes) > 0): ?>
+                                <div class="space-y-4">
+                                    <?php foreach ($commandes_recentes as $commande): ?>
+                                        <div
+                                            class="group relative bg-white p-4 rounded-xl border border-gray-200 hover:border-blue-200 hover:shadow-md transition-all duration-200">
+                                            <div class="flex items-center justify-between">
+                                                <div class="flex-1">
+                                                    <div class="flex items-center mb-2">
+                                                        <span
+                                                            class="font-bold text-gray-900 mr-3">#<?php echo htmlspecialchars($commande['numero_commande'] ?? '', ENT_QUOTES, 'UTF-8'); ?></span>
+                                                        <span class="text-xs px-2.5 py-1 rounded-full font-semibold <?php
+                                                        $statut = $commande['statut'] ?? 'en_attente';
+                                                        echo $statut == 'paye' ? 'bg-emerald-100 text-emerald-800' :
+                                                            ($statut == 'en_attente' ? 'bg-amber-100 text-amber-800' :
+                                                                ($statut == 'expedie' ? 'bg-blue-100 text-blue-800' :
+                                                                    'bg-rose-100 text-rose-800'));
+                                                        ?>">
+                                                            <i class="fas <?php
+                                                            echo $statut == 'paye' ? 'fa-check-circle' :
+                                                                ($statut == 'en_attente' ? 'fa-clock' :
+                                                                    ($statut == 'expedie' ? 'fa-shipping-fast' :
+                                                                        'fa-times-circle'));
+                                                            ?> mr-1.5 text-xs"></i>
+                                                            <?php echo htmlspecialchars(ucfirst($statut), ENT_QUOTES, 'UTF-8'); ?>
+                                                        </span>
+                                                    </div>
+                                                    <div class="text-sm text-gray-600">
+                                                        <div class="flex items-center mb-1">
+                                                            <i class="fas fa-user mr-2 text-gray-400"></i>
+                                                            <?php echo htmlspecialchars($commande['client_nom'] ?? 'Client', ENT_QUOTES, 'UTF-8'); ?>
+                                                        </div>
+                                                        <div class="flex items-center">
+                                                            <i class="fas fa-calendar-day mr-2 text-gray-400"></i>
+                                                            <?php echo isset($commande['date_commande']) ? date('d/m/Y H:i', strtotime($commande['date_commande'])) : 'Date non disponible'; ?>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="text-right min-w-28">
+                                                    <p class="text-lg font-bold text-emerald-600 mb-1">
+                                                        <?php echo isset($commande['montant_total']) ? formatMontant($commande['montant_total']) : formatMontant(0); ?>
+                                                    </p>
+                                                    <button onclick="gererCommande(<?php echo $commande['id'] ?? 0; ?>)"
+                                                        class="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center justify-end group">
+                                                        Gérer
+                                                        <i
+                                                            class="fas fa-chevron-right ml-1 text-xs group-hover:translate-x-1 transition-transform"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
                                         </div>
-                                        <div class="text-right">
-                                            <p class="font-bold text-green-600">
-                                                <?php echo formatMontant($commande['montant_total']); ?></p>
-                                            <p class="text-sm">
-                                                <?php if ($commande['statut'] == 'paye'): ?>
-                                                    <span class="badge badge-success">Payé</span>
-                                                <?php elseif ($commande['statut'] == 'en_attente'): ?>
-                                                    <span class="badge badge-warning">En attente</span>
-                                                <?php else: ?>
-                                                    <span class="badge badge-danger"><?php echo e($commande['statut']); ?></span>
-                                                <?php endif; ?>
+                                    <?php endforeach; ?>
+                                </div>
+
+                                <div class="mt-6 pt-6 border-t border-gray-100 text-center">
+                                    <a href="?page=commandes"
+                                        class="inline-flex items-center text-blue-600 hover:text-blue-800 font-semibold text-sm group">
+                                        <span>Voir toutes les commandes</span>
+                                        <i
+                                            class="fas fa-arrow-right ml-2 transform group-hover:translate-x-1 transition-transform duration-200"></i>
+                                    </a>
+                                </div>
+                            <?php else: ?>
+                                <div class="text-center py-10">
+                                    <div
+                                        class="w-20 h-20 mx-auto mb-6 bg-gray-100 rounded-full flex items-center justify-center">
+                                        <i class="fas fa-clipboard-list text-gray-400 text-3xl"></i>
+                                    </div>
+                                    <h3 class="text-lg font-semibold text-gray-800 mb-2">Aucune commande récente</h3>
+                                    <p class="text-gray-600 mb-6 max-w-sm mx-auto">
+                                        Vous n'avez pas de commandes en attente. Vos produits sont en ligne et prêts à être
+                                        commandés.
+                                    </p>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+
+                    <!-- Actions rapides -->
+                    <div
+                        class="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
+                        <div class="p-6 border-b border-gray-100">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-gradient-to-br from-amber-100 to-orange-100 rounded-xl mr-4">
+                                    <i class="fas fa-bolt text-amber-600 text-xl"></i>
+                                </div>
+                                <div>
+                                    <h2 class="text-xl font-bold text-gray-900">Actions rapides</h2>
+                                    <p class="text-sm text-gray-500">Accès direct aux fonctions essentielles</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="p-6">
+                            <div class="space-y-5">
+                                <!-- Ajouter produit -->
+                                <a href="?page=ajouter_produit"
+                                    class="group relative flex items-center justify-between p-5 bg-gradient-to-r from-purple-50 to-violet-50 rounded-xl border border-purple-200 hover:border-purple-300 hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5">
+                                    <div class="flex items-center">
+                                        <div
+                                            class="p-3 bg-gradient-to-br from-purple-500 to-violet-600 rounded-lg shadow-lg mr-4 group-hover:scale-110 transition-transform duration-300">
+                                            <i class="fas fa-plus-circle text-white text-xl"></i>
+                                        </div>
+                                        <div>
+                                            <p class="font-bold text-gray-900 text-lg mb-1">Ajouter un produit</p>
+                                            <p class="text-sm text-gray-600">Étendez votre catalogue avec de nouveaux
+                                                produits</p>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center">
+                                        <span
+                                            class="text-purple-600 font-semibold text-sm mr-3 hidden md:inline">Accéder</span>
+                                        <i
+                                            class="fas fa-chevron-right text-purple-400 text-lg group-hover:translate-x-2 transition-transform duration-300"></i>
+                                    </div>
+                                </a>
+
+                                <!-- Voir commandes -->
+                                <a href="?page=commandes"
+                                    class="group relative flex items-center justify-between p-5 bg-gradient-to-r from-blue-50 to-cyan-50 rounded-xl border border-blue-200 hover:border-blue-300 hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5">
+                                    <div class="flex items-center">
+                                        <div
+                                            class="p-3 bg-gradient-to-br from-blue-500 to-cyan-600 rounded-lg shadow-lg mr-4 group-hover:scale-110 transition-transform duration-300">
+                                            <i class="fas fa-clipboard-list text-white text-xl"></i>
+                                        </div>
+                                        <div>
+                                            <p class="font-bold text-gray-900 text-lg mb-1">Gérer les commandes</p>
+                                            <p class="text-sm text-gray-600">
+                                                <?php echo isset($stats['commandes_attente']) ? $stats['commandes_attente'] : 0; ?>
+                                                commande(s) en attente de traitement
                                             </p>
                                         </div>
                                     </div>
-                                <?php endforeach; ?>
+                                    <div class="flex items-center">
+                                        <?php if (isset($stats['commandes_attente']) && $stats['commandes_attente'] > 0): ?>
+                                            <span
+                                                class="bg-gradient-to-r from-blue-500 to-cyan-600 text-white text-xs font-bold py-1 px-2.5 rounded-full shadow-sm mr-3">
+                                                <?php echo $stats['commandes_attente']; ?>
+                                            </span>
+                                        <?php endif; ?>
+                                        <span class="text-blue-600 font-semibold text-sm mr-3 hidden md:inline">Voir</span>
+                                        <i
+                                            class="fas fa-chevron-right text-blue-400 text-lg group-hover:translate-x-2 transition-transform duration-300"></i>
+                                    </div>
+                                </a>
+
+                                <!-- Messages -->
+                                <a href="?page=messages"
+                                    class="group relative flex items-center justify-between p-5 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-xl border border-emerald-200 hover:border-emerald-300 hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5">
+                                    <div class="flex items-center">
+                                        <div
+                                            class="p-3 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-lg shadow-lg mr-4 group-hover:scale-110 transition-transform duration-300">
+                                            <i class="fas fa-envelope text-white text-xl"></i>
+                                        </div>
+                                        <div>
+                                            <p class="font-bold text-gray-900 text-lg mb-1">Contacter la pharmacie</p>
+                                            <p class="text-sm text-gray-600">Envoyez un message à l'administration NAGEX</p>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center">
+                                        <span
+                                            class="text-emerald-600 font-semibold text-sm mr-3 hidden md:inline">Contacter</span>
+                                        <i
+                                            class="fas fa-chevron-right text-emerald-400 text-lg group-hover:translate-x-2 transition-transform duration-300"></i>
+                                    </div>
+                                </a>
+
+                                <!-- Statistiques -->
+                                <a href="?page=statistiques"
+                                    class="group relative flex items-center justify-between p-5 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl border border-amber-200 hover:border-amber-300 hover:shadow-lg transition-all duration-300 hover:-translate-y-0.5">
+                                    <div class="flex items-center">
+                                        <div
+                                            class="p-3 bg-gradient-to-br from-amber-500 to-orange-600 rounded-lg shadow-lg mr-4 group-hover:scale-110 transition-transform duration-300">
+                                            <i class="fas fa-chart-bar text-white text-xl"></i>
+                                        </div>
+                                        <div>
+                                            <p class="font-bold text-gray-900 text-lg mb-1">Analyses détaillées</p>
+                                            <p class="text-sm text-gray-600">Consultez vos performances et tendances de
+                                                vente</p>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center">
+                                        <span
+                                            class="text-amber-600 font-semibold text-sm mr-3 hidden md:inline">Analyser</span>
+                                        <i
+                                            class="fas fa-chevron-right text-amber-400 text-lg group-hover:translate-x-2 transition-transform duration-300"></i>
+                                    </div>
+                                </a>
                             </div>
-                        <?php else: ?>
-                            <p class="text-gray-500 text-center py-4">Aucune commande récente</p>
-                        <?php endif; ?>
-                    </div>
-
-                    <div class="bg-white rounded-lg shadow-md p-6">
-                        <h2 class="text-xl font-bold text-gray-800 mb-4">
-                            <i class="fas fa-bolt mr-2"></i>Actions rapides
-                        </h2>
-                        <div class="space-y-4">
-                            <a href="?page=ajouter_produit"
-                                class="flex items-center justify-between p-4 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200">
-                                <div class="flex items-center">
-                                    <i class="fas fa-plus-circle text-purple-600 text-xl mr-3"></i>
-                                    <div>
-                                        <p class="font-semibold text-purple-700">Ajouter un produit</p>
-                                        <p class="text-sm text-purple-600">Étendre votre catalogue</p>
-                                    </div>
-                                </div>
-                                <i class="fas fa-chevron-right text-purple-400"></i>
-                            </a>
-
-                            <a href="?page=commandes"
-                                class="flex items-center justify-between p-4 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200">
-                                <div class="flex items-center">
-                                    <i class="fas fa-clipboard-list text-blue-600 text-xl mr-3"></i>
-                                    <div>
-                                        <p class="font-semibold text-blue-700">Voir commandes</p>
-                                        <p class="text-sm text-blue-600"><?php echo $stats['commandes_attente']; ?>
-                                            commandes en attente</p>
-                                    </div>
-                                </div>
-                                <i class="fas fa-chevron-right text-blue-400"></i>
-                            </a>
-
-                            <a href="?page=messages"
-                                class="flex items-center justify-between p-4 bg-green-50 hover:bg-green-100 rounded-lg border border-green-200">
-                                <div class="flex items-center">
-                                    <i class="fas fa-envelope text-green-600 text-xl mr-3"></i>
-                                    <div>
-                                        <p class="font-semibold text-green-700">Envoyer message</p>
-                                        <p class="text-sm text-green-600">Contacter la pharmacie</p>
-                                    </div>
-                                </div>
-                                <i class="fas fa-chevron-right text-green-400"></i>
-                            </a>
                         </div>
                     </div>
                 </div>
 
-            <?php elseif ($current_page == 'produits'): ?>
-                <!-- ========== MES PRODUITS ========== -->
-                <div class="mb-6 flex justify-between items-center">
-                    <div>
-                        <h1 class="text-2xl font-bold text-gray-800">Mes produits</h1>
-                        <p class="text-gray-600">Catalogue des produits que vous fournissez</p>
-                    </div>
-                    <a href="?page=ajouter_produit"
-                        class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg">
-                        <i class="fas fa-plus mr-2"></i>Ajouter un produit
-                    </a>
-                </div>
-
-                <?php if (count($produits_fournis) > 0): ?>
-                    <div class="bg-white rounded-lg shadow-md overflow-hidden">
-                        <div class="overflow-x-auto">
-                            <table class="min-w-full divide-y divide-gray-200">
-                                <thead class="bg-gray-50">
-                                    <tr>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Produit</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Catégorie
-                                        </th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code barre
-                                        </th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Prix de
-                                            vente</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Statut</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ventes</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="bg-white divide-y divide-gray-200">
-                                    <?php foreach ($produits_fournis as $produit): ?>
-                                        <tr>
-                                            <td class="px-6 py-4">
-                                                <p class="font-semibold text-gray-900"><?php echo e($produit['nom']); ?></p>
-                                                <p class="text-sm text-gray-500 truncate max-w-xs">
-                                                    <?php echo e(substr($produit['description'] ?? '', 0, 50)); ?>...</p>
-                                            </td>
-                                            <td class="px-6 py-4 text-sm text-gray-500"><?php echo e($produit['categorie_nom']); ?>
-                                            </td>
-                                            <td class="px-6 py-4 text-sm font-mono text-gray-500">
-                                                <?php echo e($produit['code_barre']); ?></td>
-                                            <td class="px-6 py-4">
-                                                <?php if ($produit['prix_fc']): ?>
-                                                    <p class="text-green-600 font-bold">
-                                                        <?php echo formatMontant($produit['prix_fc']); ?></p>
-                                                    <p class="text-sm text-blue-600">
-                                                        $<?php echo number_format($produit['prix_usd'] ?? 0, 2); ?></p>
-                                                <?php else: ?>
-                                                    <span class="text-yellow-500 text-sm">Prix non défini</span>
-                                                <?php endif; ?>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <?php if ($produit['statut'] == 'actif'): ?>
-                                                    <span class="badge badge-success">Actif</span>
-                                                <?php elseif ($produit['statut'] == 'en_attente'): ?>
-                                                    <span class="badge badge-warning">En attente</span>
-                                                <?php else: ?>
-                                                    <span class="badge badge-danger">Inactif</span>
-                                                <?php endif; ?>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm">
-                                                    <?php echo $produit['ventes_total']; ?> ventes
-                                                </span>
-                                            </td>
-                                            <td class="px-6 py-4 text-sm space-x-2">
-                                                <button onclick="voirDetailsProduit(<?php echo $produit['id']; ?>)"
-                                                    class="text-blue-600 hover:text-blue-900">
-                                                    <i class="fas fa-eye"></i>
-                                                </button>
-                                                <button onclick="modifierProduit(<?php echo $produit['id']; ?>)"
-                                                    class="text-purple-600 hover:text-purple-900">
-                                                    <i class="fas fa-edit"></i>
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
+                <!-- Section aperçu stocks -->
+                <?php if (isset($produits_stock) && !empty($produits_stock)): ?>
+                    <div class="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg border border-gray-100 p-6">
+                        <div class="flex items-center justify-between mb-6">
+                            <div class="flex items-center">
+                                <div class="p-3 bg-gradient-to-br from-rose-100 to-pink-100 rounded-xl mr-4">
+                                    <i class="fas fa-boxes text-rose-600 text-xl"></i>
+                                </div>
+                                <div>
+                                    <h2 class="text-xl font-bold text-gray-900">Aperçu des stocks</h2>
+                                    <p class="text-sm text-gray-500">Niveaux de stock de vos produits les plus vendus</p>
+                                </div>
+                            </div>
+                            <a href="?page=stocks"
+                                class="text-sm text-blue-600 hover:text-blue-800 font-semibold flex items-center group">
+                                Gérer les stocks
+                                <i class="fas fa-arrow-right ml-1 text-xs group-hover:translate-x-1 transition-transform"></i>
+                            </a>
                         </div>
-                    </div>
-                <?php else: ?>
-                    <div class="bg-white rounded-lg shadow-md p-12 text-center">
-                        <i class="fas fa-box-open text-gray-400 text-5xl mb-4"></i>
-                        <h3 class="text-xl font-semibold text-gray-800 mb-2">Aucun produit</h3>
-                        <p class="text-gray-600 mb-6">Vous n'avez pas encore ajouté de produits à votre catalogue.</p>
-                        <a href="?page=ajouter_produit"
-                            class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg">
-                            <i class="fas fa-plus mr-2"></i>Ajouter votre premier produit
-                        </a>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                            <?php foreach ($produits_stock as $produit):
+                                if (isset($produit['stock']) && isset($produit['stock_min'])) {
+                                    $pourcentage = min(100, ($produit['stock'] / ($produit['stock_min'] * 2)) * 100);
+                                    $couleur = $produit['stock'] > $produit['stock_min'] * 1.5 ? 'emerald' :
+                                        ($produit['stock'] > $produit['stock_min'] ? 'amber' : 'rose');
+                                } else {
+                                    // Valeurs par défaut si les données ne sont pas définies
+                                    $pourcentage = 0;
+                                    $couleur = 'gray';
+                                }
+                                ?>
+                                <div class="bg-white p-4 rounded-xl border border-gray-200 hover:shadow-md transition-shadow">
+                                    <div class="flex justify-between items-start mb-3">
+                                        <h4 class="font-semibold text-gray-900 text-sm">
+                                            <?php echo htmlspecialchars($produit['nom'] ?? 'Produit', ENT_QUOTES, 'UTF-8'); ?>
+                                        </h4>
+                                        <span
+                                            class="text-xs px-2 py-1 rounded-full font-semibold bg-<?php echo $couleur; ?>-100 text-<?php echo $couleur; ?>-800">
+                                            <?php echo isset($produit['stock']) ? $produit['stock'] : 0; ?> unités
+                                        </span>
+                                    </div>
+                                    <div class="mb-2">
+                                        <div class="w-full bg-gray-200 rounded-full h-2">
+                                            <div class="h-2 bg-<?php echo $couleur; ?>-500 rounded-full transition-all duration-500"
+                                                style="width: <?php echo $pourcentage; ?>%"></div>
+                                        </div>
+                                    </div>
+                                    <div class="flex justify-between text-xs text-gray-500">
+                                        <span>Stock min:
+                                            <?php echo isset($produit['stock_min']) ? $produit['stock_min'] : 0; ?></span>
+                                        <?php if (isset($produit['tendance'])): ?>
+                                            <span class="flex items-center">
+                                                <i
+                                                    class="fas fa-arrow-<?php echo $produit['tendance']; ?> text-<?php
+                                                        echo $produit['tendance'] == 'up' ? 'emerald' :
+                                                            ($produit['tendance'] == 'down' ? 'rose' : 'gray'); ?>-500 mr-1"></i>
+                                                <?php echo $produit['tendance'] == 'up' ? 'En hausse' :
+                                                    ($produit['tendance'] == 'down' ? 'En baisse' : 'Stable'); ?>
+                                            </span>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
                     </div>
                 <?php endif; ?>
+            </div>
 
-            <?php elseif ($current_page == 'ajouter_produit'): ?>
-                <!-- ========== AJOUTER UN PRODUIT ========== -->
-                <div class="mb-6">
-                    <h1 class="text-2xl font-bold text-gray-800">Ajouter un produit au catalogue</h1>
-                    <p class="text-gray-600">Remplissez les informations du produit que vous souhaitez fournir</p>
-                </div>
+            <script>
+                function actualiserDashboard() {
+                    // Animation de rotation sur le bouton
+                    const btn = event.currentTarget;
+                    const icon = btn.querySelector('i');
 
-                <div class="bg-white rounded-lg shadow-md p-6">
-                    <form method="POST" action="">
-                        <input type="hidden" name="action" value="ajouter_produit_catalogue">
+                    // Désactiver temporairement le bouton
+                    btn.disabled = true;
 
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                            <div>
-                                <h3 class="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">
-                                    <i class="fas fa-info-circle mr-2"></i>Informations du produit
-                                </h3>
+                    // Animation
+                    icon.classList.add('animate-spin');
 
-                                <div class="mb-4">
-                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="nom">
-                                        Nom du produit *
-                                    </label>
-                                    <input type="text" id="nom" name="nom" required
-                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                        placeholder="Ex: Paracétamol 500mg">
+                    // Simuler un rafraîchissement
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 800);
+                }
+
+                function gererCommande(commandeId) {
+                    // Redirection vers la page de gestion de commande
+                    window.location.href = `?page=commande&id=${commandeId}`;
+                }
+            </script>
+
+        <?php elseif ($current_page == 'produits'): ?>
+            <!-- ========== MES PRODUITS ========== -->
+            <!-- ========== PAGE MES PRODUITS (FOURNISSEUR) ========== -->
+            <div class="mb-8">
+                <!-- En-tête avec statistiques -->
+                <div class="mb-8">
+                    <div class="flex flex-col lg:flex-row lg:items-center justify-between mb-6">
+                        <div class="mb-6 lg:mb-0">
+                            <div
+                                class="inline-flex items-center px-4 py-2 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-2xl border border-emerald-100 mb-4">
+                                <i class="fas fa-industry text-emerald-500 mr-2"></i>
+                                <span class="text-sm font-medium text-emerald-700">Espace Fournisseur</span>
+                            </div>
+                            <h1 class="text-3xl lg:text-4xl font-bold text-gray-900 tracking-tight mb-2">Mes produits</h1>
+                            <p class="text-gray-600 text-lg">Gérez votre catalogue de produits fournis à NAGEX Pharma</p>
+                        </div>
+
+                        <div class="flex items-center space-x-4">
+                            <!-- Statistiques rapides -->
+                            <div
+                                class="text-center px-4 py-2 bg-gradient-to-br from-blue-50 to-cyan-50 rounded-xl border border-blue-200">
+                                <p class="text-sm text-gray-600 mb-1">Produits actifs</p>
+                                <p class="text-xl font-bold text-blue-600">
+                                    <?php
+                                    $produits_actifs = array_filter($produits_fournis, function ($p) {
+                                        return $p['statut'] == 'actif';
+                                    });
+                                    echo count($produits_actifs);
+                                    ?>
+                                </p>
+                            </div>
+
+                            <!-- Bouton ajouter produit -->
+                            <a href="?page=ajouter_produit"
+                                class="inline-flex items-center px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold rounded-xl hover:from-emerald-600 hover:to-teal-700 shadow-lg hover:shadow-xl transition-all group">
+                                <i class="fas fa-plus-circle mr-2 group-hover:scale-110 transition-transform"></i>
+                                Ajouter un produit
+                            </a>
+                        </div>
+                    </div>
+
+                    <!-- Statistiques détaillées -->
+                    <?php if (count($produits_fournis) > 0): ?>
+                        <?php
+                        $total_ventes = array_sum(array_column($produits_fournis, 'ventes_total'));
+                        $revenu_total = array_sum(array_map(function ($p) {
+                            return $p['prix_fc'] * $p['ventes_total'];
+                        }, $produits_fournis));
+                        ?>
+
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+                            <div class="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-2xl border border-blue-200 p-5">
+                                <div class="flex items-center">
+                                    <div class="p-3 bg-white rounded-xl shadow-sm mr-4">
+                                        <i class="fas fa-cubes text-blue-500 text-xl"></i>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm text-gray-600 mb-1">Total produits</p>
+                                        <p class="text-2xl font-bold text-gray-900"><?php echo count($produits_fournis); ?></p>
+                                    </div>
                                 </div>
+                            </div>
 
-                                <div class="mb-4">
-                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="code_barre">
-                                        Code barre (EAN/UPC) *
-                                    </label>
-                                    <input type="text" id="code_barre" name="code_barre" required
-                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                        placeholder="Ex: 1234567890123">
+                            <div class="bg-gradient-to-br from-emerald-50 to-teal-50 rounded-2xl border border-emerald-200 p-5">
+                                <div class="flex items-center">
+                                    <div class="p-3 bg-white rounded-xl shadow-sm mr-4">
+                                        <i class="fas fa-chart-line text-emerald-500 text-xl"></i>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm text-gray-600 mb-1">Ventes totales</p>
+                                        <p class="text-2xl font-bold text-gray-900"><?php echo $total_ventes; ?></p>
+                                    </div>
                                 </div>
+                            </div>
 
-                                <div class="mb-4">
-                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="categorie_id">
-                                        Catégorie *
-                                    </label>
-                                    <select id="categorie_id" name="categorie_id" required
-                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
-                                        <option value="">Sélectionnez une catégorie</option>
-                                        <?php foreach ($categories as $categorie): ?>
-                                            <option value="<?php echo $categorie['id']; ?>">
-                                                <?php echo e($categorie['nom']); ?>
-                                            </option>
-                                        <?php endforeach; ?>
+                            <div class="bg-gradient-to-br from-purple-50 to-violet-50 rounded-2xl border border-purple-200 p-5">
+                                <div class="flex items-center">
+                                    <div class="p-3 bg-white rounded-xl shadow-sm mr-4">
+                                        <i class="fas fa-sack-dollar text-purple-500 text-xl"></i>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm text-gray-600 mb-1">Revenu généré</p>
+                                        <p class="text-2xl font-bold text-gray-900"><?php echo formatMontant($revenu_total); ?>
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl border border-amber-200 p-5">
+                                <div class="flex items-center">
+                                    <div class="p-3 bg-white rounded-xl shadow-sm mr-4">
+                                        <i class="fas fa-star text-amber-500 text-xl"></i>
+                                    </div>
+                                    <div>
+                                        <p class="text-sm text-gray-600 mb-1">Taux d'activation</p>
+                                        <p class="text-2xl font-bold text-gray-900">
+                                            <?php echo round(count($produits_actifs) / max(1, count($produits_fournis)) * 100); ?>%
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Filtres et recherche -->
+                        <div
+                            class="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-sm border border-gray-200 p-4 mb-6">
+                            <div class="flex flex-col md:flex-row md:items-center justify-between">
+                                <div class="mb-4 md:mb-0">
+                                    <div class="flex items-center">
+                                        <i class="fas fa-filter text-blue-500 mr-3"></i>
+                                        <h3 class="font-semibold text-gray-900 text-lg">Filtrer votre catalogue</h3>
+                                    </div>
+                                </div>
+                                <div class="flex space-x-3">
+                                    <!-- Barre de recherche -->
+                                    <div class="relative">
+                                        <input type="text" placeholder="Rechercher un produit..."
+                                            class="pl-10 pr-4 py-2 bg-white border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-sm">
+                                        <i
+                                            class="fas fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"></i>
+                                    </div>
+
+                                    <!-- Filtre par statut -->
+                                    <select
+                                        class="px-4 py-2 bg-white border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent shadow-sm appearance-none">
+                                        <option value="">Tous les statuts</option>
+                                        <option value="actif">Actif</option>
+                                        <option value="en_attente">En attente</option>
+                                        <option value="inactif">Inactif</option>
                                     </select>
                                 </div>
                             </div>
-
-                            <div>
-                                <h3 class="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">
-                                    <i class="fas fa-flask mr-2"></i>Informations techniques
-                                </h3>
-
-                                <div class="mb-4">
-                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="composition">
-                                        Composition
-                                    </label>
-                                    <textarea id="composition" name="composition" rows="4"
-                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                        placeholder="Liste des principes actifs et excipients"></textarea>
-                                </div>
-
-                                <div class="mb-4">
-                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="description">
-                                        Description complète *
-                                    </label>
-                                    <textarea id="description" name="description" rows="4" required
-                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
-                                        placeholder="Description détaillée du produit"></textarea>
-                                </div>
-                            </div>
                         </div>
+                    <?php endif; ?>
+                </div>
 
-                        <div class="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
-                            <p class="text-sm text-yellow-800">
-                                <i class="fas fa-info-circle mr-2"></i>
-                                <strong>Important:</strong> Votre produit sera soumis à validation par le pharmacien.
-                                Une fois validé, il apparaîtra dans le catalogue de la pharmacie.
-                            </p>
-                        </div>
-
-                        <div class="flex justify-end space-x-4">
-                            <a href="?page=produits"
-                                class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
-                                Annuler
+                <!-- Contenu principal -->
+                <?php if (count($produits_fournis) > 0): ?>
+                    <!-- Navigation par statut -->
+                    <div class="mb-6 overflow-x-auto">
+                        <div class="flex space-x-2 pb-2">
+                            <a href="?page=mes_produits"
+                                class="inline-flex items-center px-4 py-2 rounded-xl <?php echo empty($_GET['statut']) ? 'bg-gradient-to-r from-blue-600 to-cyan-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'; ?> transition-colors whitespace-nowrap">
+                                <i class="fas fa-layer-group mr-2"></i>
+                                Tous (<?php echo count($produits_fournis); ?>)
                             </a>
-                            <button type="submit" class="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
-                                <i class="fas fa-paper-plane mr-2"></i>Soumettre le produit
-                            </button>
-                        </div>
-                    </form>
-                </div>
-
-            <?php elseif ($current_page == 'commandes'): ?>
-                <!-- ========== COMMANDES EN COURS ========== -->
-                <div class="mb-6">
-                    <h1 class="text-2xl font-bold text-gray-800">Commandes en cours</h1>
-                    <p class="text-gray-600">Suivez les commandes contenant vos produits</p>
-                </div>
-
-                <?php if (count($commandes_en_cours) > 0): ?>
-                    <div class="bg-white rounded-lg shadow-md overflow-hidden">
-                        <div class="overflow-x-auto">
-                            <table class="min-w-full divide-y divide-gray-200">
-                                <thead class="bg-gray-50">
-                                    <tr>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Commande
-                                        </th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Client</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Montant (vos
-                                            produits)</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Statut</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Produits
-                                        </th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="bg-white divide-y divide-gray-200">
-                                    <?php foreach ($commandes_en_cours as $commande): ?>
-                                        <tr>
-                                            <td class="px-6 py-4">
-                                                <p class="font-bold text-gray-900">#<?php echo e($commande['numero_commande']); ?>
-                                                </p>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <p class="font-semibold"><?php echo e($commande['client_nom']); ?></p>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                               <!-- Ligne ~652 dans le code -->
-<p class="font-bold text-purple-600"><?php echo formatMontant(floatval($commande['montant_fournisseur'])); ?></p>
-                                            </td>
-                                            <td class="px-6 py-4 text-sm text-gray-500">
-                                                <?php echo date('d/m/Y H:i', strtotime($commande['date_commande'])); ?>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <?php if ($commande['statut'] == 'paye'): ?>
-                                                    <span class="badge badge-success">Payé</span>
-                                                <?php elseif ($commande['statut'] == 'en_attente'): ?>
-                                                    <span class="badge badge-warning">En attente</span>
-                                                <?php else: ?>
-                                                    <span class="badge badge-danger"><?php echo e($commande['statut']); ?></span>
-                                                <?php endif; ?>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm">
-                                                    <?php echo $commande['nombre_produits']; ?> produits
-                                                </span>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <button onclick="voirDetailsCommande(<?php echo $commande['id']; ?>)"
-                                                    class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
-                                                    <i class="fas fa-eye mr-1"></i>Détails
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
+                            <a href="?page=mes_produits&statut=actif"
+                                class="inline-flex items-center px-4 py-2 rounded-xl <?php echo ($_GET['statut'] ?? '') == 'actif' ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'; ?> transition-colors whitespace-nowrap">
+                                <i class="fas fa-check-circle mr-2"></i>
+                                Actifs (<?php echo count($produits_actifs); ?>)
+                            </a>
+                            <a href="?page=mes_produits&statut=en_attente"
+                                class="inline-flex items-center px-4 py-2 rounded-xl <?php echo ($_GET['statut'] ?? '') == 'en_attente' ? 'bg-gradient-to-r from-amber-600 to-orange-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'; ?> transition-colors whitespace-nowrap">
+                                <i class="fas fa-clock mr-2"></i>
+                                En attente
+                            </a>
+                            <a href="?page=mes_produits&statut=inactif"
+                                class="inline-flex items-center px-4 py-2 rounded-xl <?php echo ($_GET['statut'] ?? '') == 'inactif' ? 'bg-gradient-to-r from-rose-600 to-pink-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'; ?> transition-colors whitespace-nowrap">
+                                <i class="fas fa-times-circle mr-2"></i>
+                                Inactifs
+                            </a>
                         </div>
                     </div>
-                <?php else: ?>
-                    <div class="bg-white rounded-lg shadow-md p-12 text-center">
-                        <i class="fas fa-shopping-cart text-gray-400 text-5xl mb-4"></i>
-                        <h3 class="text-xl font-semibold text-gray-800 mb-2">Aucune commande</h3>
-                        <p class="text-gray-600">Aucune commande ne contient actuellement vos produits.</p>
-                    </div>
-                <?php endif; ?>
 
-            <?php elseif ($current_page == 'historique'): ?>
-                <!-- ========== HISTORIQUE DES COMMANDES ========== -->
-                <div class="mb-6">
-                    <h1 class="text-2xl font-bold text-gray-800">Historique des commandes</h1>
-                    <p class="text-gray-600">Historique des 30 derniers jours</p>
-                </div>
+                    <!-- Liste des produits en cartes -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+                        <?php foreach ($produits_fournis as $produit): ?>
+                            <div
+                                class="product-card group relative bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg border border-gray-200 hover:border-emerald-300 overflow-hidden transition-all duration-300 hover:-translate-y-2 hover:shadow-xl">
+                                <!-- Badge statut -->
+                                <div class="absolute top-4 right-4 z-10">
+                                    <span class="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-bold <?php
+                                    echo $produit['statut'] == 'actif' ? 'bg-emerald-100 text-emerald-800' :
+                                        ($produit['statut'] == 'en_attente' ? 'bg-amber-100 text-amber-800' :
+                                            'bg-rose-100 text-rose-800');
+                                    ?>">
+                                        <i class="fas <?php
+                                        echo $produit['statut'] == 'actif' ? 'fa-check-circle' :
+                                            ($produit['statut'] == 'en_attente' ? 'fa-clock' :
+                                                'fa-times-circle');
+                                        ?> mr-1.5"></i>
+                                        <?php echo ucfirst(str_replace('_', ' ', $produit['statut'])); ?>
+                                    </span>
+                                </div>
 
-                <?php if (count($historique_commandes) > 0): ?>
-                    <div class="bg-white rounded-lg shadow-md overflow-hidden">
-                        <div class="overflow-x-auto">
-                            <table class="min-w-full divide-y divide-gray-200">
-                                <thead class="bg-gray-50">
-                                    <tr>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Commande
-                                        </th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Client</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Montant
-                                            total</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Produits
-                                        </th>
-                                    </tr>
-                                </thead>
-                                <tbody class="bg-white divide-y divide-gray-200">
-                                    <?php foreach ($historique_commandes as $commande): ?>
-                                        <tr>
-                                            <td class="px-6 py-4">
-                                                <p class="font-bold text-gray-900">#<?php echo e($commande['numero_commande']); ?>
-                                                </p>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <p class="font-semibold"><?php echo e($commande['client_nom']); ?></p>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <p class="font-bold text-green-600">
-                                                    <?php echo formatMontant($commande['montant_total']); ?></p>
-                                            </td>
-                                            <td class="px-6 py-4 text-sm text-gray-500">
-                                                <?php echo date('d/m/Y H:i', strtotime($commande['date_commande'])); ?>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <span class="bg-green-100 text-green-800 px-2 py-1 rounded text-sm">
-                                                    <?php echo $commande['nombre_produits']; ?> produits
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                <?php else: ?>
-                    <div class="bg-white rounded-lg shadow-md p-12 text-center">
-                        <i class="fas fa-history text-gray-400 text-5xl mb-4"></i>
-                        <h3 class="text-xl font-semibold text-gray-800 mb-2">Aucun historique</h3>
-                        <p class="text-gray-600">Aucune commande payée dans les 30 derniers jours.</p>
-                    </div>
-                <?php endif; ?>
-
-            <?php elseif ($current_page == 'evaluations'): ?>
-                <!-- ========== ÉVALUATIONS ========== -->
-                <div class="mb-6">
-                    <h1 class="text-2xl font-bold text-gray-800">Évaluations et retours</h1>
-                    <p class="text-gray-600">Feedback sur vos produits et services</p>
-                </div>
-
-                <?php if (count($evaluations) > 0): ?>
-                    <div class="space-y-6">
-                        <?php foreach ($evaluations as $evaluation): ?>
-                            <div class="bg-white rounded-lg shadow-md p-6">
-                                <div class="flex justify-between items-start mb-4">
-                                    <div>
-                                        <h3 class="font-bold text-gray-800"><?php echo e($evaluation['produit_nom']); ?></h3>
-                                        <p class="text-sm text-gray-600">Évalué par <?php echo e($evaluation['evaluateur_nom']); ?>
-                                        </p>
-                                    </div>
-                                    <div class="text-right">
-                                        <div class="flex items-center">
-                                            <?php for ($i = 1; $i <= 5; $i++): ?>
-                                                <?php if ($i <= $evaluation['note']): ?>
-                                                    <i class="fas fa-star text-yellow-500"></i>
-                                                <?php else: ?>
-                                                    <i class="far fa-star text-gray-300"></i>
-                                                <?php endif; ?>
-                                            <?php endfor; ?>
-                                            <span class="ml-2 font-bold"><?php echo $evaluation['note']; ?>/5</span>
-                                        </div>
-                                        <p class="text-sm text-gray-500 mt-1">
-                                            <?php echo formatDate($evaluation['created_at']); ?>
-                                        </p>
+                                <!-- Image produit -->
+                                <div
+                                    class="h-48 bg-gradient-to-br from-blue-50 to-cyan-50 flex items-center justify-center overflow-hidden">
+                                    <div class="text-center p-6">
+                                        <i class="fas fa-pills text-4xl text-blue-400 mb-3"></i>
+                                        <p class="text-xs text-blue-600 font-semibold">NAGEX Pharma</p>
                                     </div>
                                 </div>
 
-                                <?php if (!empty($evaluation['commentaire'])): ?>
-                                    <div class="mt-4 p-4 bg-gray-50 rounded-lg">
-                                        <p class="text-gray-700">"<?php echo e($evaluation['commentaire']); ?>"</p>
-                                    </div>
-                                <?php endif; ?>
-
-                                <?php if (!empty($evaluation['type_evaluation'])): ?>
-                                    <div class="mt-4">
+                                <!-- Corps de la carte -->
+                                <div class="p-5">
+                                    <!-- Catégorie -->
+                                    <div class="mb-3">
                                         <span
-                                            class="inline-block bg-<?php echo $evaluation['type_evaluation'] == 'qualite' ? 'green' : 'blue'; ?>-100 text-<?php echo $evaluation['type_evaluation'] == 'qualite' ? 'green' : 'blue'; ?>-800 px-3 py-1 rounded text-sm">
-                                            <?php echo $evaluation['type_evaluation'] == 'qualite' ? 'Qualité' : 'Service'; ?>
+                                            class="inline-flex items-center px-3 py-1 bg-emerald-100 text-emerald-800 text-xs font-semibold rounded-full">
+                                            <i class="fas fa-tag mr-1.5 text-xs"></i>
+                                            <?php echo e($produit['categorie_nom']); ?>
                                         </span>
                                     </div>
-                                <?php endif; ?>
+
+                                    <!-- Nom produit -->
+                                    <h3
+                                        class="font-bold text-gray-900 text-lg mb-2 group-hover:text-emerald-700 transition-colors line-clamp-1">
+                                        <?php echo e($produit['nom']); ?>
+                                    </h3>
+
+                                    <!-- Description -->
+                                    <p class="text-gray-600 text-sm mb-4 line-clamp-2 leading-relaxed">
+                                        <?php echo e(substr($produit['description'] ?? 'Produit fourni à NAGEX Pharma', 0, 80)); ?>...
+                                    </p>
+
+                                    <!-- Code barre -->
+                                    <div class="mb-4 p-3 bg-gray-50 rounded-xl">
+                                        <div class="flex items-center justify-between">
+                                            <div>
+                                                <p class="text-xs text-gray-500 mb-1">Code barre</p>
+                                                <p class="font-mono font-bold text-gray-900 text-sm">
+                                                    <?php echo e($produit['code_barre']); ?>
+                                                </p>
+                                            </div>
+                                            <i class="fas fa-barcode text-gray-400 text-lg"></i>
+                                        </div>
+                                    </div>
+
+                                    <!-- Prix et ventes -->
+                                    <div class="grid grid-cols-2 gap-4 mb-5">
+                                        <!-- Prix -->
+                                        <div class="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-xl p-3">
+                                            <p class="text-xs text-gray-600 mb-1">Prix de vente</p>
+                                            <?php if ($produit['prix_fc']): ?>
+                                                <p class="font-bold text-emerald-600 text-lg">
+                                                    <?php echo formatMontant($produit['prix_fc']); ?>
+                                                </p>
+                                                <p class="text-xs text-blue-600">
+                                                    $<?php echo number_format($produit['prix_usd'] ?? 0, 2); ?> USD
+                                                </p>
+                                            <?php else: ?>
+                                                <p class="text-sm text-amber-600 font-semibold">À définir</p>
+                                            <?php endif; ?>
+                                        </div>
+
+                                        <!-- Ventes -->
+                                        <div class="bg-gradient-to-br from-purple-50 to-violet-50 rounded-xl p-3">
+                                            <p class="text-xs text-gray-600 mb-1">Ventes totales</p>
+                                            <p class="font-bold text-purple-600 text-lg">
+                                                <?php echo $produit['ventes_total']; ?>
+                                            </p>
+                                            <p class="text-xs text-gray-500">unités vendues</p>
+                                        </div>
+                                    </div>
+
+                                    <!-- Actions -->
+                                    <div class="flex space-x-3">
+                                        <!-- Bouton Voir -->
+                                        <button onclick="voirDetailsProduit(<?php echo $produit['id']; ?>)"
+                                            class="flex-1 inline-flex items-center justify-center px-4 py-2.5 bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-200 text-blue-700 font-semibold rounded-xl hover:bg-gradient-to-r hover:from-blue-100 hover:to-cyan-100 hover:border-blue-300 hover:text-blue-800 transition-all group">
+                                            <i class="fas fa-eye mr-2 group-hover:scale-110 transition-transform"></i>
+                                            Voir
+                                        </button>
+
+                                        <!-- Bouton Modifier -->
+                                        <button onclick="modifierProduit(<?php echo $produit['id']; ?>)"
+                                            class="flex-1 inline-flex items-center justify-center px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold rounded-xl hover:from-emerald-600 hover:to-teal-700 shadow-md hover:shadow-lg transition-all group">
+                                            <i class="fas fa-edit mr-2 group-hover:scale-110 transition-transform"></i>
+                                            Modifier
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Indicateur de performance -->
+                                <div class="px-5 py-3 bg-gray-50 border-t border-gray-100">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-xs text-gray-600">Performance</span>
+                                        <div class="flex items-center">
+                                            <?php if ($produit['ventes_total'] > 0): ?>
+                                                <div class="w-24 h-1.5 bg-gray-200 rounded-full overflow-hidden mr-2">
+                                                    <?php
+                                                    $max_ventes = max(array_column($produits_fournis, 'ventes_total'));
+                                                    $pourcentage = $max_ventes > 0 ? ($produit['ventes_total'] / $max_ventes) * 100 : 0;
+                                                    ?>
+                                                    <div class="h-full bg-emerald-500 rounded-full"
+                                                        style="width: <?php echo $pourcentage; ?>%"></div>
+                                                </div>
+                                                <span class="text-xs font-semibold text-emerald-600">
+                                                    Top <?php echo round(100 - $pourcentage); ?>%
+                                                </span>
+                                            <?php else: ?>
+                                                <span class="text-xs text-gray-500">Aucune vente</span>
+                                            <?php endif; ?>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         <?php endforeach; ?>
                     </div>
+
+                    <!-- Résumé et actions -->
+                    <div class="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg border border-gray-200 p-6">
+                        <div class="flex flex-col md:flex-row justify-between items-center">
+                            <div class="mb-6 md:mb-0">
+                                <h3 class="text-lg font-bold text-gray-900 mb-2">Résumé de votre catalogue</h3>
+                                <div class="grid grid-cols-2 gap-4">
+                                    <div class="text-center">
+                                        <p class="text-sm text-gray-600">Revenu moyen/produit</p>
+                                        <p class="text-xl font-bold text-emerald-600">
+                                            <?php echo formatMontant($revenu_total / max(1, count($produits_fournis))); ?>
+                                        </p>
+                                    </div>
+                                    <div class="text-center">
+                                        <p class="text-sm text-gray-600">Ventes moyennes/produit</p>
+                                        <p class="text-xl font-bold text-purple-600">
+                                            <?php echo round($total_ventes / max(1, count($produits_fournis)), 1); ?>
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
+                                <button onclick="exporterCatalogue()"
+                                    class="inline-flex items-center px-5 py-2.5 border border-gray-300 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition-colors">
+                                    <i class="fas fa-file-export mr-2"></i>
+                                    Exporter catalogue
+                                </button>
+                                <a href="?page=ajouter_produit"
+                                    class="inline-flex items-center px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold rounded-xl hover:from-emerald-600 hover:to-teal-700 shadow-lg hover:shadow-xl transition-all">
+                                    <i class="fas fa-plus-circle mr-2"></i>
+                                    Ajouter un autre produit
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+
                 <?php else: ?>
-                    <div class="bg-white rounded-lg shadow-md p-12 text-center">
-                        <i class="fas fa-star text-gray-400 text-5xl mb-4"></i>
-                        <h3 class="text-xl font-semibold text-gray-800 mb-2">Aucune évaluation</h3>
-                        <p class="text-gray-600">Vous n'avez pas encore reçu d'évaluations.</p>
+                    <!-- État vide amélioré -->
+                    <div
+                        class="bg-gradient-to-br from-white to-gray-50 rounded-2xl shadow-lg border border-gray-100 p-16 text-center">
+                        <div class="max-w-md mx-auto">
+                            <div
+                                class="w-28 h-28 mx-auto mb-8 bg-gradient-to-br from-blue-100 to-cyan-100 rounded-full flex items-center justify-center">
+                                <i class="fas fa-boxes text-blue-400 text-5xl"></i>
+                            </div>
+                            <h3 class="text-2xl font-bold text-gray-900 mb-3">Votre catalogue est vide</h3>
+                            <p class="text-gray-600 mb-8 leading-relaxed">
+                                Vous n'avez pas encore ajouté de produits à votre catalogue fournisseur. Commencez par ajouter
+                                votre premier produit pour le proposer aux clients NAGEX Pharma.
+                            </p>
+                            <div class="space-y-4">
+                                <a href="?page=ajouter_produit"
+                                    class="inline-flex items-center px-6 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold rounded-xl hover:from-emerald-600 hover:to-teal-700 shadow-lg hover:shadow-xl transition-all">
+                                    <i class="fas fa-plus-circle mr-3"></i>
+                                    Ajouter mon premier produit
+                                </a>
+                                <div class="pt-4 border-t border-gray-100">
+                                    <p class="text-sm text-gray-500">
+                                        <i class="fas fa-lightbulb text-amber-500 mr-2"></i>
+                                        Les produits bien décrits avec photos se vendent 3x plus
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 <?php endif; ?>
+            </div>
 
-            <?php elseif ($current_page == 'profil'): ?>
-                <!-- ========== MON PROFIL ========== -->
-                <div class="mb-6">
-                    <h1 class="text-2xl font-bold text-gray-800">Mon profil</h1>
-                    <p class="text-gray-600">Gérez les informations de votre société</p>
-                </div>
+            <script>
+                // Fonction pour exporter le catalogue
+                function exporterCatalogue() {
+                    if (confirm('Voulez-vous exporter votre catalogue au format CSV ?')) {
+                        // Simulation d'export
+                        const exportBtn = event.target.closest('button');
+                        const originalHTML = exportBtn.innerHTML;
 
-                <div class="bg-white rounded-lg shadow-md p-6">
-                    <form method="POST" action="">
-                        <input type="hidden" name="action" value="update_profile">
+                        exportBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Export en cours...';
+                        exportBtn.disabled = true;
 
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                            <div>
-                                <div class="mb-4">
-                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="nom_societe">
-                                        Nom de la société *
-                                    </label>
-                                    <input type="text" id="nom_societe" name="nom_societe" required
-                                        value="<?php echo e($infos_fournisseur['nom_societe'] ?? ''); ?>"
-                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
-                                </div>
+                        setTimeout(() => {
+                            exportBtn.innerHTML = '<i class="fas fa-check mr-2"></i>Exporté !';
+                            setTimeout(() => {
+                                exportBtn.innerHTML = originalHTML;
+                                exportBtn.disabled = false;
+                            }, 2000);
 
-                                <div class="mb-4">
-                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="contact_principal">
-                                        Contact principal *
-                                    </label>
-                                    <input type="text" id="contact_principal" name="contact_principal" required
-                                        value="<?php echo e($infos_fournisseur['contact_principal'] ?? ''); ?>"
-                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
-                                </div>
+                            // Téléchargement simulé
+                            alert('Votre catalogue a été exporté. Le fichier sera téléchargé automatiquement.');
+                        }, 1500);
+                    }
+                }
 
-                                <div class="mb-4">
-                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="telephone">
-                                        Téléphone
-                                    </label>
-                                    <input type="tel" id="telephone" name="telephone"
-                                        value="<?php echo e($infos_fournisseur['telephone'] ?? ''); ?>"
-                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
-                                </div>
+                // Fonction pour voir les détails du produit
+                function voirDetailsProduit(produitId) {
+                    // Redirection vers la page de détails
+                    window.location.href = `?page=details_produit&id=${produitId}`;
+                }
+
+                // Fonction pour modifier le produit
+                function modifierProduit(produitId) {
+                    // Redirection vers la page de modification
+                    window.location.href = `?page=modifier_produit&id=${produitId}`;
+                }
+            </script>
+
+        <?php elseif ($current_page == 'ajouter_produit'): ?>
+            <!-- ========== AJOUTER UN PRODUIT ========== -->
+            <div class="mb-6">
+                <h1 class="text-2xl font-bold text-gray-800">Ajouter un produit au catalogue</h1>
+                <p class="text-gray-600">Remplissez les informations du produit que vous souhaitez fournir</p>
+            </div>
+
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <form method="POST" action="">
+                    <input type="hidden" name="action" value="ajouter_produit_catalogue">
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">
+                                <i class="fas fa-info-circle mr-2"></i>Informations du produit
+                            </h3>
+
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2" for="nom">
+                                    Nom du produit *
+                                </label>
+                                <input type="text" id="nom" name="nom" required
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                    placeholder="Ex: Paracétamol 500mg">
                             </div>
 
-                            <div>
-                                <div class="mb-4">
-                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="email">
-                                        Email de contact *
-                                    </label>
-                                    <input type="email" id="email" name="email" required
-                                        value="<?php echo e($infos_fournisseur['email'] ?? ''); ?>"
-                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
-                                </div>
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2" for="code_barre">
+                                    Code barre (EAN/UPC) *
+                                </label>
+                                <input type="text" id="code_barre" name="code_barre" required
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                    placeholder="Ex: 1234567890123">
+                            </div>
 
-                                <div class="mb-4">
-                                    <label class="block text-gray-700 text-sm font-bold mb-2" for="adresse_siege">
-                                        Adresse du siège
-                                    </label>
-                                    <textarea id="adresse_siege" name="adresse_siege" rows="4"
-                                        class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"><?php echo e($infos_fournisseur['adresse_siege'] ?? ''); ?></textarea>
-                                </div>
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2" for="categorie_id">
+                                    Catégorie *
+                                </label>
+                                <select id="categorie_id" name="categorie_id" required
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
+                                    <option value="">Sélectionnez une catégorie</option>
+                                    <?php foreach ($categories as $categorie): ?>
+                                        <option value="<?php echo $categorie['id']; ?>">
+                                            <?php echo e($categorie['nom']); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
                             </div>
                         </div>
 
-                        <div class="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                            <h4 class="font-semibold text-blue-800 mb-2">
-                                <i class="fas fa-info-circle mr-2"></i>Informations complémentaires
-                            </h4>
-                            <ul class="text-sm text-blue-700 space-y-1">
-                                <li>• Note de qualité:
-                                    <strong><?php echo number_format($stats['note_qualite'], 1); ?>/5</strong></li>
-                                <li>• Produits fournis: <strong><?php echo $stats['total_produits']; ?></strong></li>
-                                <li>• Ventes totales:
-                                    <strong><?php echo formatMontant($stats['ventes_totales']); ?></strong></li>
-                            </ul>
-                        </div>
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-800 mb-4 border-b pb-2">
+                                <i class="fas fa-flask mr-2"></i>Informations techniques
+                            </h3>
 
-                        <div class="flex justify-end space-x-4">
-                            <button type="submit" class="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
-                                <i class="fas fa-save mr-2"></i>Mettre à jour
-                            </button>
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2" for="composition">
+                                    Composition
+                                </label>
+                                <textarea id="composition" name="composition" rows="4"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                    placeholder="Liste des principes actifs et excipients"></textarea>
+                            </div>
+
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2" for="description">
+                                    Description complète *
+                                </label>
+                                <textarea id="description" name="description" rows="4" required
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                    placeholder="Description détaillée du produit"></textarea>
+                            </div>
                         </div>
-                    </form>
+                    </div>
+
+                    <div class="mb-6 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                        <p class="text-sm text-yellow-800">
+                            <i class="fas fa-info-circle mr-2"></i>
+                            <strong>Important:</strong> Votre produit sera soumis à validation par le pharmacien.
+                            Une fois validé, il apparaîtra dans le catalogue de la pharmacie.
+                        </p>
+                    </div>
+
+                    <div class="flex justify-end space-x-4">
+                        <a href="?page=produits"
+                            class="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50">
+                            Annuler
+                        </a>
+                        <button type="submit" class="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+                            <i class="fas fa-paper-plane mr-2"></i>Soumettre le produit
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+        <?php elseif ($current_page == 'commandes'): ?>
+            <!-- ========== COMMANDES EN COURS ========== -->
+            <div class="mb-6">
+                <h1 class="text-2xl font-bold text-gray-800">Commandes en cours</h1>
+                <p class="text-gray-600">Suivez les commandes contenant vos produits</p>
+            </div>
+
+            <?php if (count($commandes_en_cours) > 0): ?>
+                <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Commande
+                                    </th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Client</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Montant (vos
+                                        produits)</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Statut</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Produits
+                                    </th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                <?php foreach ($commandes_en_cours as $commande): ?>
+                                    <tr>
+                                        <td class="px-6 py-4">
+                                            <p class="font-bold text-gray-900">#<?php echo e($commande['numero_commande']); ?>
+                                            </p>
+                                        </td>
+                                        <td class="px-6 py-4">
+                                            <p class="font-semibold"><?php echo e($commande['client_nom']); ?></p>
+                                        </td>
+                                        <td class="px-6 py-4">
+                                            <!-- Ligne ~652 dans le code -->
+                                            <p class="font-bold text-purple-600">
+                                                <?php echo formatMontant(floatval($commande['montant_fournisseur'])); ?>
+                                            </p>
+                                        </td>
+                                        <td class="px-6 py-4 text-sm text-gray-500">
+                                            <?php echo date('d/m/Y H:i', strtotime($commande['date_commande'])); ?>
+                                        </td>
+                                        <td class="px-6 py-4">
+                                            <?php if ($commande['statut'] == 'paye'): ?>
+                                                <span class="badge badge-success">Payé</span>
+                                            <?php elseif ($commande['statut'] == 'en_attente'): ?>
+                                                <span class="badge badge-warning">En attente</span>
+                                            <?php else: ?>
+                                                <span class="badge badge-danger"><?php echo e($commande['statut']); ?></span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="px-6 py-4">
+                                            <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm">
+                                                <?php echo $commande['nombre_produits']; ?> produits
+                                            </span>
+                                        </td>
+                                        <td class="px-6 py-4">
+                                            <button onclick="voirDetailsCommande(<?php echo $commande['id']; ?>)"
+                                                class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
+                                                <i class="fas fa-eye mr-1"></i>Détails
+                                            </button>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
-
             <?php else: ?>
-                <!-- ========== PAGE NON TROUVÉE ========== -->
                 <div class="bg-white rounded-lg shadow-md p-12 text-center">
-                    <i class="fas fa-exclamation-circle text-red-500 text-5xl mb-4"></i>
-                    <h3 class="text-xl font-semibold text-gray-800 mb-2">Page non trouvée</h3>
-                    <p class="text-gray-600 mb-6">La page que vous cherchez n'existe pas.</p>
-                    <a href="?page=dashboard" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg">
-                        <i class="fas fa-home mr-2"></i>Retour au dashboard
-                    </a>
+                    <i class="fas fa-shopping-cart text-gray-400 text-5xl mb-4"></i>
+                    <h3 class="text-xl font-semibold text-gray-800 mb-2">Aucune commande</h3>
+                    <p class="text-gray-600">Aucune commande ne contient actuellement vos produits.</p>
                 </div>
             <?php endif; ?>
-        </div>
+
+        <?php elseif ($current_page == 'historique'): ?>
+            <!-- ========== HISTORIQUE DES COMMANDES ========== -->
+            <div class="mb-6">
+                <h1 class="text-2xl font-bold text-gray-800">Historique des commandes</h1>
+                <p class="text-gray-600">Historique des 30 derniers jours</p>
+            </div>
+
+            <?php if (count($historique_commandes) > 0): ?>
+                <div class="bg-white rounded-lg shadow-md overflow-hidden">
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Commande
+                                    </th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Client</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Montant
+                                        total</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Produits
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                <?php foreach ($historique_commandes as $commande): ?>
+                                    <tr>
+                                        <td class="px-6 py-4">
+                                            <p class="font-bold text-gray-900">#<?php echo e($commande['numero_commande']); ?>
+                                            </p>
+                                        </td>
+                                        <td class="px-6 py-4">
+                                            <p class="font-semibold"><?php echo e($commande['client_nom']); ?></p>
+                                        </td>
+                                        <td class="px-6 py-4">
+                                            <p class="font-bold text-green-600">
+                                                <?php echo formatMontant($commande['montant_total']); ?>
+                                            </p>
+                                        </td>
+                                        <td class="px-6 py-4 text-sm text-gray-500">
+                                            <?php echo date('d/m/Y H:i', strtotime($commande['date_commande'])); ?>
+                                        </td>
+                                        <td class="px-6 py-4">
+                                            <span class="bg-green-100 text-green-800 px-2 py-1 rounded text-sm">
+                                                <?php echo $commande['nombre_produits']; ?> produits
+                                            </span>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            <?php else: ?>
+                <div class="bg-white rounded-lg shadow-md p-12 text-center">
+                    <i class="fas fa-history text-gray-400 text-5xl mb-4"></i>
+                    <h3 class="text-xl font-semibold text-gray-800 mb-2">Aucun historique</h3>
+                    <p class="text-gray-600">Aucune commande payée dans les 30 derniers jours.</p>
+                </div>
+            <?php endif; ?>
+
+        <?php elseif ($current_page == 'evaluations'): ?>
+            <!-- ========== ÉVALUATIONS ========== -->
+            <div class="mb-6">
+                <h1 class="text-2xl font-bold text-gray-800">Évaluations et retours</h1>
+                <p class="text-gray-600">Feedback sur vos produits et services</p>
+            </div>
+
+            <?php if (count($evaluations) > 0): ?>
+                <div class="space-y-6">
+                    <?php foreach ($evaluations as $evaluation): ?>
+                        <div class="bg-white rounded-lg shadow-md p-6">
+                            <div class="flex justify-between items-start mb-4">
+                                <div>
+                                    <h3 class="font-bold text-gray-800"><?php echo e($evaluation['produit_nom']); ?></h3>
+                                    <p class="text-sm text-gray-600">Évalué par <?php echo e($evaluation['evaluateur_nom']); ?>
+                                    </p>
+                                </div>
+                                <div class="text-right">
+                                    <div class="flex items-center">
+                                        <?php for ($i = 1; $i <= 5; $i++): ?>
+                                            <?php if ($i <= $evaluation['note']): ?>
+                                                <i class="fas fa-star text-yellow-500"></i>
+                                            <?php else: ?>
+                                                <i class="far fa-star text-gray-300"></i>
+                                            <?php endif; ?>
+                                        <?php endfor; ?>
+                                        <span class="ml-2 font-bold"><?php echo $evaluation['note']; ?>/5</span>
+                                    </div>
+                                    <p class="text-sm text-gray-500 mt-1">
+                                        <?php echo formatDate($evaluation['created_at']); ?>
+                                    </p>
+                                </div>
+                            </div>
+
+                            <?php if (!empty($evaluation['commentaire'])): ?>
+                                <div class="mt-4 p-4 bg-gray-50 rounded-lg">
+                                    <p class="text-gray-700">"<?php echo e($evaluation['commentaire']); ?>"</p>
+                                </div>
+                            <?php endif; ?>
+
+                            <?php if (!empty($evaluation['type_evaluation'])): ?>
+                                <div class="mt-4">
+                                    <span
+                                        class="inline-block bg-<?php echo $evaluation['type_evaluation'] == 'qualite' ? 'green' : 'blue'; ?>-100 text-<?php echo $evaluation['type_evaluation'] == 'qualite' ? 'green' : 'blue'; ?>-800 px-3 py-1 rounded text-sm">
+                                        <?php echo $evaluation['type_evaluation'] == 'qualite' ? 'Qualité' : 'Service'; ?>
+                                    </span>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php else: ?>
+                <div class="bg-white rounded-lg shadow-md p-12 text-center">
+                    <i class="fas fa-star text-gray-400 text-5xl mb-4"></i>
+                    <h3 class="text-xl font-semibold text-gray-800 mb-2">Aucune évaluation</h3>
+                    <p class="text-gray-600">Vous n'avez pas encore reçu d'évaluations.</p>
+                </div>
+            <?php endif; ?>
+
+        <?php elseif ($current_page == 'profil'): ?>
+            <!-- ========== MON PROFIL ========== -->
+            <div class="mb-6">
+                <h1 class="text-2xl font-bold text-gray-800">Mon profil</h1>
+                <p class="text-gray-600">Gérez les informations de votre société</p>
+            </div>
+
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <form method="POST" action="">
+                    <input type="hidden" name="action" value="update_profile">
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                        <div>
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2" for="nom_societe">
+                                    Nom de la société *
+                                </label>
+                                <input type="text" id="nom_societe" name="nom_societe" required
+                                    value="<?php echo e($infos_fournisseur['nom_societe'] ?? ''); ?>"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
+                            </div>
+
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2" for="contact_principal">
+                                    Contact principal *
+                                </label>
+                                <input type="text" id="contact_principal" name="contact_principal" required
+                                    value="<?php echo e($infos_fournisseur['contact_principal'] ?? ''); ?>"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
+                            </div>
+
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2" for="telephone">
+                                    Téléphone
+                                </label>
+                                <input type="tel" id="telephone" name="telephone"
+                                    value="<?php echo e($infos_fournisseur['telephone'] ?? ''); ?>"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2" for="email">
+                                    Email de contact *
+                                </label>
+                                <input type="email" id="email" name="email" required
+                                    value="<?php echo e($infos_fournisseur['email'] ?? ''); ?>"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
+                            </div>
+
+                            <div class="mb-4">
+                                <label class="block text-gray-700 text-sm font-bold mb-2" for="adresse_siege">
+                                    Adresse du siège
+                                </label>
+                                <textarea id="adresse_siege" name="adresse_siege" rows="4"
+                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"><?php echo e($infos_fournisseur['adresse_siege'] ?? ''); ?></textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                        <h4 class="font-semibold text-blue-800 mb-2">
+                            <i class="fas fa-info-circle mr-2"></i>Informations complémentaires
+                        </h4>
+                        <ul class="text-sm text-blue-700 space-y-1">
+                            <li>• Note de qualité:
+                                <strong><?php echo number_format($stats['note_qualite'], 1); ?>/5</strong>
+                            </li>
+                            <li>• Produits fournis: <strong><?php echo $stats['total_produits']; ?></strong></li>
+                            <li>• Ventes totales:
+                                <strong><?php echo formatMontant($stats['ventes_totales']); ?></strong>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div class="flex justify-end space-x-4">
+                        <button type="submit" class="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+                            <i class="fas fa-save mr-2"></i>Mettre à jour
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+        <?php else: ?>
+            <!-- ========== PAGE NON TROUVÉE ========== -->
+            <div class="bg-white rounded-lg shadow-md p-12 text-center">
+                <i class="fas fa-exclamation-circle text-red-500 text-5xl mb-4"></i>
+                <h3 class="text-xl font-semibold text-gray-800 mb-2">Page non trouvée</h3>
+                <p class="text-gray-600 mb-6">La page que vous cherchez n'existe pas.</p>
+                <a href="?page=dashboard" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg">
+                    <i class="fas fa-home mr-2"></i>Retour au dashboard
+                </a>
+            </div>
+        <?php endif; ?>
+    </div>
     </div>
 
     <!-- Modals -->

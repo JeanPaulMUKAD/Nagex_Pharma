@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS `categories` (
   CONSTRAINT `categories_ibfk_1` FOREIGN KEY (`created_by`) REFERENCES `utilisateurs` (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- Listage des données de la table nagex_pharma_db.categories : ~0 rows (environ)
+-- Listage des données de la table nagex_pharma_db.categories : ~1 rows (environ)
 INSERT INTO `categories` (`id`, `nom`, `description`, `created_by`, `statut`, `created_at`) VALUES
 	(1, 'Maux de tête', 'Produit pharmaceutique', 5, 'actif', '2025-11-27 01:18:45');
 
@@ -69,12 +69,14 @@ CREATE TABLE IF NOT EXISTS `commandes` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `numero_commande` (`numero_commande`),
   KEY `client_id` (`client_id`),
-  KEY `caissier_id` (`caissier_id`),
+  KEY `idx_commandes_caissier` (`caissier_id`,`date_commande`),
   CONSTRAINT `commandes_ibfk_1` FOREIGN KEY (`client_id`) REFERENCES `utilisateurs` (`id`),
   CONSTRAINT `commandes_ibfk_2` FOREIGN KEY (`caissier_id`) REFERENCES `utilisateurs` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- Listage des données de la table nagex_pharma_db.commandes : ~0 rows (environ)
+INSERT INTO `commandes` (`id`, `numero_commande`, `client_id`, `caissier_id`, `montant_total`, `statut`, `mode_paiement`, `date_commande`, `date_paiement`) VALUES
+	(1, 'CMD-20251208-30A5CC', 10, NULL, 15000.00, 'en_attente', 'especes', '2025-12-08 00:44:03', NULL);
 
 -- Listage de la structure de table nagex_pharma_db. commande_details
 CREATE TABLE IF NOT EXISTS `commande_details` (
@@ -95,6 +97,8 @@ CREATE TABLE IF NOT EXISTS `commande_details` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- Listage des données de la table nagex_pharma_db.commande_details : ~0 rows (environ)
+INSERT INTO `commande_details` (`id`, `commande_id`, `produit_id`, `lot_id`, `quantite`, `prix_unitaire`, `sous_total`) VALUES
+	(1, 1, 1, 1, 1, 15000.00, 15000.00);
 
 -- Listage de la structure de table nagex_pharma_db. favoris
 CREATE TABLE IF NOT EXISTS `favoris` (
@@ -110,6 +114,8 @@ CREATE TABLE IF NOT EXISTS `favoris` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- Listage des données de la table nagex_pharma_db.favoris : ~0 rows (environ)
+INSERT INTO `favoris` (`id`, `client_id`, `produit_id`, `date_ajout`) VALUES
+	(1, 10, 1, '2025-12-08 00:50:17');
 
 -- Listage de la structure de table nagex_pharma_db. fournisseurs
 CREATE TABLE IF NOT EXISTS `fournisseurs` (
@@ -122,9 +128,12 @@ CREATE TABLE IF NOT EXISTS `fournisseurs` (
   PRIMARY KEY (`id`),
   KEY `user_id` (`user_id`),
   CONSTRAINT `fournisseurs_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `utilisateurs` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- Listage des données de la table nagex_pharma_db.fournisseurs : ~0 rows (environ)
+INSERT INTO `fournisseurs` (`id`, `user_id`, `nom_societe`, `contact_principal`, `adresse_siege`, `note_qualite`, `updated_at`) VALUES
+	(1, 5, 'CMDC', '+243977199714', '', 5.00, '2025-12-07 22:30:40'),
+	(2, 6, 'KASA KIBINGA Israel - Société', 'KASA KIBINGA Israel', NULL, 0.00, '2025-12-08 02:22:20');
 
 -- Listage de la structure de table nagex_pharma_db. lots
 CREATE TABLE IF NOT EXISTS `lots` (
@@ -146,6 +155,8 @@ CREATE TABLE IF NOT EXISTS `lots` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- Listage des données de la table nagex_pharma_db.lots : ~0 rows (environ)
+INSERT INTO `lots` (`id`, `produit_id`, `numero_lot`, `quantite_initiale`, `quantite_actuelle`, `date_expiration`, `prix_achat`, `date_reception`, `statut`, `created_by`, `created_at`) VALUES
+	(1, 1, 'LOT-2025-12-688', 25, 25, '2025-12-31', 100.00, '2025-12-07', 'en_stock', 7, '2025-12-07 23:47:24');
 
 -- Listage de la structure de table nagex_pharma_db. mouvements_stock
 CREATE TABLE IF NOT EXISTS `mouvements_stock` (
@@ -169,6 +180,8 @@ CREATE TABLE IF NOT EXISTS `mouvements_stock` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- Listage des données de la table nagex_pharma_db.mouvements_stock : ~0 rows (environ)
+INSERT INTO `mouvements_stock` (`id`, `produit_id`, `lot_id`, `type_mouvement`, `quantite`, `quantite_avant`, `quantite_apres`, `raison`, `created_by`, `created_at`) VALUES
+	(1, 1, 1, 'entree', 25, 0, 25, 'Réception nouveau lot', 7, '2025-12-07 23:47:24');
 
 -- Listage de la structure de table nagex_pharma_db. paniers
 CREATE TABLE IF NOT EXISTS `paniers` (
@@ -213,13 +226,15 @@ CREATE TABLE IF NOT EXISTS `prix_vente` (
   `created_by` int NOT NULL,
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  KEY `produit_id` (`produit_id`),
   KEY `created_by` (`created_by`),
+  KEY `idx_prix_vente_produit_active` (`produit_id`,`date_fin`),
   CONSTRAINT `prix_vente_ibfk_1` FOREIGN KEY (`produit_id`) REFERENCES `produits` (`id`) ON DELETE CASCADE,
   CONSTRAINT `prix_vente_ibfk_2` FOREIGN KEY (`created_by`) REFERENCES `utilisateurs` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- Listage des données de la table nagex_pharma_db.prix_vente : ~0 rows (environ)
+INSERT INTO `prix_vente` (`id`, `produit_id`, `prix_fc`, `prix_usd`, `taux_conversion`, `date_debut`, `date_fin`, `created_by`, `created_at`) VALUES
+	(1, 1, 15000.00, 25.00, 600.0000, '2025-12-08', NULL, 8, '2025-12-08 00:11:05');
 
 -- Listage de la structure de table nagex_pharma_db. produits
 CREATE TABLE IF NOT EXISTS `produits` (
@@ -248,6 +263,8 @@ CREATE TABLE IF NOT EXISTS `produits` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 -- Listage des données de la table nagex_pharma_db.produits : ~0 rows (environ)
+INSERT INTO `produits` (`id`, `nom`, `description`, `code_barre`, `categorie_id`, `fournisseur_id`, `necessite_ordonnance`, `composition`, `posologie`, `contre_indications`, `statut`, `created_by`, `created_at`, `updated_at`) VALUES
+	(1, 'QUININE 300 MG 10 CES (P.K.)', 'Essai', '123432', 1, 1, 1, 'Essai', 'Essai', 'Essai', 'actif', 5, '2025-12-07 22:54:58', '2025-12-07 23:44:01');
 
 -- Listage de la structure de table nagex_pharma_db. statistiques_ventes
 CREATE TABLE IF NOT EXISTS `statistiques_ventes` (
@@ -275,9 +292,9 @@ CREATE TABLE IF NOT EXISTS `user_logs` (
   `user_agent` text,
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=27 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=60 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- Listage des données de la table nagex_pharma_db.user_logs : ~26 rows (environ)
+-- Listage des données de la table nagex_pharma_db.user_logs : ~59 rows (environ)
 INSERT INTO `user_logs` (`id`, `user_id`, `action`, `details`, `ip_address`, `user_agent`, `created_at`) VALUES
 	(1, 1, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-11-26 19:39:20'),
 	(2, 1, 'MODIFICATION_UTILISATEUR', 'Utilisateur modifié: KASONGO LUMBALA Nathan (paularmimukad@gmail.com) - Rôle: admin', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-11-26 19:54:00'),
@@ -304,7 +321,56 @@ INSERT INTO `user_logs` (`id`, `user_id`, `action`, `details`, `ip_address`, `us
 	(23, 10, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-11-27 00:58:17'),
 	(24, 10, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-11-27 00:58:54'),
 	(25, 10, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-11-27 01:00:13'),
-	(26, 5, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-11-27 01:18:24');
+	(26, 5, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-11-27 01:18:24'),
+	(27, 1, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-06 23:13:34'),
+	(28, 1, 'DECONNEXION', 'Utilisateur déconnecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-06 23:16:33'),
+	(29, 6, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-06 23:16:46'),
+	(30, 6, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-06 23:17:03'),
+	(31, 6, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-06 23:23:05'),
+	(32, 6, 'DECONNEXION', 'Utilisateur déconnecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-06 23:36:02'),
+	(33, 5, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-06 23:36:15'),
+	(34, 1, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-06 23:41:54'),
+	(35, 5, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-06 23:48:02'),
+	(36, 1, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-06 23:53:44'),
+	(37, 1, 'SUPPRESSION_UTILISATEUR', 'Utilisateur supprimé: CMDC (cmdc.2@fournisseur.pharma)', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-06 23:53:50'),
+	(38, 1, 'SUPPRESSION_UTILISATEUR', 'Utilisateur supprimé: CMDC (Inconnu)', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-06 23:54:00'),
+	(39, 1, 'SUPPRESSION_UTILISATEUR', 'Utilisateur supprimé: CMDC (cmdc@fournisseur.pharma)', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-06 23:54:08'),
+	(40, 1, 'SUPPRESSION_UTILISATEUR', 'Utilisateur supprimé: CMDC (test.17642076134346@fournisseur.pharma)', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-06 23:54:14'),
+	(41, 1, 'SUPPRESSION_UTILISATEUR', 'Utilisateur supprimé: CMDC (test.17642075812678@fournisseur.pharma)', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-06 23:54:20'),
+	(42, 1, 'SUPPRESSION_UTILISATEUR', 'Utilisateur supprimé: CMDC (cmdc.1@fournisseur.pharma)', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-06 23:54:27'),
+	(43, 5, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 00:06:11'),
+	(44, 7, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 00:39:08'),
+	(45, 8, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 00:44:35'),
+	(46, 10, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 00:56:55'),
+	(47, 1, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 00:59:25'),
+	(48, 10, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 01:06:34'),
+	(49, 6, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 01:15:44'),
+	(50, 5, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 01:32:18'),
+	(51, 7, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 02:39:49'),
+	(52, 7, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 03:16:53'),
+	(53, 8, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 03:31:05'),
+	(54, 10, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 08:35:36'),
+	(55, 6, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 21:20:12'),
+	(56, 1, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 21:20:37'),
+	(57, 6, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 21:20:56'),
+	(58, 6, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 21:24:01'),
+	(59, 6, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 21:24:19'),
+	(60, 5, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 21:32:29'),
+	(61, 1, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 21:34:53'),
+	(62, 5, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 21:37:24'),
+	(63, 7, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-07 23:46:16'),
+	(64, 8, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-08 00:10:04'),
+	(65, 10, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-08 00:25:22'),
+	(66, 8, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-08 00:44:53'),
+	(67, 10, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-08 00:45:54'),
+	(68, 8, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-08 00:54:52'),
+	(69, 6, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-08 00:55:50'),
+	(70, 6, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-08 01:05:22'),
+	(71, 8, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-08 01:28:35'),
+	(72, 7, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-08 01:29:02'),
+	(73, 10, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-08 01:29:27'),
+	(74, 6, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-08 01:32:16'),
+	(75, 5, 'CONNEXION', 'Utilisateur connecté avec succès', '::1', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36', '2025-12-08 02:34:00');
 
 -- Listage de la structure de table nagex_pharma_db. utilisateurs
 CREATE TABLE IF NOT EXISTS `utilisateurs` (
@@ -322,9 +388,9 @@ CREATE TABLE IF NOT EXISTS `utilisateurs` (
   UNIQUE KEY `email` (`email`),
   KEY `idx_role` (`role`),
   KEY `idx_statut` (`statut`)
-) ENGINE=InnoDB AUTO_INCREMENT=17 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- Listage des données de la table nagex_pharma_db.utilisateurs : ~12 rows (environ)
+-- Listage des données de la table nagex_pharma_db.utilisateurs : ~7 rows (environ)
 INSERT INTO `utilisateurs` (`id`, `nom`, `email`, `mot_de_passe`, `role`, `telephone`, `adresse`, `date_creation`, `date_modification`, `statut`) VALUES
 	(1, 'KASONGO LUMBALA Nathan', 'paularmimukad@gmail.com', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin', '+243977199714', '12, KALOMBO, GAMBELA II, L\'shi, RDC', '2025-11-19 18:57:18', '2025-11-26 19:54:00', 'actif'),
 	(5, 'KASOMBW MUKAD Jean-Paul', 'mukadjeanpaul@gmail.com', '$2y$12$TpKUswxqaePsdJn12RXlRufP7DJbjFQpsETcp3qan65NRgxVoLvIm', 'pharmacien', '+243977199714', NULL, '2025-11-19 22:48:50', '2025-11-26 19:25:27', 'actif'),
@@ -332,12 +398,7 @@ INSERT INTO `utilisateurs` (`id`, `nom`, `email`, `mot_de_passe`, `role`, `telep
 	(7, 'MULANGU Lumiere', 'lmr@gmail.com', '$2y$12$5Mn8I37dsYNH0FaqPZGC8uV53ExjxHZF5hHrB044soCD9zpjWOMwK', 'stockiste', '+243977199714', NULL, '2025-11-19 23:55:05', '2025-11-26 19:25:27', 'actif'),
 	(8, 'neville orman', 'orman@gmail.com', '$2y$12$lV.HSn1KaBodr8lYieg9J.iRDkrpopIxnmpK/.l8mbV4vqey/kJJy', 'caissier', '+243977199714', NULL, '2025-11-20 00:11:01', '2025-11-26 19:25:27', 'actif'),
 	(9, 'MUTAMBA Poly', 'poly@gmail.com', '$2y$12$DSEz.hnF3V4I/sbbGDcEEu2DQI4fafwEGz5GkFGrQApCatokJdmhK', 'gerant', '+243977199714', NULL, '2025-11-20 00:39:49', '2025-11-26 19:25:27', 'actif'),
-	(10, 'Gnr', 'gnr@gmail.com', '$2y$12$MP8pNQfJKHT5TJVDPrVXFO754Xoka3C2dSt6PA1JFihjleTBNIqv6', 'client', '+243977199714', 'L\'shi', '2025-11-27 01:30:47', '2025-11-26 23:30:47', 'actif'),
-	(11, 'CMDC', 'Inconnu', '$2y$12$ujg.bMY9RkhH/Z9jEjG8zuzwCITZVxFyudsSwrwvXFcaSFRwhhuC2', 'fournisseur', 'Inconnu', NULL, '2025-11-27 03:20:16', '2025-11-27 01:20:16', 'actif'),
-	(13, 'CMDC', 'cmdc@fournisseur.pharma', '$2y$12$Eedtoi915kMZF6VsuugxuOX.ggzEJoJZyYXOQ2mvLQBdJsI0aVGu.', 'fournisseur', 'Inconnu', NULL, '2025-11-27 03:33:25', '2025-11-27 01:33:25', 'actif'),
-	(14, 'CMDC', 'cmdc.1@fournisseur.pharma', '$2y$12$Bo5Gz9viDHr0vyadmhgZY.ZX0ZTkZRQBeeyeHXJUYQqSp.y1oQYt2', 'fournisseur', 'Inconnu', NULL, '2025-11-27 03:38:41', '2025-11-27 01:38:41', 'actif'),
-	(15, 'CMDC', 'test.17642075812678@fournisseur.pharma', '$2y$12$KlBiGF0x6ScQWKF2ASouqumVtcCPGYwVgXc054ss7Nhp72/Ck23g2', 'fournisseur', 'Inconnu', NULL, '2025-11-27 03:39:41', '2025-11-27 01:39:41', 'actif'),
-	(16, 'CMDC', 'test.17642076134346@fournisseur.pharma', '$2y$12$jOvELxxcnRkWI6LYrgGnr.tU40ihsTeHbKYSF5mH2TFGW8/cRHb6a', 'fournisseur', 'Inconnu', NULL, '2025-11-27 03:40:14', '2025-11-27 01:40:14', 'actif');
+	(10, 'Gnr', 'gnr@gmail.com', '$2y$12$MP8pNQfJKHT5TJVDPrVXFO754Xoka3C2dSt6PA1JFihjleTBNIqv6', 'client', '+243977199714', 'L\'shi', '2025-11-27 01:30:47', '2025-11-26 23:30:47', 'actif');
 
 /*!40103 SET TIME_ZONE=IFNULL(@OLD_TIME_ZONE, 'system') */;
 /*!40101 SET SQL_MODE=IFNULL(@OLD_SQL_MODE, '') */;

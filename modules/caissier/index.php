@@ -701,7 +701,7 @@ try {
                                 </span>
                             <?php endif; ?>
                         </a>
-                       
+
                         <a href="?page=taux_conversion"
                             class="menu-item block py-2.5 px-4 hover:bg-emerald-50 rounded-lg transition-all duration-200 <?php echo $current_page == 'taux_conversion' ? 'active-menu shadow-md' : 'text-gray-700'; ?>">
                             <i class="fas fa-exchange-alt mr-3 w-5 text-center"></i>
@@ -710,9 +710,9 @@ try {
                     </div>
                 </div>
 
-               
 
-              
+
+
             </nav>
 
 
@@ -1207,8 +1207,10 @@ try {
                                                         <?php echo formatMontant($commande['montant_total']); ?>
                                                     </div>
                                                     <div class="text-xs text-gray-500 mt-1">
-                                                        <i
-                                                            class="fas fa-<?php echo $commande['methode_paiement'] == 'especes' ? 'money-bill' : 'credit-card'; ?> mr-1"></i>
+                                                        <?php
+                                                        $icon_class = ($commande['methode_paiement'] ?? '') == 'especes' ? 'money-bill' : 'credit-card';
+                                                        ?>
+                                                        <i class="fas fa-<?php echo htmlspecialchars($icon_class); ?> mr-1"></i>
                                                         <?php echo htmlspecialchars($commande['methode_paiement'] ?? 'Non spécifié'); ?>
                                                     </div>
                                                 </td>
@@ -1444,14 +1446,28 @@ try {
                                         </td>
                                         <td class="px-6 py-4">
                                             <?php if ($produit['prix_usd']): ?>
-                                                <span
-                                                    class="font-bold text-blue-600">$<?php echo number_format($produit['prix_usd'], 2); ?></span>
+                                                <span class="font-bold text-blue-600">
+                                                    <?php
+                                                    if (is_numeric($produit['prix_usd']) && $produit['prix_usd'] > 0) {
+                                                        echo '$' . number_format((float) $produit['prix_usd'], 2);
+                                                    } else {
+                                                        echo '<span class="text-red-500 text-sm">Non défini</span>';
+                                                    }
+                                                    ?>
+                                                </span>
                                             <?php else: ?>
                                                 <span class="text-red-500 text-sm">Non défini</span>
                                             <?php endif; ?>
                                         </td>
                                         <td class="px-6 py-4 text-sm text-gray-500">
-                                            <?php echo number_format($produit['taux_conversion'] ?? 1, 4); ?>
+                                            <?php
+                                            $taux = $produit['taux_conversion'] ?? 1;
+                                            if (is_numeric($taux)) {
+                                                echo number_format((float) $taux, 4);
+                                            } else {
+                                                echo '1.0000';
+                                            }
+                                            ?>
                                         </td>
                                         <td class="px-6 py-4">
                                             <button
@@ -1576,7 +1592,8 @@ try {
                                                 <!-- Nom du client -->
                                                 <td class="px-6 py-4">
                                                     <p class="font-medium text-gray-800 text-sm">
-                                                        <?php echo e($transaction['client_nom']); ?></p>
+                                                        <?php echo e($transaction['client_nom']); ?>
+                                                    </p>
                                                 </td>
 
                                                 <!-- Montant total -->
