@@ -511,7 +511,7 @@ switch ($current_page) {
                 LEFT JOIN categories c ON p.categorie_id = c.id
                 LEFT JOIN fournisseurs f ON p.fournisseur_id = f.id
                 WHERE p.statut != 'inactif'
-                ORDER BY p.created_at DESC
+                ORDER BY p.created_at ASC
                 LIMIT 50
             ");
             $stmt->execute();
@@ -529,7 +529,7 @@ switch ($current_page) {
                 LEFT JOIN categories c ON p.categorie_id = c.id
                 LEFT JOIN fournisseurs f ON p.fournisseur_id = f.id
                 WHERE p.statut = 'en_attente'
-                ORDER BY p.created_at DESC
+                ORDER BY p.created_at ASC
             ");
             $stmt->execute();
             $produits_attente = $stmt->fetchAll();
@@ -561,7 +561,7 @@ switch ($current_page) {
             LEFT JOIN categories c ON p.categorie_id = c.id
             LEFT JOIN fournisseurs f ON p.fournisseur_id = f.id
             WHERE p.statut = 'inactif'
-            ORDER BY p.updated_at DESC
+            ORDER BY p.updated_at ASC
         ");
             $stmt->execute();
             $produits_archives = $stmt->fetchAll();
@@ -600,7 +600,7 @@ try {
         FROM alertes a
         LEFT JOIN produits p ON a.produit_id = p.id
         WHERE a.statut = 'non_lu'
-        ORDER BY a.created_at DESC
+        ORDER BY a.created_at ASC
         LIMIT 5
     ");
     $alertes = $stmt->fetchAll();
@@ -840,6 +840,48 @@ try {
                     <i class="fas fa-archive mr-3 w-5 text-center"></i>
                     <span>Produits archivés</span>
                 </a>
+
+                <!-- Section Sécurité -->
+                <div class="section-title">
+                    <div
+                        class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-emerald-600 flex items-center">
+                        <div class="w-8 h-px bg-emerald-200 mr-3"></div>
+                        <i class="fas fa-shield-alt text-emerald-500 mr-2"></i>
+                        <span>Sécurité</span>
+                        <div class="flex-1 h-px bg-emerald-200 ml-3"></div>
+                    </div>
+                </div>
+
+                <!-- Déconnexion -->
+                <a href="../utilisateurs/logout.php"
+                    class="menu-item group relative flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-300 ease-out text-gray-600 hover:bg-gradient-to-r hover:from-red-50 hover:to-rose-50 hover:text-red-700 hover:shadow-md">
+                    <div class="relative">
+                        <i class="fas fa-sign-out-alt w-5 h-5 mr-3 text-gray-400 group-hover:text-red-500"></i>
+                    </div>
+                    <span class="flex-1">Déconnexion</span>
+                    <i
+                        class="fas fa-chevron-right text-xs text-gray-400 group-hover:text-red-400 group-hover:translate-x-1 transition-transform"></i>
+                </a>
+
+                <!-- Ligne de séparation -->
+                <div class="px-4 py-2">
+                    <div class="border-t border-gray-200"></div>
+                </div>
+
+                <!-- Informations de session -->
+                <div class="px-4 py-3">
+                    <div class="text-xs text-gray-500">
+                        <div class="flex items-center mb-1">
+                            <i class="fas fa-user-circle mr-2 text-gray-400"></i>
+                            <span
+                                class="font-medium text-gray-600"><?php echo e($_SESSION['user_nom'] ?? 'Client'); ?></span>
+                        </div>
+                        <div class="flex items-center">
+                            <i class="fas fa-clock mr-2 text-gray-400"></i>
+                            <span>Connecté depuis <?php echo date('H:i'); ?></span>
+                        </div>
+                    </div>
+                </div>
             </nav>
 
 
@@ -1814,8 +1856,8 @@ try {
                                                 <div class="flex items-center">
                                                     <i class="fas fa-barcode text-gray-400 mr-2 text-sm"></i>
                                                     <code class="text-sm text-gray-900 bg-gray-50 px-2 py-1 rounded font-mono">
-                                                                                                        <?php echo htmlspecialchars($produit['code_barre']); ?>
-                                                                                                    </code>
+                                                                                                                        <?php echo htmlspecialchars($produit['code_barre']); ?>
+                                                                                                                    </code>
                                                 </div>
                                             </td>
                                             <td class="px-6 py-4">

@@ -10,6 +10,23 @@ declare(strict_types=1);
 // Démarrage de session et vérification du rôle
 session_start();
 
+// ============================================
+// INCLUSION DE FPDF
+// ============================================
+
+// Chemin vers FPDF à la racine du projet
+$fpdf_path = __DIR__ . '/../../fpdf.php';
+$font_path = __DIR__ . '/../../font/';
+
+if (file_exists($fpdf_path)) {
+    require_once $fpdf_path;
+
+    // Définir le chemin des polices
+    define('FPDF_FONTPATH', $font_path);
+} else {
+    die("Erreur: FPDF n'est pas installé. Veuillez installer FPDF à la racine de votre projet.");
+}
+
 // Vérifier si l'utilisateur est connecté et a le rôle client
 if (!isset($_SESSION['user_id']) || ($_SESSION['user_role'] ?? '') !== 'client') {
     header('Location: login.php');
@@ -42,6 +59,433 @@ try {
 // ============================================
 // FONCTIONS UTILITAIRES
 // ============================================
+
+/**
+ * Formatte un montant avec devise
+ */
+function formatMontant($montant, string $devise = 'CDF'): string
+{
+    // S'assurer que c'est un nombre
+    if (!is_numeric($montant)) {
+        $montant = 0;
+    }
+
+    // Convertir en float
+    $montant_float = floatval($montant);
+
+    if ($devise === 'USD') {
+        return '$' . number_format($montant_float, 2, '.', ',');
+    }
+    return number_format($montant_float, 0, '.', ',') . ' FC';
+}
+
+/**
+ * Initialise les polices UTF-8 pour FPDF
+ */
+function initialiserPolicesUTF8($pdf) {
+    // Chemin vers le dossier des polices
+    $font_path = __DIR__ . '/../../font/';
+    
+    // Vérifier si la police DejaVu existe (UTF-8 compatible)
+    $dejavu_sans = $font_path . 'DejaVuSans.php';
+    $dejavu_sans_bold = $font_path . 'DejaVuSans-Bold.php';
+    
+    if (file_exists($dejavu_sans)) {
+        // Utiliser DejaVu (UTF-8 compatible)
+        $pdf->AddFont('DejaVu', '', 'DejaVuSans.php');
+        $pdf->AddFont('DejaVu', 'B', 'DejaVuSans-Bold.php');
+        $pdf->AddFont('DejaVu', 'I', 'DejaVuSans-Oblique.php');
+        $pdf->AddFont('DejaVu', 'BI', 'DejaVuSans-BoldOblique.php');
+        return 'DejaVu';
+    }
+    
+    // Si DejaVu n'existe pas, télécharger ou utiliser Arial Unicode MS
+    // Pour l'instant, on utilise Arial standard (avec conversion d'accents)
+    return 'Arial';
+}
+
+/**
+ * Convertit les caractères accentués pour FPDF standard
+ */
+function convertirAccents($texte) {
+    $accented = array(
+        'à', 'á', 'â', 'ã', 'ä', 'å', 'æ',
+        'ç',
+        'è', 'é', 'ê', 'ë',
+        'ì', 'í', 'î', 'ï',
+        'ð', 'ñ',
+        'ò', 'ó', 'ô', 'õ', 'ö', 'ø',
+        'ù', 'ú', 'û', 'ü',
+        'ý', 'ÿ',
+        'À', 'Á', 'Â', 'Ã', 'Ä', 'Å', 'Æ',
+        'Ç',
+        'È', 'É', 'Ê', 'Ë',
+        'Ì', 'Í', 'Î', 'Ï',
+        'Ð', 'Ñ',
+        'Ò', 'Ó', 'Ô', 'Õ', 'Ö', 'Ø',
+        'Ù', 'Ú', 'Û', 'Ü',
+        'Ý',
+        'œ', 'Œ', '€', '£', '¥', '§', '©', '®', '™',
+        '«', '»', '…', '–', '—', '¿', '¡'
+    );
+    
+    $unaccented = array(
+        'a', 'a', 'a', 'a', 'a', 'a', 'ae',
+        'c',
+        'e', 'e', 'e', 'e',
+        'i', 'i', 'i', 'i',
+        'd', 'n',
+        'o', 'o', 'o', 'o', 'o', 'o',
+        'u', 'u', 'u', 'u',
+        'y', 'y',
+        'A', 'A', 'A', 'A', 'A', 'A', 'AE',
+        'C',
+        'E', 'E', 'E', 'E',
+        'I', 'I', 'I', 'I',
+        'D', 'N',
+        'O', 'O', 'O', 'O', 'O', 'O',
+        'U', 'U', 'U', 'U',
+        'Y',
+        'oe', 'OE', 'EUR', 'GBP', 'JPY', 'SS', '(c)', '(R)', 'TM',
+        '<<', '>>', '...', '-', '-', '?', '!'
+    );
+    
+    return str_replace($accented, $unaccented, $texte);
+}
+
+/**
+ * Génère un PDF de reçu pour une commande avec FPDF (version UTF-8)
+ */
+function genererPDFRecu(PDO $pdo, int $commande_id, int $client_id): string
+{
+    try {
+        // Vérifier que la commande appartient au client
+        $stmt = $pdo->prepare("
+            SELECT c.*, u.nom as client_nom, u.email, u.telephone, u.adresse,
+                   COUNT(cd.id) as nombre_articles, SUM(cd.quantite) as total_quantite
+            FROM commandes c
+            JOIN utilisateurs u ON c.client_id = u.id
+            LEFT JOIN commande_details cd ON c.id = cd.commande_id
+            WHERE c.id = :commande_id AND c.client_id = :client_id
+            GROUP BY c.id
+        ");
+        $stmt->execute([':commande_id' => $commande_id, ':client_id' => $client_id]);
+        $commande = $stmt->fetch();
+
+        if (!$commande) {
+            throw new Exception("Commande non trouvee ou non autorisee");
+        }
+
+        // Récupérer les détails de la commande
+        $stmt = $pdo->prepare("
+            SELECT cd.*, p.nom as produit_nom, p.code_barre,
+                   cat.nom as categorie_nom
+            FROM commande_details cd
+            JOIN produits p ON cd.produit_id = p.id
+            LEFT JOIN categories cat ON p.categorie_id = cat.id
+            WHERE cd.commande_id = :commande_id
+            ORDER BY p.nom ASC
+        ");
+        $stmt->execute([':commande_id' => $commande_id]);
+        $details = $stmt->fetchAll();
+
+        // Traductions (sans accents pour compatibilité)
+        $statut_fr = [
+            'paye' => 'PAYEE',
+            'en_attente' => 'EN ATTENTE',
+            'expedie' => 'EXPEDIEE',
+            'livre' => 'LIVREE',
+            'annule' => 'ANNULEE'
+        ];
+
+        $mode_paiement_fr = [
+            'especes' => 'Especes',
+            'carte' => 'Carte bancaire',
+            'mobile' => 'Mobile Money',
+            'virement' => 'Virement bancaire'
+        ];
+
+        // Créer le PDF
+        $pdf = new FPDF('P', 'mm', 'A4');
+        $pdf->AddPage();
+        
+        // Initialiser la police UTF-8
+        $font = initialiserPolicesUTF8($pdf);
+        
+        // ========== EN-TÊTE ==========
+        // Logo/En-tête
+        $pdf->SetFont($font, 'B', 24);
+        $pdf->SetTextColor(16, 185, 129); // Vert NAGEX
+        $pdf->Cell(0, 10, 'NAGEX PHARMA', 0, 1, 'C');
+
+        $pdf->SetFont($font, 'B', 16);
+        $pdf->SetTextColor(55, 65, 81); // Gris foncé
+        $pdf->Cell(0, 8, 'RECU DE COMMANDE', 0, 1, 'C');
+
+        $pdf->SetFont($font, '', 10);
+        $pdf->SetTextColor(107, 114, 128); // Gris
+        $pdf->Cell(0, 6, convertirAccents('Votre sante, notre priorite'), 0, 1, 'C');
+
+        // Ligne de séparation
+        $pdf->SetDrawColor(16, 185, 129);
+        $pdf->SetLineWidth(0.5);
+        $pdf->Line(10, $pdf->GetY() + 5, 200, $pdf->GetY() + 5);
+        $pdf->Ln(10);
+
+        // ========== INFORMATIONS COMMANDE ==========
+        $pdf->SetFont($font, 'B', 12);
+        $pdf->SetTextColor(31, 41, 55);
+        $pdf->SetFillColor(240, 253, 244); // Vert très clair
+        $pdf->Cell(0, 8, 'INFORMATIONS DE LA COMMANDE', 0, 1, 'L', true);
+        $pdf->Ln(2);
+
+        $pdf->SetFont($font, '', 10);
+        $pdf->SetTextColor(0, 0, 0);
+
+        // Tableau des informations
+        $pdf->Cell(40, 7, 'N° Commande:', 0, 0);
+        $pdf->SetFont($font, 'B', 10);
+        $pdf->Cell(60, 7, $commande['numero_commande'], 0, 0);
+
+        $pdf->SetFont($font, '', 10);
+        $pdf->Cell(30, 7, 'Date:', 0, 0);
+        $pdf->Cell(0, 7, date('d/m/Y a H:i', strtotime($commande['date_commande'])), 0, 1);
+
+        $pdf->Cell(40, 7, 'Statut:', 0, 0);
+        $pdf->SetFont($font, 'B', 10);
+        $pdf->SetTextColor(16, 185, 129); // Vert pour le statut
+        $pdf->Cell(60, 7, $statut_fr[$commande['statut']] ?? strtoupper($commande['statut']), 0, 0);
+
+        $pdf->SetFont($font, '', 10);
+        $pdf->SetTextColor(0, 0, 0);
+        $pdf->Cell(30, 7, convertirAccents('Mode paiement:'), 0, 0);
+        $pdf->Cell(0, 7, convertirAccents($mode_paiement_fr[$commande['mode_paiement']] ?? $commande['mode_paiement']), 0, 1);
+        $pdf->Ln(5);
+
+        // ========== INFORMATIONS CLIENT ==========
+        $pdf->SetFont($font, 'B', 12);
+        $pdf->SetTextColor(31, 41, 55);
+        $pdf->SetFillColor(240, 253, 244);
+        $pdf->Cell(0, 8, 'INFORMATIONS CLIENT', 0, 1, 'L', true);
+        $pdf->Ln(2);
+
+        $pdf->SetFont($font, '', 10);
+        $pdf->SetTextColor(0, 0, 0);
+
+        $pdf->Cell(40, 7, 'Nom:', 0, 0);
+        $pdf->Cell(0, 7, convertirAccents($commande['client_nom']), 0, 1);
+
+        $pdf->Cell(40, 7, 'Email:', 0, 0);
+        $pdf->Cell(0, 7, $commande['email'], 0, 1);
+
+        if ($commande['telephone']) {
+            $pdf->Cell(40, 7, convertirAccents('Telephone:'), 0, 0);
+            $pdf->Cell(0, 7, $commande['telephone'], 0, 1);
+        }
+
+        if ($commande['adresse']) {
+            $pdf->Cell(40, 7, convertirAccents('Adresse:'), 0, 0);
+            $pdf->MultiCell(0, 7, convertirAccents($commande['adresse']));
+        }
+        $pdf->Ln(5);
+
+        // ========== DÉTAILS DES PRODUITS ==========
+        $pdf->SetFont($font, 'B', 12);
+        $pdf->SetTextColor(31, 41, 55);
+        $pdf->SetFillColor(240, 253, 244);
+        $pdf->Cell(0, 8, convertirAccents('DETAILS DE LA COMMANDE'), 0, 1, 'L', true);
+        $pdf->Ln(2);
+
+        // En-tête du tableau
+        $pdf->SetFont($font, 'B', 10);
+        $pdf->SetFillColor(220, 252, 231); // Vert clair
+        $pdf->SetTextColor(5, 95, 70); // Vert foncé
+
+        $pdf->Cell(10, 8, '#', 1, 0, 'C', true);
+        $pdf->Cell(70, 8, 'PRODUIT', 1, 0, 'L', true);
+        $pdf->Cell(25, 8, convertirAccents('CATEGORIE'), 1, 0, 'L', true);
+        $pdf->Cell(20, 8, 'QTE', 1, 0, 'C', true);
+        $pdf->Cell(30, 8, convertirAccents('PRIX UNIT.'), 1, 0, 'R', true);
+        $pdf->Cell(35, 8, convertirAccents('SOUS-TOTAL'), 1, 1, 'R', true);
+
+        // Contenu du tableau
+        $pdf->SetFont($font, '', 9);
+        $pdf->SetTextColor(0, 0, 0);
+        $pdf->SetFillColor(255, 255, 255);
+
+        $total = 0;
+        $alternate = false;
+
+        foreach ($details as $index => $detail) {
+            $sous_total = floatval($detail['prix_unitaire']) * intval($detail['quantite']);
+            $total += $sous_total;
+
+            // Alternance des couleurs de fond
+            if ($alternate) {
+                $pdf->SetFillColor(249, 250, 251); // Gris très clair
+            } else {
+                $pdf->SetFillColor(255, 255, 255); // Blanc
+            }
+            $alternate = !$alternate;
+
+            $pdf->Cell(10, 8, $index + 1, 1, 0, 'C', true);
+
+            // Nom du produit
+            $produit_desc = convertirAccents($detail['produit_nom']);
+            $pdf->MultiCell(70, 8, $produit_desc, 1, 'L', true);
+            $pdf->SetXY($pdf->GetX() + 80, $pdf->GetY() - 8); // Répositionner après MultiCell
+
+            $categorie = convertirAccents($detail['categorie_nom'] ?? '');
+            $pdf->Cell(25, 8, substr($categorie, 0, 12), 1, 0, 'L', true);
+            $pdf->Cell(20, 8, $detail['quantite'], 1, 0, 'C', true);
+            $pdf->Cell(30, 8, formatMontant(floatval($detail['prix_unitaire'])), 1, 0, 'R', true);
+            $pdf->Cell(35, 8, formatMontant($sous_total), 1, 1, 'R', true);
+        }
+
+        // ========== RÉCAPITULATIF FINANCIER ==========
+        $pdf->Ln(5);
+        $pdf->SetFont($font, 'B', 12);
+        $pdf->SetTextColor(31, 41, 55);
+        $pdf->SetFillColor(240, 253, 244);
+        $pdf->Cell(0, 8, convertirAccents('RECAPITULATIF FINANCIER'), 0, 1, 'L', true);
+        $pdf->Ln(2);
+
+        $pdf->SetFont($font, '', 10);
+        $pdf->SetTextColor(0, 0, 0);
+
+        // Calcul des montants
+        $montant_total = floatval($commande['montant_total']);
+        $frais_livraison = 0;
+        $remise = max(0, $total - $montant_total);
+
+        // Tableau récapitulatif
+        $pdf->Cell(100, 8, convertirAccents('Total produits:'), 0, 0, 'R');
+        $pdf->Cell(30, 8, formatMontant($total), 0, 1, 'R');
+
+        $pdf->Cell(100, 8, convertirAccents('Frais de livraison:'), 0, 0, 'R');
+        $pdf->Cell(30, 8, formatMontant($frais_livraison), 0, 1, 'R');
+
+        if ($remise > 0) {
+            $pdf->Cell(100, 8, convertirAccents('Remise appliquee:'), 0, 0, 'R');
+            $pdf->SetTextColor(239, 68, 68); // Rouge pour la remise
+            $pdf->Cell(30, 8, '-' . formatMontant($remise), 0, 1, 'R');
+            $pdf->SetTextColor(0, 0, 0);
+        }
+
+        // Ligne de séparation avant le total
+        $pdf->SetDrawColor(16, 185, 129);
+        $pdf->SetLineWidth(0.3);
+        $pdf->Line(110, $pdf->GetY(), 190, $pdf->GetY());
+        $pdf->Ln(2);
+
+        // Total
+        $pdf->SetFont($font, 'B', 12);
+        $pdf->SetTextColor(16, 185, 129);
+        $pdf->Cell(100, 10, convertirAccents('MONTANT TOTAL:'), 0, 0, 'R');
+        $pdf->Cell(30, 10, formatMontant($montant_total), 0, 1, 'R');
+
+        $pdf->SetFont($font, '', 10);
+        $pdf->SetTextColor(0, 0, 0);
+        $pdf->Cell(100, 7, convertirAccents('Montant paye:'), 0, 0, 'R');
+        $pdf->SetFont($font, 'B', 10);
+        $pdf->Cell(30, 7, formatMontant($montant_total), 0, 1, 'R');
+
+        $pdf->SetFont($font, '', 10);
+        $pdf->Cell(100, 7, convertirAccents('Reste a payer:'), 0, 0, 'R');
+        $pdf->Cell(30, 7, formatMontant(0), 0, 1, 'R');
+        $pdf->Ln(10);
+
+        // ========== INFORMATIONS SUPPLÉMENTAIRES ==========
+        $pdf->SetFont($font, 'B', 12);
+        $pdf->SetTextColor(31, 41, 55);
+        $pdf->SetFillColor(240, 253, 244);
+        $pdf->Cell(0, 8, convertirAccents('INFORMATIONS SUPPLEMENTAIRES'), 0, 1, 'L', true);
+        $pdf->Ln(2);
+
+        $pdf->SetFont($font, '', 9);
+        $pdf->SetTextColor(0, 0, 0);
+
+        $pdf->Cell(60, 6, convertirAccents("Nombre d'articles:"), 0, 0);
+        $pdf->Cell(0, 6, count($details), 0, 1);
+
+        $pdf->Cell(60, 6, convertirAccents('Quantite totale:'), 0, 0);
+        $pdf->Cell(0, 6, array_sum(array_column($details, 'quantite')), 0, 1);
+
+        $pdf->Cell(60, 6, convertirAccents('Date limite de retour:'), 0, 0);
+        $pdf->Cell(0, 6, date('d/m/Y', strtotime('+30 days', strtotime($commande['date_commande']))), 0, 1);
+
+        $pdf->Cell(60, 6, convertirAccents('Delai de livraison:'), 0, 0);
+        $pdf->Cell(0, 6, '24-48h pour Kinshasa, 3-5 jours province', 0, 1);
+        $pdf->Ln(8);
+
+        // ========== INFORMATIONS SOCIÉTÉ ==========
+        $pdf->SetFont($font, 'B', 10);
+        $pdf->SetTextColor(16, 185, 129);
+        $pdf->Cell(0, 6, 'NAGEX PHARMA SARL', 0, 1, 'C');
+
+        $pdf->SetFont($font, '', 9);
+        $pdf->SetTextColor(75, 85, 99);
+        $pdf->Cell(0, 5, convertirAccents('Votre sante, notre priorite'), 0, 1, 'C');
+
+        $pdf->SetFont($font, '', 8);
+        $pdf->Cell(0, 4, '☎ +243 81 234 5678 | ✉ contact@nagexpharma.cd', 0, 1, 'C');
+        $pdf->Cell(0, 4, convertirAccents('📍 Kinshasa, Republique Democratique du Congo'), 0, 1, 'C');
+        $pdf->Ln(5);
+
+        // ========== PIED DE PAGE ==========
+        $pdf->SetY(-40);
+        $pdf->SetFont($font, 'I', 8);
+        $pdf->SetTextColor(107, 114, 128);
+
+        // Ligne de séparation
+        $pdf->SetDrawColor(16, 185, 129);
+        $pdf->SetLineWidth(0.2);
+        $pdf->Line(10, $pdf->GetY(), 200, $pdf->GetY());
+        $pdf->Ln(5);
+
+        $pdf->Cell(0, 4, convertirAccents('Merci pour votre confiance ! Nous sommes heureux de vous servir.'), 0, 1, 'C');
+        $pdf->Cell(0, 4, convertirAccents("Ce document est une copie numerique du recu original et a valeur de justificatif d'achat."), 0, 1, 'C');
+        $pdf->Ln(3);
+
+        // Signature
+        $pdf->Cell(0, 4, '___________________________________________', 0, 1, 'C');
+        $pdf->Cell(0, 4, convertirAccents('Signature et cachet de l\'etablissement'), 0, 1, 'C');
+        $pdf->Ln(2);
+
+        // Informations techniques
+        $pdf->SetFont($font, '', 7);
+        $pdf->SetTextColor(156, 163, 175);
+        $pdf->Cell(0, 3, convertirAccents('Document genere electroniquement le ') . date('d/m/Y a H:i:s'), 0, 1, 'C');
+        $pdf->Cell(0, 3, 'ID de transaction: NXP-' . $commande_id . '-' . date('YmdHis'), 0, 1, 'C');
+
+        // Retourner le PDF en tant que chaîne
+        return $pdf->Output('S'); // 'S' pour retourner comme chaîne
+
+    } catch (Exception $e) {
+        error_log("Erreur generation PDF commande $commande_id: " . $e->getMessage());
+        throw new Exception("Impossible de generer le PDF: " . $e->getMessage());
+    }
+}
+
+/**
+ * Échapper les données pour l'affichage HTML
+ */
+function e(string $string): string
+{
+    return htmlspecialchars($string, ENT_QUOTES, 'UTF-8');
+}
+
+/**
+ * Calcule le prix avec promotion
+ */
+function calculerPixPromotion(float $prix_original, array $promotion): float
+{
+    if ($promotion['type_promotion'] === 'pourcentage') {
+        return $prix_original * (1 - $promotion['valeur'] / 100);
+    } else {
+        return max(0, $prix_original - $promotion['valeur']);
+    }
+}
 
 /**
  * Récupère les statistiques du dashboard client
@@ -81,35 +525,351 @@ function getDashboardStats(PDO $pdo, int $client_id): array
     return $stats;
 }
 
-function formatMontant($montant, string $devise = 'CDF'): string
+/**
+ * Génère le HTML des détails du produit pour le modal
+ */
+function genererHTMLDetailsProduit(PDO $pdo, int $produit_id, int $client_id): string
 {
-    // Convertir en float
-    $montant_float = floatval($montant);
+    try {
+        // Récupérer les détails du produit
+        $stmt = $pdo->prepare("
+            SELECT 
+                p.*,
+                c.nom as categorie_nom,
+                pv.prix_fc,
+                pv.prix_usd,
+                pr.type_promotion,
+                pr.valeur as promo_valeur,
+                COALESCE(SUM(l.quantite_actuelle), 0) as stock_total,
+                (SELECT COUNT(*) FROM favoris f WHERE f.produit_id = p.id AND f.client_id = :client_id) as est_favori,
+                CASE 
+                    WHEN pr.valeur IS NOT NULL THEN
+                        CASE 
+                            WHEN pr.type_promotion = 'pourcentage' 
+                            THEN pv.prix_fc * (1 - pr.valeur/100)
+                            ELSE pv.prix_fc - pr.valeur
+                        END
+                    ELSE pv.prix_fc
+                END as prix_final
+            FROM produits p
+            LEFT JOIN categories c ON p.categorie_id = c.id
+            LEFT JOIN prix_vente pv ON p.id = pv.produit_id AND pv.date_fin IS NULL
+            LEFT JOIN promotions pr ON p.id = pr.produit_id 
+                AND (pr.date_fin IS NULL OR pr.date_fin >= CURDATE())
+                AND pr.date_debut <= CURDATE()
+            LEFT JOIN lots l ON p.id = l.produit_id 
+                AND l.statut = 'en_stock'
+                AND l.date_expiration > CURDATE()
+            WHERE p.id = :produit_id AND p.statut = 'actif'
+            GROUP BY p.id
+        ");
 
-    if ($devise === 'USD') {
-        return '$' . number_format($montant_float, 2, '.', ',');
+        $stmt->execute([
+            ':produit_id' => $produit_id,
+            ':client_id' => $client_id
+        ]);
+
+        $produit = $stmt->fetch();
+
+        if (!$produit) {
+            return '<div class="p-8 text-center"><p class="text-red-600">Produit non trouvé</p></div>';
+        }
+
+        ob_start();
+        ?>
+        <!-- Close Button -->
+        <button onclick="fermerModalProduit()"
+            class="absolute top-4 right-4 z-20 w-10 h-10 bg-white/90 backdrop-blur-sm rounded-full flex items-center justify-center shadow-lg hover:shadow-xl hover:scale-110 transition-all text-gray-600 hover:text-rose-600">
+            <i class="fas fa-times text-xl"></i>
+        </button>
+
+        <!-- Product Header -->
+        <div class="relative h-48 bg-gradient-to-r from-blue-500/10 to-cyan-500/10 overflow-hidden">
+            <!-- Badges -->
+            <div class="absolute top-4 left-4 flex flex-col space-y-2 z-10">
+                <?php if (!empty($produit['promo_valeur']) && $produit['promo_valeur'] > 0): ?>
+                    <span
+                        class="inline-flex items-center px-3 py-1.5 bg-gradient-to-r from-rose-500 to-pink-600 text-white text-sm font-bold rounded-full shadow-lg animate-pulse">
+                        <i class="fas fa-bolt mr-1.5"></i>
+                        PROMO
+                        -<?php echo $produit['type_promotion'] == 'pourcentage' ? $produit['promo_valeur'] . '%' : formatMontant($produit['promo_valeur']); ?>
+                    </span>
+                <?php endif; ?>
+
+                <span
+                    class="inline-flex items-center px-3 py-1.5 bg-emerald-100 text-emerald-800 text-sm font-semibold rounded-full shadow">
+                    <i class="fas fa-tag mr-1.5"></i>
+                    <?php echo e($produit['categorie_nom']); ?>
+                </span>
+            </div>
+
+            <!-- Stock Status -->
+            <div class="absolute top-4 right-4 z-10">
+                <?php if ($produit['stock_total'] > 10): ?>
+                    <span
+                        class="inline-flex items-center px-3 py-1.5 bg-emerald-100 text-emerald-800 text-sm font-bold rounded-full shadow-lg">
+                        <i class="fas fa-check-circle mr-1.5"></i>
+                        En stock
+                    </span>
+                <?php elseif ($produit['stock_total'] > 0): ?>
+                    <span
+                        class="inline-flex items-center px-3 py-1.5 bg-amber-100 text-amber-800 text-sm font-bold rounded-full shadow-lg">
+                        <i class="fas fa-exclamation-circle mr-1.5"></i>
+                        Stock limité
+                    </span>
+                <?php else: ?>
+                    <span
+                        class="inline-flex items-center px-3 py-1.5 bg-rose-100 text-rose-800 text-sm font-bold rounded-full shadow-lg">
+                        <i class="fas fa-times-circle mr-1.5"></i>
+                        Rupture
+                    </span>
+                <?php endif; ?>
+            </div>
+
+            <!-- Product Image -->
+            <div class="h-full flex items-center justify-center">
+                <div class="text-center">
+                    <div
+                        class="w-24 h-24 mx-auto mb-4 bg-gradient-to-br from-blue-500 to-cyan-600 rounded-2xl flex items-center justify-center shadow-2xl">
+                        <i class="fas fa-capsules text-white text-4xl"></i>
+                    </div>
+                    <p class="text-sm text-blue-600 font-semibold">NAGEX Pharma</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scrollable Content -->
+        <div class="p-6 overflow-y-auto max-h-[calc(90vh-12rem)]">
+            <!-- Product Title -->
+            <h1 class="text-2xl font-bold text-gray-900 mb-2"><?php echo e($produit['nom']); ?></h1>
+
+            <!-- Product Code -->
+            <div class="flex items-center text-gray-600 mb-4">
+                <i class="fas fa-barcode mr-2 text-gray-400"></i>
+                <span class="font-mono text-sm"><?php echo e($produit['code_barre'] ?? 'N/A'); ?></span>
+            </div>
+
+            <!-- Price Section -->
+            <div class="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-2xl p-5 mb-6 border border-emerald-200">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-600 text-sm mb-1">Prix</p>
+                        <div class="flex items-baseline space-x-3">
+                            <span class="text-3xl font-bold text-emerald-600">
+                                <?php echo formatMontant($produit['prix_final']); ?>
+                            </span>
+
+                            <?php if (!empty($produit['promo_valeur']) && $produit['promo_valeur'] > 0): ?>
+                                <span class="text-lg text-gray-400 line-through">
+                                    <?php echo formatMontant($produit['prix_fc']); ?>
+                                </span>
+                                <span class="text-sm text-rose-600 font-semibold">
+                                    <i class="fas fa-save mr-1"></i>
+                                    Économisez <?php echo formatMontant($produit['prix_fc'] - $produit['prix_final']); ?>
+                                </span>
+                            <?php endif; ?>
+                        </div>
+
+                        <?php if (!empty($produit['prix_usd']) && $produit['prix_usd'] > 0): ?>
+                            <p class="text-gray-600 text-sm mt-2">
+                                <i class="fas fa-dollar-sign mr-1"></i>
+                                ≈ $<?php echo number_format(floatval($produit['prix_usd'] ?? 0), 2); ?> USD
+                            </p>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- Stock Info -->
+                    <div class="text-right">
+                        <p class="text-sm text-gray-600 mb-1">Disponibilité</p>
+                        <p
+                            class="text-lg font-bold <?php echo $produit['stock_total'] > 0 ? 'text-emerald-600' : 'text-rose-600'; ?>">
+                            <?php echo $produit['stock_total']; ?> unités
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Description -->
+            <div class="mb-6">
+                <h3 class="text-lg font-bold text-gray-900 mb-3 flex items-center">
+                    <i class="fas fa-file-alt text-blue-500 mr-2"></i>
+                    Description
+                </h3>
+                <div class="bg-gray-50 rounded-xl p-4">
+                    <p class="text-gray-700 leading-relaxed">
+                        <?php echo nl2br(e($produit['description'] ?? 'Aucune description disponible.')); ?>
+                    </p>
+                </div>
+            </div>
+
+            <!-- Specifications Grid -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <!-- Form and Dosage -->
+                <div class="bg-white rounded-xl p-4 border border-gray-200">
+                    <h4 class="font-bold text-gray-900 mb-2 flex items-center">
+                        <i class="fas fa-pills text-purple-500 mr-2"></i>
+                        Caractéristiques
+                    </h4>
+                    <div class="space-y-2">
+                        <?php if (!empty($produit['forme']) && $produit['forme'] !== ''): ?>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Forme:</span>
+                                <span class="font-semibold"><?php echo e($produit['forme']); ?></span>
+                            </div>
+                        <?php endif; ?>
+
+                        <?php if (!empty($produit['dosage']) && $produit['dosage'] !== ''): ?>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Dosage:</span>
+                                <span class="font-semibold"><?php echo e($produit['dosage']); ?></span>
+                            </div>
+                        <?php endif; ?>
+
+                        <?php if (!empty($produit['fabricant']) && $produit['fabricant'] !== ''): ?>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Fabricant:</span>
+                                <span class="font-semibold"><?php echo e($produit['fabricant']); ?></span>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+
+                <!-- Storage and Expiry -->
+                <div class="bg-white rounded-xl p-4 border border-gray-200">
+                    <h4 class="font-bold text-gray-900 mb-2 flex items-center">
+                        <i class="fas fa-box text-amber-500 mr-2"></i>
+                        Conservation
+                    </h4>
+                    <div class="space-y-2">
+                        <?php if (!empty($produit['conditions_conservation']) && $produit['conditions_conservation'] !== ''): ?>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">Conditions:</span>
+                                <span class="font-semibold"><?php echo e($produit['conditions_conservation']); ?></span>
+                            </div>
+                        <?php endif; ?>
+
+                        <div class="flex justify-between">
+                            <span class="text-gray-600">Statut:</span>
+                            <span class="font-semibold text-emerald-600"><?php echo e($produit['statut'] ?? 'Actif'); ?></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Ingredients -->
+            <?php
+            $ingredients = [];
+            try {
+                $stmtIngredients = $pdo->prepare("
+                    SELECT i.nom, i.description 
+                    FROM ingredients i
+                    JOIN produit_ingredients pi ON i.id = pi.ingredient_id
+                    WHERE pi.produit_id = :produit_id
+                    LIMIT 3
+                ");
+                $stmtIngredients->execute([':produit_id' => $produit_id]);
+                $ingredients = $stmtIngredients->fetchAll();
+            } catch (Exception $e) {
+                // Ignorer l'erreur des ingrédients, ce n'est pas critique
+                error_log("Note: Pas d'ingrédients pour produit $produit_id - " . $e->getMessage());
+            }
+            ?>
+
+            <?php if (!empty($ingredients)): ?>
+                <div class="mb-6">
+                    <h3 class="text-lg font-bold text-gray-900 mb-3 flex items-center">
+                        <i class="fas fa-flask text-emerald-500 mr-2"></i>
+                        Ingrédients principaux
+                    </h3>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <?php foreach ($ingredients as $ingredient): ?>
+                            <div class="bg-emerald-50 rounded-lg p-3">
+                                <h4 class="font-bold text-emerald-800 text-sm"><?php echo e($ingredient['nom'] ?? ''); ?></h4>
+                                <?php if (!empty($ingredient['description'])): ?>
+                                    <p class="text-xs text-gray-600 mt-1"><?php echo e(substr($ingredient['description'], 0, 60)); ?>...</p>
+                                <?php endif; ?>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            <?php endif; ?>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="border-t border-gray-200 p-6 bg-white">
+            <div class="flex flex-col sm:flex-row items-center justify-between space-y-4 sm:space-y-0">
+                <!-- Left Actions -->
+                <div class="flex items-center space-x-4">
+                    <!-- Favorites -->
+                    <form method="POST" action="" class="inline"
+                        onsubmit="event.preventDefault(); toggleFavoriModal(<?php echo $produit['id']; ?>, <?php echo $produit['est_favori'] ? 'true' : 'false'; ?>);">
+                        <button type="submit"
+                            class="inline-flex items-center px-4 py-2.5 bg-gradient-to-r from-rose-50 to-pink-50 border border-rose-200 text-rose-700 font-semibold rounded-xl hover:from-rose-100 hover:to-pink-100 hover:border-rose-300 transition-all group">
+                            <i
+                                class="fas fa-heart <?php echo $produit['est_favori'] ? 'fas text-rose-500' : 'far'; ?> mr-2"></i>
+                            <?php echo $produit['est_favori'] ? 'Retirer' : 'Favoris'; ?>
+                        </button>
+                    </form>
+
+                    <!-- Share -->
+                    <button onclick="partagerProduit(<?php echo $produit['id']; ?>)"
+                        class="inline-flex items-center px-4 py-2.5 bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-200 text-blue-700 font-semibold rounded-xl hover:from-blue-100 hover:to-cyan-100 hover:border-blue-300 transition-all group">
+                        <i class="fas fa-share-alt mr-2"></i>
+                        Partager
+                    </button>
+                </div>
+
+                <!-- Add to Cart -->
+                <div class="flex items-center space-x-4">
+                    <!-- Quantity Selector -->
+                    <div class="flex items-center bg-gray-100 rounded-xl" id="quantity-selector-<?php echo $produit['id']; ?>">
+                        <button onclick="modifierQuantiteModal(<?php echo $produit['id']; ?>, -1)"
+                            class="w-10 h-10 flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-gray-200 rounded-l-xl transition-colors">
+                            <i class="fas fa-minus"></i>
+                        </button>
+                        <div class="px-4 py-2">
+                            <span id="quantite-display-<?php echo $produit['id']; ?>" class="font-bold text-gray-900">1</span>
+                        </div>
+                        <button onclick="modifierQuantiteModal(<?php echo $produit['id']; ?>, 1)"
+                            class="w-10 h-10 flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-gray-200 rounded-r-xl transition-colors">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+
+                    <!-- Add to Cart Button -->
+                    <form method="POST" action="" onsubmit="return ajouterAuPanierModal(<?php echo $produit['id']; ?>);">
+                        <input type="hidden" name="action" value="ajouter_panier">
+                        <input type="hidden" name="produit_id" value="<?php echo $produit['id']; ?>">
+                        <input type="hidden" name="quantite" value="1" id="quantite-input-<?php echo $produit['id']; ?>">
+                        <button type="submit"
+                            class="inline-flex items-center px-6 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold rounded-xl hover:from-emerald-600 hover:to-teal-700 shadow-lg hover:shadow-xl transition-all group"
+                            <?php echo $produit['stock_total'] <= 0 ? 'disabled' : ''; ?>>
+                            <i class="fas fa-cart-plus mr-3"></i>
+                            Ajouter au panier
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <?php
+
+        return ob_get_clean();
+
+    } catch (Exception $e) {
+        error_log("Erreur génération détails produit ID $produit_id: " . $e->getMessage());
+        // Retourner uniquement le message d'erreur sans le HTML du modal
+        return '<div class="p-8 text-center"><p class="text-red-600">Erreur technique: ' . htmlspecialchars($e->getMessage()) . '</p></div>';
     }
-    return number_format($montant_float, 0, '.', ',') . ' FC';
 }
 
-/**
- * Échapper les données pour l'affichage HTML
- */
-function e(string $string): string
-{
-    return htmlspecialchars($string, ENT_QUOTES, 'UTF-8');
-}
+// ============================================
+// ENDPOINT AJAX POUR DÉTAILS PRODUIT
+// ============================================
 
-/**
- * Calcule le prix avec promotion
- */
-function calculerPixPromotion(float $prix_original, array $promotion): float
-{
-    if ($promotion['type_promotion'] === 'pourcentage') {
-        return $prix_original * (1 - $promotion['valeur'] / 100);
-    } else {
-        return max(0, $prix_original - $promotion['valeur']);
-    }
+if (isset($_GET['ajax']) && $_GET['ajax'] == 'details_produit' && isset($_GET['id'])) {
+    $produit_id = intval($_GET['id']);
+    echo genererHTMLDetailsProduit($pdo, $produit_id, $user_id);
+    exit();
 }
 
 // ============================================
@@ -376,11 +1136,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 break;
 
+            case 'telecharger_recu':
+                try {
+                    $commande_id = intval($_POST['commande_id'] ?? 0);
+
+                    // Vérifier si la commande existe et appartient au client
+                    $stmt = $pdo->prepare("SELECT id, numero_commande FROM commandes WHERE id = :id AND client_id = :client_id");
+                    $stmt->execute([':id' => $commande_id, ':client_id' => $user_id]);
+                    $commande = $stmt->fetch();
+
+                    if (!$commande) {
+                        throw new Exception("Commande non trouvée ou non autorisée");
+                    }
+
+                    // Générer le PDF avec FPDF
+                    $pdf_content = genererPDFRecu($pdo, $commande_id, $user_id);
+
+                    if (empty($pdf_content)) {
+                        throw new Exception("Le PDF généré est vide");
+                    }
+
+                    // Envoyer les headers pour le téléchargement du PDF
+                    header('Content-Type: application/pdf');
+                    header('Content-Disposition: attachment; filename="Recu_NAGEX_' . $commande['numero_commande'] . '_' . date('Ymd_His') . '.pdf"');
+                    header('Content-Length: ' . strlen($pdf_content));
+                    header('Cache-Control: private, max-age=0, must-revalidate');
+                    header('Pragma: public');
+                    header('Expires: 0');
+
+                    echo $pdf_content;
+                    exit();
+
+                } catch (Exception $e) {
+                    // Afficher une alerte JavaScript avec l'erreur
+                    echo '<script>
+            alert("❌ Erreur lors du téléchargement: ' . addslashes($e->getMessage()) . '");
+            window.history.back();
+        </script>';
+                    exit();
+                }
+                break;
+
+
+
             // METTRE À JOUR LE PROFIL
             case 'mettre_a_jour_profil':
                 try {
                     $stmt = $pdo->prepare("
-                        UPDATE users SET
+                        UPDATE utilisateurs SET
                             nom = :nom,
                             email = :email,
                             telephone = :telephone,
@@ -424,11 +1227,11 @@ $produits_favoris = [];
 $commandes_client = [];
 $panier_details = [];
 $user_info = [];
-$categories = []; // Initialiser la variable categories
+$categories = [];
 
 // Informations du client
 try {
-    $stmt = $pdo->prepare("SELECT nom, email, telephone, adresse, created_at as date_inscription FROM users WHERE id = :id");
+    $stmt = $pdo->prepare("SELECT nom, email, telephone, adresse, created_at as date_inscription FROM utilisateurs WHERE id = :id");
     $stmt->execute([':id' => $user_id]);
     $user_info = $stmt->fetch();
 } catch (Exception $e) {
@@ -678,6 +1481,8 @@ try {
     error_log("Erreur chargement dernières commandes: " . $e->getMessage());
 }
 ?>
+
+
 
 <!DOCTYPE html>
 <html lang="fr">
@@ -1069,6 +1874,48 @@ try {
                         <div class="absolute -right-2 top-1/2 -translate-y-1/2 w-2 h-8 bg-emerald-500 rounded-l-lg"></div>
                     <?php endif; ?>
                 </a>
+                
+                <!-- Section Sécurité -->
+                <div class="section-title">
+                    <div
+                        class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-emerald-600 flex items-center">
+                        <div class="w-8 h-px bg-emerald-200 mr-3"></div>
+                        <i class="fas fa-shield-alt text-emerald-500 mr-2"></i>
+                        <span>Sécurité</span>
+                        <div class="flex-1 h-px bg-emerald-200 ml-3"></div>
+                    </div>
+                </div>
+
+                <!-- Déconnexion -->
+                <a href="../utilisateurs/logout.php"
+                    class="menu-item group relative flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-300 ease-out text-gray-600 hover:bg-gradient-to-r hover:from-red-50 hover:to-rose-50 hover:text-red-700 hover:shadow-md">
+                    <div class="relative">
+                        <i class="fas fa-sign-out-alt w-5 h-5 mr-3 text-gray-400 group-hover:text-red-500"></i>
+                    </div>
+                    <span class="flex-1">Déconnexion</span>
+                    <i
+                        class="fas fa-chevron-right text-xs text-gray-400 group-hover:text-red-400 group-hover:translate-x-1 transition-transform"></i>
+                </a>
+
+                <!-- Ligne de séparation -->
+                <div class="px-4 py-2">
+                    <div class="border-t border-gray-200"></div>
+                </div>
+
+                <!-- Informations de session -->
+                <div class="px-4 py-3">
+                    <div class="text-xs text-gray-500">
+                        <div class="flex items-center mb-1">
+                            <i class="fas fa-user-circle mr-2 text-gray-400"></i>
+                            <span
+                                class="font-medium text-white"><?php echo e($_SESSION['user_nom'] ?? 'Client'); ?></span>
+                        </div>
+                        <div class="flex items-center">
+                            <i class="fas fa-clock mr-2 text-gray-400"></i>
+                            <span class="text-white">Connecté depuis <?php echo date('H:i'); ?></span>
+                        </div>
+                    </div>
+                </div>
             </nav>
 
 
@@ -1754,7 +2601,7 @@ try {
                                         <!-- Actions -->
                                         <div class="flex space-x-3">
                                             <!-- Bouton Détails -->
-                                            <button onclick="voirDetailsProduit(<?php echo $produit['id']; ?>)"
+                                            <button onclick="afficherDetailsProduit(<?php echo $produit['id']; ?>)"
                                                 class="flex-1 inline-flex items-center justify-center px-4 py-2.5 bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-200 text-blue-700 font-semibold rounded-xl hover:bg-gradient-to-r hover:from-blue-100 hover:to-cyan-100 hover:border-blue-300 hover:text-blue-800 transition-all group">
                                                 <i class="fas fa-eye mr-2 group-hover:scale-110 transition-transform"></i>
                                                 Détails
@@ -1990,7 +2837,7 @@ try {
                                             <?php if ($produit['prix_usd']): ?>
                                                 <p class="text-xs text-gray-500 flex items-center">
                                                     <i class="fas fa-dollar-sign mr-1.5"></i>
-                                                  <?php echo number_format(floatval($produit['prix_usd'] ?? 0), 2); ?>
+                                                    <?php echo number_format(floatval($produit['prix_usd'] ?? 0), 2); ?>
                                                 </p>
                                             <?php endif; ?>
                                         </div>
@@ -2853,20 +3700,22 @@ try {
 
                                         <!-- Actions -->
                                         <div class="flex flex-wrap gap-3">
-                                            <!-- Détails -->
-                                            <button onclick="voirDetailsCommande(<?php echo $commande['id']; ?>)"
-                                                class="inline-flex items-center px-5 py-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 text-white font-semibold rounded-xl hover:from-blue-700 hover:to-cyan-700 shadow-md hover:shadow-lg transition-all group">
-                                                <i class="fas fa-eye mr-2 group-hover:scale-110 transition-transform"></i>
-                                                Voir les détails
-                                            </button>
 
-                                            <!-- Réimpression -->
+
+                                            <!-- Télécharger le reçu -->
                                             <?php if ($commande['statut'] == 'paye'): ?>
-                                                <button onclick="imprimerReçu(<?php echo $commande['id']; ?>)"
-                                                    class="inline-flex items-center px-5 py-2.5 bg-gradient-to-r from-gray-600 to-gray-700 text-white font-semibold rounded-xl hover:from-gray-700 hover:to-gray-800 shadow-md hover:shadow-lg transition-all group">
-                                                    <i class="fas fa-print mr-2 group-hover:scale-110 transition-transform"></i>
-                                                    Imprimer le reçu
-                                                </button>
+                                                <form method="POST" action="" class="inline" onsubmit="showReceiptLoader(this)">
+                                                    <input type="hidden" name="action" value="telecharger_recu">
+                                                    <input type="hidden" name="commande_id" value="<?php echo $commande['id']; ?>">
+                                                    <button type="submit"
+                                                        class="inline-flex items-center px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-semibold rounded-xl hover:from-emerald-700 hover:to-teal-700 shadow-md hover:shadow-lg transition-all group">
+                                                        <i class="fas fa-file-pdf mr-2 group-hover:scale-110 transition-transform"></i>
+                                                        <span class="receipt-text">Télécharger le reçu</span>
+                                                        <span class="receipt-loader hidden ml-2">
+                                                            <i class="fas fa-spinner fa-spin"></i>
+                                                        </span>
+                                                    </button>
+                                                </form>
                                             <?php endif; ?>
 
                                             <!-- Suivi -->
@@ -2891,11 +3740,11 @@ try {
                                             </form>
 
                                             <!-- Support -->
-                                            <button onclick="contacterSupport(<?php echo $commande['id']; ?>)"
+                                            <a href="https://wa.me/243974521216?text=Bonjour, j'aimerais me renseigner sur: <?php echo e($commande['numero_commande']); ?>"
                                                 class="inline-flex items-center px-5 py-2.5 bg-gradient-to-r from-amber-600 to-orange-600 text-white font-semibold rounded-xl hover:from-amber-700 hover:to-orange-700 shadow-md hover:shadow-lg transition-all group">
                                                 <i class="fas fa-headset mr-2 group-hover:scale-110 transition-transform"></i>
                                                 Contacter le support
-                                            </button>
+                                            </a>
                                         </div>
                                     </div>
                                 </div>
@@ -3577,52 +4426,214 @@ try {
         </div>
     </div>
 
-    <!-- Modals -->
-    <div id="modalProduit" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50">
-        <div class="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white">
-            <div class="mt-3">
-                <div id="modalContent"></div>
-                <div class="flex justify-end mt-4">
-                    <button onclick="fermerModalProduit()"
-                        class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400">
-                        Fermer
-                    </button>
-                </div>
+
+    <!-- Modal pour les détails du produit - Version simplifiée -->
+    <div id="modalDetailsProduit" class="fixed inset-0 z-50 hidden">
+        <!-- Overlay -->
+        <div class="fixed inset-0 bg-black bg-opacity-50" onclick="fermerModalProduit()"></div>
+
+        <!-- Modal Container -->
+        <div class="relative h-screen w-screen flex items-center justify-center p-4">
+            <!-- Modal Content -->
+            <div id="modalContent"
+                class="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-auto">
+                <!-- Le contenu sera chargé ici dynamiquement -->
             </div>
         </div>
     </div>
 
-    <!-- Scripts JavaScript -->
     <script>
-        // Fonction pour voir les détails d'un produit
-        function voirDetailsProduit(produitId) {
+        // Fonction pour afficher les détails du produit - VERSION CORRIGÉE
+        function afficherDetailsProduit(produitId) {
+            console.log('Afficher détails produit ID:', produitId);
+
+            const modal = document.getElementById('modalDetailsProduit');
+            const modalContent = document.getElementById('modalContent');
+
+            if (!modal || !modalContent) {
+                console.error('Modal non trouvé');
+                alert('Erreur: Modal non trouvé');
+                return;
+            }
+
+            // Afficher le modal
+            modal.classList.remove('hidden');
+
+            // Ajouter un overlay de chargement
+            modalContent.innerHTML = `
+        <div class="p-8 text-center">
+            <div class="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
+            <p class="text-gray-600">Chargement des détails...</p>
+        </div>
+    `;
+
             // Charger les détails via AJAX
-            fetch(`produit_details.php?id=${produitId}`)
-                .then(response => response.text())
+            fetch(`?ajax=details_produit&id=${produitId}`)
+                .then(response => {
+                    console.log('Réponse reçue, status:', response.status);
+                    if (!response.ok) {
+                        throw new Error('Erreur HTTP: ' + response.status);
+                    }
+                    return response.text();
+                })
                 .then(html => {
-                    document.getElementById('modalContent').innerHTML = html;
-                    document.getElementById('modalProduit').classList.remove('hidden');
+                    console.log('HTML reçu, longueur:', html.length);
+
+                    // Vérifier si le HTML contient des erreurs
+                    if (html.includes('Erreur technique') || html.includes('Produit non trouvé')) {
+                        throw new Error('Erreur dans le contenu HTML');
+                    }
+
+                    // Vider le contenu avant d'insérer le nouveau
+                    modalContent.innerHTML = '';
+
+                    // Insérer le HTML
+                    modalContent.innerHTML = html;
+
+                    // Réinitialiser la quantité à 1
+                    const quantiteDisplay = document.getElementById(`quantite-display-${produitId}`);
+                    const quantiteInput = document.getElementById(`quantite-input-${produitId}`);
+                    if (quantiteDisplay) quantiteDisplay.textContent = '1';
+                    if (quantiteInput) quantiteInput.value = '1';
+
+                    console.log('Modal chargé avec succès');
                 })
                 .catch(error => {
-                    console.error('Erreur:', error);
-                    alert('Erreur lors du chargement des détails');
+                    console.error('Erreur dans fetch:', error);
+                    // Ne pas remplacer tout le contenu, juste ajouter un message d'erreur
+                    const errorDiv = document.createElement('div');
+                    errorDiv.className = 'bg-red-50 border-l-4 border-red-500 p-4 mt-4';
+                    errorDiv.innerHTML = `
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <i class="fas fa-exclamation-triangle text-red-400"></i>
+                    </div>
+                    <div class="ml-3">
+                        <p class="text-sm text-red-700">
+                            Erreur: ${error.message}
+                        </p>
+                    </div>
+                </div>
+            `;
+                    modalContent.appendChild(errorDiv);
                 });
         }
 
-        // Fonction pour voir les détails d'une commande
-        function voirDetailsCommande(commandeId) {
-            window.open(`commande_details.php?id=${commandeId}`, '_blank');
+        // Fonction pour fermer le modal
+        function fermerModalProduit() {
+            const modal = document.getElementById('modalDetailsProduit');
+            if (modal) {
+                modal.classList.add('hidden');
+                // Vider le contenu après un court délai
+                setTimeout(() => {
+                    const modalContent = document.getElementById('modalContent');
+                    if (modalContent) {
+                        modalContent.innerHTML = '';
+                    }
+                }, 300);
+            }
         }
 
-        // Fonction pour imprimer un reçu
-        function imprimerReçu(commandeId) {
-            window.open(`imprimer_recu.php?id=${commandeId}`, '_blank');
+        // Fonction pour modifier la quantité dans le modal
+        function modifierQuantiteModal(produitId, delta) {
+            const quantiteDisplay = document.getElementById(`quantite-display-${produitId}`);
+            const quantiteInput = document.getElementById(`quantite-input-${produitId}`);
+
+            if (!quantiteDisplay || !quantiteInput) {
+                console.error('Éléments quantité non trouvés pour produit:', produitId);
+                return;
+            }
+
+            let quantite = parseInt(quantiteDisplay.textContent) || 1;
+            quantite += delta;
+
+            // Limiter entre 1 et 99
+            if (quantite < 1) quantite = 1;
+            if (quantite > 99) quantite = 99;
+
+            quantiteDisplay.textContent = quantite;
+            quantiteInput.value = quantite;
         }
 
-        // Fonction pour ajouter/retirer des favoris
-        function toggleFavori(produitId, estFavori) {
+        // Fonction pour montrer l'indicateur de chargement
+        function showReceiptLoader(form) {
+            const button = form.querySelector('button');
+            const text = button.querySelector('.receipt-text');
+            const loader = button.querySelector('.receipt-loader');
+
+            if (text && loader) {
+                text.classList.add('hidden');
+                loader.classList.remove('hidden');
+                button.disabled = true;
+            }
+
+            // Réactiver le bouton après 5 secondes au cas où
+            setTimeout(() => {
+                if (text && loader) {
+                    text.classList.remove('hidden');
+                    loader.classList.add('hidden');
+                    button.disabled = false;
+                }
+            }, 5000);
+        }
+
+        // Style CSS pour l'indicateur
+        const style = document.createElement('style');
+        style.textContent = `
+    .hidden { display: none !important; }
+    .receipt-loader i { animation: spin 1s linear infinite; }
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+`;
+        document.head.appendChild(style);
+
+        // Fonction pour ajouter au panier depuis le modal
+        function ajouterAuPanierModal(produitId) {
+            const quantiteInput = document.getElementById(`quantite-input-${produitId}`);
+            const quantite = quantiteInput ? parseInt(quantiteInput.value) || 1 : 1;
+
+            console.log('Ajouter au panier:', produitId, 'quantité:', quantite);
+
+            // Créer un formulaire pour soumettre la requête
             const formData = new FormData();
-            formData.append('action', estFavori ? 'retirer_favori' : 'ajouter_favori');
+            formData.append('action', 'ajouter_panier');
+            formData.append('produit_id', produitId);
+            formData.append('quantite', quantite);
+
+            fetch('', {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => {
+                    console.log('Produit ajouté au panier');
+                    // Fermer le modal
+                    fermerModalProduit();
+
+                    // Afficher un message de confirmation
+                    showToast('✅ Produit ajouté au panier!', 'success');
+
+                    // Rafraîchir la page pour mettre à jour le compteur du panier
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1000);
+                })
+                .catch(error => {
+                    console.error('Erreur ajout panier:', error);
+                    showToast('❌ Erreur lors de l\'ajout au panier', 'error');
+                });
+
+            return false; // Empêcher la soumission normale du formulaire
+        }
+
+        // Fonction pour gérer les favoris dans le modal
+        function toggleFavoriModal(produitId, estFavori) {
+            const action = estFavori ? 'retirer_favori' : 'ajouter_favori';
+            console.log('Toggle favori:', produitId, 'action:', action);
+
+            const formData = new FormData();
+            formData.append('action', action);
             formData.append('produit_id', produitId);
 
             fetch('', {
@@ -3630,56 +4641,95 @@ try {
                 body: formData
             })
                 .then(response => {
-                    location.reload();
+                    const message = estFavori ? '✅ Retiré des favoris!' : '✅ Ajouté aux favoris!';
+                    showToast(message, 'success');
+                    // Rafraîchir le modal pour mettre à jour l'état
+                    afficherDetailsProduit(produitId);
                 })
                 .catch(error => {
-                    console.error('Erreur:', error);
-                    alert('Erreur lors de la mise à jour des favoris');
+                    console.error('Erreur toggle favori:', error);
+                    showToast('❌ Erreur lors de la mise à jour', 'error');
                 });
         }
 
-        // Fonction pour fermer les modals
-        function fermerModalProduit() {
-            document.getElementById('modalProduit').classList.add('hidden');
+        // Fonction pour partager un produit
+        function partagerProduit(produitId) {
+            const url = window.location.origin + window.location.pathname + '?page=catalogue&produit=' + produitId;
+            const title = document.title;
+
+            if (navigator.share) {
+                navigator.share({
+                    title: title,
+                    text: 'Découvrez ce produit sur NAGEX Pharma',
+                    url: url
+                });
+            } else {
+                // Fallback pour copier dans le presse-papier
+                navigator.clipboard.writeText(url);
+                showToast('✅ Lien copié dans le presse-papier!', 'success');
+            }
         }
 
-        // Gestion des quantités dans le panier
-        document.querySelectorAll('input[name="quantite"]').forEach(input => {
-            input.addEventListener('change', function () {
-                const form = this.closest('form');
-                const quantite = parseInt(this.value);
+        // Fonction pour afficher des notifications toast
+        function showToast(message, type = 'info') {
+            // Créer l'élément toast
+            const toast = document.createElement('div');
+            toast.className = `fixed top-4 right-4 z-[110] px-6 py-3 rounded-xl shadow-xl transform transition-all duration-300 translate-x-full ${type === 'success' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' : 'bg-rose-100 text-rose-800 border border-rose-300'}`;
+            toast.innerHTML = `
+        <div class="flex items-center">
+            <i class="fas ${type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'} mr-3"></i>
+            <span>${message}</span>
+        </div>
+    `;
 
-                if (quantite < 1) {
-                    this.value = 1;
-                } else if (quantite > 99) {
-                    this.value = 99;
-                }
-            });
-        });
+            document.body.appendChild(toast);
 
-        // Auto-dismiss les messages d'alerte après 5 secondes
-        setTimeout(function () {
-            let alerts = document.querySelectorAll('.bg-green-100, .bg-red-100');
-            alerts.forEach(function (alert) {
-                alert.style.transition = 'opacity 0.5s ease';
-                alert.style.opacity = '0';
-                setTimeout(() => alert.remove(), 500);
-            });
-        }, 5000);
+            // Animation d'entrée
+            setTimeout(() => {
+                toast.classList.remove('translate-x-full');
+                toast.classList.add('translate-x-0');
+            }, 10);
 
-        // Confirmation avant de vider le panier
-        document.querySelector('form[action*="vider_panier"]')?.addEventListener('submit', function (e) {
-            if (!confirm('Êtes-vous sûr de vouloir vider votre panier ?')) {
-                e.preventDefault();
+            // Supprimer après 3 secondes
+            setTimeout(() => {
+                toast.classList.remove('translate-x-0');
+                toast.classList.add('translate-x-full');
+                setTimeout(() => {
+                    document.body.removeChild(toast);
+                }, 300);
+            }, 3000);
+        }
+
+        // Fermer le modal avec la touche Escape
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') {
+                fermerModalProduit();
             }
         });
 
-        // Confirmation avant de passer commande
-        document.querySelector('form[action*="passer_commande"]')?.addEventListener('submit', function (e) {
-            if (!confirm('Confirmez-vous votre commande ?')) {
-                e.preventDefault();
+        // Fermer en cliquant en dehors du modal
+        document.addEventListener('DOMContentLoaded', function () {
+            const modal = document.getElementById('modalDetailsProduit');
+            if (modal) {
+                modal.addEventListener('click', function (event) {
+                    // Si on clique sur l'overlay (l'élément modal lui-même, pas son contenu)
+                    if (event.target === this) {
+                        fermerModalProduit();
+                    }
+                });
             }
         });
+
+        // Fonction de debug
+        function debugModal() {
+            console.log('=== DEBUG MODAL ===');
+            console.log('Modal:', document.getElementById('modalDetailsProduit'));
+            console.log('Modal content:', document.getElementById('modalContent'));
+            console.log('URL test:', `?ajax=details_produit&id=1`);
+
+            // Tester avec un ID de produit connu
+            afficherDetailsProduit(1);
+        }
     </script>
 </body>
 

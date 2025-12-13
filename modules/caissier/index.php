@@ -189,23 +189,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                         // Enregistrer les mouvements de stock
                         $stmt = $pdo->prepare("
-                            INSERT INTO mouvements_stock (
-                                produit_id, lot_id, type_mouvement, quantite,
-                                quantite_avant, quantite_apres, raison, created_by
-                            )
-                            SELECT 
-                                cd.produit_id,
-                                cd.lot_id,
-                                'sortie',
-                                cd.quantite,
-                                l.quantite_actuelle + cd.quantite,
-                                l.quantite_actuelle,
-                                'Vente commande #' || :commande_id,
-                                :created_by
-                            FROM commande_details cd
-                            JOIN lots l ON cd.lot_id = l.id
-                            WHERE cd.commande_id = :commande_id2
-                        ");
+    INSERT INTO mouvements_stock (
+        produit_id, lot_id, type_mouvement, quantite,
+        quantite_avant, quantite_apres, raison, created_by
+    )
+    SELECT 
+        cd.produit_id,
+        cd.lot_id,
+        'sortie',
+        cd.quantite,
+        l.quantite_actuelle + cd.quantite,
+        l.quantite_actuelle,
+        CONCAT('Vente commande #', :commande_id),
+        :created_by
+    FROM commande_details cd
+    JOIN lots l ON cd.lot_id = l.id
+    WHERE cd.commande_id = :commande_id2
+");
                         $stmt->execute([
                             ':commande_id' => intval($_POST['commande_id'] ?? 0),
                             ':created_by' => $_SESSION['user_id'],
@@ -709,7 +709,47 @@ try {
                         </a>
                     </div>
                 </div>
+                <!-- Section Sécurité -->
+                <div class="section-title">
+                    <div
+                        class="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-emerald-600 flex items-center">
+                        <div class="w-8 h-px bg-emerald-200 mr-3"></div>
+                        <i class="fas fa-shield-alt text-emerald-500 mr-2"></i>
+                        <span>Sécurité</span>
+                        <div class="flex-1 h-px bg-emerald-200 ml-3"></div>
+                    </div>
+                </div>
 
+                <!-- Déconnexion -->
+                <a href="../utilisateurs/logout.php"
+                    class="menu-item group relative flex items-center px-4 py-3 text-sm font-medium rounded-xl transition-all duration-300 ease-out text-gray-600 hover:bg-gradient-to-r hover:from-red-50 hover:to-rose-50 hover:text-red-700 hover:shadow-md">
+                    <div class="relative">
+                        <i class="fas fa-sign-out-alt w-5 h-5 mr-3 text-gray-400 group-hover:text-red-500"></i>
+                    </div>
+                    <span class="flex-1">Déconnexion</span>
+                    <i
+                        class="fas fa-chevron-right text-xs text-gray-400 group-hover:text-red-400 group-hover:translate-x-1 transition-transform"></i>
+                </a>
+
+                <!-- Ligne de séparation -->
+                <div class="px-4 py-2">
+                    <div class="border-t border-gray-200"></div>
+                </div>
+
+                <!-- Informations de session -->
+                <div class="px-4 py-3">
+                    <div class="text-xs text-gray-500">
+                        <div class="flex items-center mb-1">
+                            <i class="fas fa-user-circle mr-2 text-gray-400"></i>
+                            <span
+                                class="font-medium text-gray-600"><?php echo e($_SESSION['user_nom'] ?? 'Client'); ?></span>
+                        </div>
+                        <div class="flex items-center">
+                            <i class="fas fa-clock mr-2 text-gray-400"></i>
+                            <span>Connecté depuis <?php echo date('H:i'); ?></span>
+                        </div>
+                    </div>
+                </div>
 
 
 
@@ -1018,11 +1058,7 @@ try {
                                     <div class="text-xs text-red-600 font-medium">En attente</div>
                                 </div>
                             <?php endif; ?>
-                            <button onclick="validerTousPaiements()"
-                                class="group bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-5 py-3 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5">
-                                <i class="fas fa-check-double mr-2 group-hover:scale-110 transition-transform"></i>
-                                Valider tous
-                            </button>
+                           
                         </div>
                     </div>
 
@@ -1252,12 +1288,7 @@ try {
                                                             Valider
                                                         </button>
 
-                                                        <button onclick="voirDetails(<?php echo $commande['id']; ?>)"
-                                                            class="group/view relative bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-4 py-2 rounded-lg font-medium shadow hover:shadow-md transition-all duration-200 text-sm flex items-center">
-                                                            <i
-                                                                class="fas fa-eye mr-2 group-hover/view:scale-110 transition-transform"></i>
-                                                            Détails
-                                                        </button>
+                                                        
                                                     </div>
                                                 </td>
                                             </tr>
@@ -1266,27 +1297,7 @@ try {
                                 </table>
                             </div>
 
-                            <!-- Actions en masse -->
-                            <div class="px-6 py-4 border-t border-gray-200 bg-gray-50">
-                                <div class="flex flex-col md:flex-row justify-between items-center gap-4">
-                                    <div class="text-sm text-gray-700">
-                                        <i class="fas fa-info-circle mr-2 text-blue-500"></i>
-                                        Sélectionnez les commandes à valider ou utilisez "Valider tous"
-                                    </div>
-                                    <div class="flex items-center space-x-3">
-                                        <button onclick="selectionnerToutesCommandes()"
-                                            class="group px-5 py-2 border border-gray-300 rounded-xl text-gray-700 hover:bg-gray-50 hover:shadow transition-all duration-200 font-medium">
-                                            <i class="fas fa-check-square mr-2 group-hover:scale-110 transition-transform"></i>
-                                            Tout sélectionner
-                                        </button>
-                                        <button onclick="validerPaiementsSelectionnes()"
-                                            class="group bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-6 py-2.5 rounded-xl font-medium shadow hover:shadow-md transition-all duration-200 flex items-center">
-                                            <i class="fas fa-check-double mr-2 group-hover:scale-110 transition-transform"></i>
-                                            Valider la sélection
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
+                            
                         </div>
                     <?php else: ?>
                         <!-- Aucune commande en attente -->
@@ -1573,9 +1584,7 @@ try {
                                             <th
                                                 class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
                                                 Produits</th>
-                                            <th
-                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                                                Actions</th>
+                                           
                                         </tr>
                                     </thead>
 
@@ -1643,24 +1652,7 @@ try {
                                                     </span>
                                                 </td>
 
-                                                <!-- Actions -->
-                                                <td class="px-6 py-4">
-                                                    <div class="flex items-center space-x-2">
-                                                        <!-- Bouton Détails -->
-                                                        <button onclick="voirDetails(<?php echo $transaction['id']; ?>)"
-                                                            class="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-all duration-200 hover:shadow-md">
-                                                            <i class="fas fa-eye mr-2"></i>
-                                                            Détails
-                                                        </button>
-
-                                                        <!-- Bouton Ticket -->
-                                                        <button onclick="imprimerTicket(<?php echo $transaction['id']; ?>)"
-                                                            class="inline-flex items-center px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 text-sm font-medium rounded-lg transition-all duration-200 hover:shadow-md">
-                                                            <i class="fas fa-print mr-2"></i>
-                                                            Ticket
-                                                        </button>
-                                                    </div>
-                                                </td>
+                                                
                                             </tr>
                                         <?php endforeach; ?>
                                     </tbody>
