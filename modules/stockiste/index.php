@@ -2540,11 +2540,11 @@ switch ($current_page) {
                                 <div class="text-2xl font-bold text-blue-700"><?php echo count($mouvements); ?></div>
                                 <div class="text-xs text-blue-600 font-medium">Mouvements</div>
                             </div>
-                            <button onclick="exportToCSV()"
+                            <!-- <button onclick="exportToCSV()"
                                 class="group bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-4 py-2 rounded-lg font-medium shadow hover:shadow-md transition-all duration-200">
                                 <i class="fas fa-download mr-2 group-hover:scale-110 transition-transform"></i>
                                 Exporter CSV
-                            </button>
+                            </button> -->
                         </div>
                     </div>
 
@@ -3499,7 +3499,7 @@ switch ($current_page) {
                                 </div>
                                 <div class="text-xs text-purple-600 font-medium">Période</div>
                             </div>
-                            <div class="flex items-center space-x-2">
+                            <!-- <div class="flex items-center space-x-2">
                                 <button onclick="exportReportPDF()"
                                     class="group bg-gradient-to-r from-red-500 to-red-600 hover:from-red-600 hover:to-red-700 text-white px-4 py-2 rounded-lg font-medium shadow hover:shadow-md transition-all duration-200">
                                     <i class="fas fa-file-pdf mr-2 group-hover:scale-110 transition-transform"></i>
@@ -3510,7 +3510,7 @@ switch ($current_page) {
                                     <i class="fas fa-file-excel mr-2 group-hover:scale-110 transition-transform"></i>
                                     Excel
                                 </button>
-                            </div>
+                            </div> -->
                         </div>
                     </div>
 

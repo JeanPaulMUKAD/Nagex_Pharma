@@ -329,6 +329,95 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 }
+// ============================================
+// GESTION DES REQUÊTES AJAX
+// ============================================
+
+if (isset($_GET['action']) && $_GET['action'] == 'get_produit' && isset($_GET['id'])) {
+    try {
+        $stmt = $pdo->prepare("
+            SELECT p.*, c.nom as categorie_nom, 
+                pv.prix_fc, pv.prix_usd,
+                (SELECT COUNT(*) FROM commande_details cd2 WHERE cd2.produit_id = p.id) as ventes_total
+            FROM produits p
+            LEFT JOIN categories c ON p.categorie_id = c.id
+            LEFT JOIN prix_vente pv ON p.id = pv.produit_id AND pv.date_fin IS NULL
+            WHERE p.id = :id AND p.fournisseur_id = :fournisseur_id
+        ");
+        $stmt->execute([
+            ':id' => intval($_GET['id']),
+            ':fournisseur_id' => $fournisseur_id
+        ]);
+
+        $produit = $stmt->fetch();
+
+        if ($produit) {
+            header('Content-Type: application/json');
+            echo json_encode($produit);
+        } else {
+            http_response_code(404);
+            echo json_encode(['error' => 'Produit non trouvé']);
+        }
+        exit();
+    } catch (Exception $e) {
+        http_response_code(500);
+        echo json_encode(['error' => $e->getMessage()]);
+        exit();
+    }
+}
+
+// ============================================
+// TRAITEMENT MODIFICATION PRODUIT (POST)
+// ============================================
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    switch ($_POST['action']) {
+        // ... vos autres cas existants ...
+
+        case 'modifier_produit':
+            try {
+                // Vérifier que le produit appartient bien au fournisseur
+                $stmt = $pdo->prepare("SELECT id FROM produits WHERE id = :id AND fournisseur_id = :fournisseur_id");
+                $stmt->execute([
+                    ':id' => intval($_POST['produit_id'] ?? 0),
+                    ':fournisseur_id' => $fournisseur_id
+                ]);
+
+                if (!$stmt->fetch()) {
+                    throw new Exception("Vous n'avez pas la permission de modifier ce produit.");
+                }
+
+                // Mettre à jour le produit
+                $stmt = $pdo->prepare("
+                    UPDATE produits SET
+                        nom = :nom,
+                        description = :description,
+                        code_barre = :code_barre,
+                        categorie_id = :categorie_id,
+                        composition = :composition,
+                        updated_at = NOW()
+                    WHERE id = :id AND fournisseur_id = :fournisseur_id
+                ");
+
+                $stmt->execute([
+                    ':nom' => $_POST['nom'] ?? '',
+                    ':description' => $_POST['description'] ?? '',
+                    ':code_barre' => $_POST['code_barre'] ?? '',
+                    ':categorie_id' => intval($_POST['categorie_id'] ?? 0),
+                    ':composition' => $_POST['composition'] ?? '',
+                    ':id' => intval($_POST['produit_id'] ?? 0),
+                    ':fournisseur_id' => $fournisseur_id
+                ]);
+
+                echo "✅ Produit modifié avec succès! Les changements seront validés par le pharmacien.";
+
+            } catch (Exception $e) {
+                echo "❌ Erreur: " . $e->getMessage();
+            }
+            exit();
+            break;
+    }
+}
 
 // ============================================
 // RÉCUPÉRATION DES DONNÉES
@@ -1742,7 +1831,11 @@ if ($fournisseur_id) {
                                                     <?php echo formatMontant($produit['prix_fc']); ?>
                                                 </p>
                                                 <p class="text-xs text-blue-600">
-                                                    $<?php echo number_format($produit['prix_usd'] ?? 0, 2); ?> USD
+                                                    $<?php
+                                                    $prix = $produit['prix_usd'] ?? 0;
+                                                    $prix_numerique = is_numeric($prix) ? (float) $prix : 0;
+                                                    echo number_format($prix_numerique, 2);
+                                                    ?> USD
                                                 </p>
                                             <?php else: ?>
                                                 <p class="text-sm text-amber-600 font-semibold">À définir</p>
@@ -1762,14 +1855,14 @@ if ($fournisseur_id) {
                                     <!-- Actions -->
                                     <div class="flex space-x-3">
                                         <!-- Bouton Voir -->
-                                        <button onclick="voirDetailsProduit(<?php echo $produit['id']; ?>)"
+                                        <button onclick="ouvrirModalDetails(<?php echo $produit['id']; ?>)"
                                             class="flex-1 inline-flex items-center justify-center px-4 py-2.5 bg-gradient-to-r from-blue-50 to-cyan-50 border border-blue-200 text-blue-700 font-semibold rounded-xl hover:bg-gradient-to-r hover:from-blue-100 hover:to-cyan-100 hover:border-blue-300 hover:text-blue-800 transition-all group">
                                             <i class="fas fa-eye mr-2 group-hover:scale-110 transition-transform"></i>
                                             Voir
                                         </button>
 
                                         <!-- Bouton Modifier -->
-                                        <button onclick="modifierProduit(<?php echo $produit['id']; ?>)"
+                                        <button onclick="ouvrirModalModifier(<?php echo $produit['id']; ?>)"
                                             class="flex-1 inline-flex items-center justify-center px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold rounded-xl hover:from-emerald-600 hover:to-teal-700 shadow-md hover:shadow-lg transition-all group">
                                             <i class="fas fa-edit mr-2 group-hover:scale-110 transition-transform"></i>
                                             Modifier
@@ -1895,17 +1988,7 @@ if ($fournisseur_id) {
                     }
                 }
 
-                // Fonction pour voir les détails du produit
-                function voirDetailsProduit(produitId) {
-                    // Redirection vers la page de détails
-                    window.location.href = `?page=details_produit&id=${produitId}`;
-                }
 
-                // Fonction pour modifier le produit
-                function modifierProduit(produitId) {
-                    // Redirection vers la page de modification
-                    window.location.href = `?page=modifier_produit&id=${produitId}`;
-                }
             </script>
 
         <?php elseif ($current_page == 'ajouter_produit'): ?>
@@ -2350,6 +2433,183 @@ if ($fournisseur_id) {
         </div>
     </div>
 
+    <!-- Modal Détails Produit -->
+    <div id="modalDetails" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50">
+        <div class="relative top-10 mx-auto p-5 border w-11/12 md:max-w-2xl shadow-lg rounded-2xl bg-white">
+            <!-- En-tête -->
+            <div class="flex justify-between items-center mb-6 pb-4 border-b">
+                <div>
+                    <h3 class="text-2xl font-bold text-gray-900">Détails du produit</h3>
+                    <p class="text-gray-600 text-sm">Informations complètes du produit</p>
+                </div>
+                <button onclick="fermerModalDetails()" class="text-gray-400 hover:text-gray-600 text-2xl">
+                    &times;
+                </button>
+            </div>
+
+            <!-- Contenu -->
+            <div class="space-y-6">
+                <!-- Ligne 1: Nom et Statut -->
+                <div class="flex justify-between items-start">
+                    <div>
+                        <h4 class="text-xl font-bold text-gray-900" id="detailNom"></h4>
+                        <p class="text-sm text-gray-600 mt-1">
+                            Catégorie: <span id="detailCategorie" class="font-semibold"></span>
+                        </p>
+                    </div>
+                    <div id="detailStatutBadge"></div>
+                </div>
+
+                <!-- Code barre -->
+                <div class="bg-gray-50 p-4 rounded-xl">
+                    <p class="text-xs text-gray-500 mb-1">Code barre</p>
+                    <p class="font-mono font-bold text-gray-900 text-lg" id="detailCodeBarre"></p>
+                </div>
+
+                <!-- Description et Composition -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <h5 class="font-semibold text-gray-900 mb-2">Description</h5>
+                        <p class="text-gray-700 bg-gray-50 p-4 rounded-lg" id="detailDescription"></p>
+                    </div>
+                    <div>
+                        <h5 class="font-semibold text-gray-900 mb-2">Composition</h5>
+                        <p class="text-gray-700 bg-gray-50 p-4 rounded-lg" id="detailComposition"></p>
+                    </div>
+                </div>
+
+                <!-- Prix et Ventes -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="bg-blue-50 p-4 rounded-xl">
+                        <p class="text-xs text-gray-600 mb-1">Prix FC</p>
+                        <p class="font-bold text-emerald-600 text-lg" id="detailPrix"></p>
+                    </div>
+                    <div class="bg-blue-50 p-4 rounded-xl">
+                        <p class="text-xs text-gray-600 mb-1">Prix USD</p>
+                        <p class="font-bold text-blue-600 text-lg" id="detailPrixUSD"></p>
+                    </div>
+                    <div class="bg-purple-50 p-4 rounded-xl">
+                        <p class="text-xs text-gray-600 mb-1">Ventes totales</p>
+                        <p class="font-bold text-purple-600 text-lg" id="detailVentes"></p>
+                        <p class="text-xs text-gray-500">unités vendues</p>
+                    </div>
+                </div>
+
+                <!-- Date de création -->
+                <div class="pt-4 border-t border-gray-200">
+                    <p class="text-sm text-gray-500">
+                        <i class="fas fa-calendar mr-2"></i>
+                        Ajouté le: <span id="detailDate"></span>
+                    </p>
+                </div>
+            </div>
+
+            <!-- Pied de modal -->
+            <div class="mt-8 flex justify-end space-x-3">
+                <button onclick="fermerModalDetails()"
+                    class="px-5 py-2.5 border border-gray-300 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition-colors">
+                    Fermer
+                </button>
+                <button onclick="ouvrirModalModifier(produitActuel.id)"
+                    class="px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold rounded-xl hover:from-emerald-600 hover:to-teal-700 shadow-md">
+                    <i class="fas fa-edit mr-2"></i>Modifier ce produit
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Modifier Produit -->
+    <div id="modalModifier" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50">
+        <div class="relative top-10 mx-auto p-5 border w-11/12 md:max-w-2xl shadow-lg rounded-2xl bg-white">
+            <!-- En-tête -->
+            <div class="flex justify-between items-center mb-6 pb-4 border-b">
+                <div>
+                    <h3 class="text-2xl font-bold text-gray-900">Modifier le produit</h3>
+                    <p class="text-gray-600 text-sm">Mettez à jour les informations</p>
+                </div>
+                <button onclick="fermerModalModifier()" class="text-gray-400 hover:text-gray-600 text-2xl">
+                    &times;
+                </button>
+            </div>
+
+            <!-- Formulaire -->
+            <form id="formModifier" onsubmit="soumettreModification(event)">
+                <input type="hidden" id="modifierProduitId" name="produit_id">
+
+                <div class="space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label class="block text-gray-700 text-sm font-bold mb-2">
+                                Nom du produit *
+                            </label>
+                            <input type="text" id="modifierNom" name="nom" required
+                                class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+
+                        <div>
+                            <label class="block text-gray-700 text-sm font-bold mb-2">
+                                Catégorie
+                            </label>
+                            <select id="modifierCategorie" name="categorie_id"
+                                class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="">Sélectionnez une catégorie</option>
+                                <?php foreach ($categories as $categorie): ?>
+                                    <option value="<?php echo $categorie['id']; ?>">
+                                        <?php echo e($categorie['nom']); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-gray-700 text-sm font-bold mb-2">
+                            Code barre *
+                        </label>
+                        <input type="text" id="modifierCodeBarre" name="code_barre" required
+                            class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+
+                    <div>
+                        <label class="block text-gray-700 text-sm font-bold mb-2">
+                            Description
+                        </label>
+                        <textarea id="modifierDescription" name="description" rows="3"
+                            class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                    </div>
+
+                    <div>
+                        <label class="block text-gray-700 text-sm font-bold mb-2">
+                            Composition
+                        </label>
+                        <textarea id="modifierComposition" name="composition" rows="3"
+                            class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            placeholder="Liste des principes actifs et excipients"></textarea>
+                    </div>
+
+                    <div class="p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                        <p class="text-sm text-amber-800">
+                            <i class="fas fa-info-circle mr-2"></i>
+                            Les modifications seront soumises à validation par le pharmacien.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Boutons -->
+                <div class="mt-8 flex justify-end space-x-3">
+                    <button type="button" onclick="fermerModalModifier()"
+                        class="px-5 py-2.5 border border-gray-300 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition-colors">
+                        Annuler
+                    </button>
+                    <button type="submit"
+                        class="px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-semibold rounded-xl hover:from-emerald-600 hover:to-teal-700 shadow-md">
+                        <i class="fas fa-save mr-2"></i>Enregistrer les modifications
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Scripts JavaScript -->
     <script>
         // Fonction pour ouvrir le modal d'envoi de message
@@ -2386,7 +2646,185 @@ if ($fournisseur_id) {
                 setTimeout(() => alert.remove(), 500);
             });
         }, 5000);
+
+        // Variables globales pour stocker les données du produit
+        let produitActuel = null;
+
+        // Fonction pour ouvrir le modal de détails
+        async function ouvrirModalDetails(produitId) {
+            try {
+                console.log('Chargement du produit ID:', produitId);
+
+                // Récupérer les données du produit via AJAX
+                const response = await fetch(`?action=get_produit&id=${produitId}`);
+
+                if (!response.ok) {
+                    throw new Error(`Erreur HTTP: ${response.status}`);
+                }
+
+                const produit = await response.json();
+                console.log('Données reçues:', produit);
+
+                if (produit.error) {
+                    throw new Error(produit.error);
+                }
+
+                produitActuel = produit;
+
+                // Remplir le modal de détails (ATTENTION aux noms de clés)
+                document.getElementById('detailNom').textContent = produit.nom || 'Non spécifié';
+
+                // La clé est 'categorie_nom' dans votre réponse JSON
+                document.getElementById('detailCategorie').textContent = produit.categorie_nom || 'Non catégorisé';
+
+                document.getElementById('detailCodeBarre').textContent = produit.code_barre || 'Non spécifié';
+                document.getElementById('detailDescription').textContent = produit.description || 'Aucune description';
+                document.getElementById('detailComposition').textContent = produit.composition || 'Non spécifiée';
+
+                // Statut
+                const statutText = produit.statut ? produit.statut.replace('_', ' ') : 'Inconnu';
+
+                // Prix (attention aux noms de clés)
+                const prixFc = produit.prix_fc || produit.prix_fc;
+                const prixUsd = produit.prix_usd || produit.prix_usd;
+
+                document.getElementById('detailPrix').textContent = prixFc ?
+                    formatMontant(prixFc) : 'À définir';
+                document.getElementById('detailPrixUSD').textContent = prixUsd ?
+                    '$' + parseFloat(prixUsd).toFixed(2) + ' USD' : 'Non défini';
+
+                // Ventes
+                document.getElementById('detailVentes').textContent = produit.ventes_total || 0;
+
+                // Date
+                if (produit.created_at) {
+                    document.getElementById('detailDate').textContent =
+                        new Date(produit.created_at).toLocaleDateString('fr-FR', {
+                            day: '2-digit',
+                            month: '2-digit',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        });
+                } else {
+                    document.getElementById('detailDate').textContent = 'Non disponible';
+                }
+
+                // Mettre à jour le badge de statut
+                const statutBadge = document.getElementById('detailStatutBadge');
+                let statutClass, statutIcon;
+
+                if (produit.statut == 'actif') {
+                    statutClass = 'bg-emerald-100 text-emerald-800';
+                    statutIcon = 'fa-check-circle';
+                } else if (produit.statut == 'en_attente') {
+                    statutClass = 'bg-amber-100 text-amber-800';
+                    statutIcon = 'fa-clock';
+                } else {
+                    statutClass = 'bg-rose-100 text-rose-800';
+                    statutIcon = 'fa-times-circle';
+                }
+
+                statutBadge.className = `inline-flex items-center px-3 py-1 rounded-full text-xs font-bold ${statutClass}`;
+                statutBadge.innerHTML = `<i class="fas ${statutIcon} mr-1.5"></i>${statutText}`;
+
+                // Afficher le modal
+                document.getElementById('modalDetails').classList.remove('hidden');
+
+                console.log('Modal ouvert avec succès');
+
+            } catch (error) {
+                console.error('Erreur complète:', error);
+                alert('Impossible de charger les détails du produit. Erreur: ' + error.message);
+            }
+        }
+        // Fonction pour ouvrir le modal de modification
+        async function ouvrirModalModifier(produitId) {
+            try {
+                console.log('Ouverture modification pour ID:', produitId);
+
+                // Récupérer les données du produit via AJAX
+                const response = await fetch(`?action=get_produit&id=${produitId}`);
+
+                if (!response.ok) {
+                    throw new Error(`Erreur HTTP: ${response.status}`);
+                }
+
+                const produit = await response.json();
+                console.log('Données pour modification:', produit);
+
+                if (produit.error) {
+                    throw new Error(produit.error);
+                }
+
+                produitActuel = produit;
+
+                // Remplir le formulaire de modification
+                document.getElementById('modifierProduitId').value = produit.id;
+                document.getElementById('modifierNom').value = produit.nom || '';
+                document.getElementById('modifierDescription').value = produit.description || '';
+                document.getElementById('modifierCodeBarre').value = produit.code_barre || '';
+                document.getElementById('modifierCategorie').value = produit.categorie_id || '';
+                document.getElementById('modifierComposition').value = produit.composition || '';
+
+                console.log('Formulaire rempli');
+
+                // Afficher le modal
+                document.getElementById('modalModifier').classList.remove('hidden');
+
+            } catch (error) {
+                console.error('Erreur:', error);
+                alert('Impossible de charger les données du produit. Erreur: ' + error.message);
+            }
+        }
+
+        // Fonction pour fermer les modals
+        function fermerModalDetails() {
+            document.getElementById('modalDetails').classList.add('hidden');
+        }
+
+        function fermerModalModifier() {
+            document.getElementById('modalModifier').classList.add('hidden');
+        }
+
+        // Fonction pour soumettre le formulaire de modification
+        async function soumettreModification(event) {
+            event.preventDefault();
+
+            const formData = new FormData(document.getElementById('formModifier'));
+            formData.append('action', 'modifier_produit');
+
+            try {
+                const response = await fetch('', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.text();
+                if (result.includes('✅')) {
+                    alert('Produit modifié avec succès!');
+                    fermerModalModifier();
+                    location.reload(); // Recharger la page pour voir les modifications
+                } else {
+                    alert('Erreur lors de la modification: ' + result);
+                }
+            } catch (error) {
+                console.error('Erreur:', error);
+                alert('Erreur réseau');
+            }
+        }
+
+        // Fonction utilitaire pour formater les montants (copié de PHP)
+        function formatMontant(montant, devise = 'CDF') {
+            const montantFloat = parseFloat(montant) || 0;
+            if (devise === 'USD') {
+                return '$' + montantFloat.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+            }
+            return montantFloat.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",") + ' FC';
+        }
     </script>
+
+
 </body>
 
 </html>
