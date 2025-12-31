@@ -1,10 +1,10 @@
 <?php declare(strict_types=1); ?>
 <?php
 class Database {
-    private $host = 'localhost';
-    private $db_name = 'nagex_pharma_db';
-    private $username = 'root';
-    private $password = '';
+    private $host = '127.0.0.1:3306';
+    private $db_name = ' u913148723_nagex_pharma ';
+    private $username = 'u913148723_nagexpharma';
+    private $password = 'Nagexpharma2003';
     public $conn;
     
     public function getConnection() {
