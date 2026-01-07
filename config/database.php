@@ -1,19 +1,21 @@
 <?php declare(strict_types=1); ?>
 <?php
-class Database {
+class Database
+{
     private $host = '127.0.0.1:3306';
-    private $db_name = ' u913148723_nagex_pharma ';
+    private $db_name = 'u913148723_nagex_pharma';
     private $username = 'u913148723_nagexpharma';
     private $password = 'Nagexpharma2003';
     public $conn;
-    
-    public function getConnection() {
+
+    public function getConnection()
+    {
         $this->conn = null;
-        
+
         try {
             $this->conn = new PDO(
                 "mysql:host=" . $this->host . ";dbname=" . $this->db_name . ";charset=utf8mb4",
-                $this->username, 
+                $this->username,
                 $this->password,
                 [
                     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
@@ -21,16 +23,17 @@ class Database {
                     PDO::ATTR_EMULATE_PREPARES => false
                 ]
             );
-        } catch(PDOException $exception) {
+        } catch (PDOException $exception) {
             // Log l'erreur complète
             error_log("Erreur DB Connexion: " . $exception->getMessage());
             throw new Exception("Erreur de connexion à la base de données: " . $exception->getMessage());
         }
-        
+
         return $this->conn;
     }
-    
-    public function prepare($sql) {
+
+    public function prepare($sql)
+    {
         try {
             return $this->getConnection()->prepare($sql);
         } catch (Exception $e) {
@@ -38,8 +41,9 @@ class Database {
             throw $e;
         }
     }
-    
-    public function exec($sql) {
+
+    public function exec($sql)
+    {
         try {
             return $this->getConnection()->exec($sql);
         } catch (Exception $e) {
@@ -47,8 +51,9 @@ class Database {
             throw $e;
         }
     }
-    
-    public function lastInsertId() {
+
+    public function lastInsertId()
+    {
         try {
             return $this->getConnection()->lastInsertId();
         } catch (Exception $e) {

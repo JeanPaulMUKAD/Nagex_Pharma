@@ -125,7 +125,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($db)) {
                 $stmt->bindParam(':mot_de_passe', $hashedPassword);
                 $stmt->bindParam(':role', $role);
                 $stmt->bindParam(':telephone', $telephone);
-                $stmt->bindParam(':adresse', $adresse); 
+                $stmt->bindParam(':adresse', $adresse);
 
                 if ($stmt->execute()) {
                     $success = "Utilisateur créé avec succès!";
@@ -305,7 +305,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($db)) {
         $nom = trim($_POST['edit_nom'] ?? '');
         $email = trim($_POST['edit_email'] ?? '');
         $telephone = trim($_POST['edit_telephone'] ?? '');
-        $adresse = trim($_POST['edit_adresse'] ?? ''); 
+        $adresse = trim($_POST['edit_adresse'] ?? '');
         $role = $_POST['edit_role'] ?? '';
 
         // Validation
@@ -492,21 +492,122 @@ function formatDate($date): string
         <!-- Navigation -->
         <nav class="mt-6">
             <div class="px-4 space-y-2">
+                <!-- Tableau de bord -->
                 <a href="#dashboard" onclick="showSection('dashboard')"
                     class="active flex items-center px-4 py-3 text-gray-700 rounded-lg transition-colors">
                     <i class="fas fa-tachometer-alt w-6"></i>
                     <span class="ml-3 font-medium">Tableau de bord</span>
                 </a>
-                <a href="#utilisateurs" onclick="showSection('utilisateurs')"
-                    class="flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-green-50 transition-colors">
-                    <i class="fas fa-users w-6"></i>
-                    <span class="ml-3 font-medium">Utilisateurs</span>
-                </a>
-                <a href="#historique" onclick="showSection('historique')"
-                    class="flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-green-50 transition-colors">
-                    <i class="fas fa-history w-6"></i>
-                    <span class="ml-3 font-medium">Historique</span>
-                </a>
+
+                <!-- Gestion des données -->
+                <div class="mt-4">
+                    <p class="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Gestion des
+                        Données</p>
+
+                    <a href="#produits" onclick="showSection('produits')"
+                        class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
+                        <div class="flex items-center">
+                            <i class="fas fa-pills w-6 text-blue-500"></i>
+                            <span class="ml-3 font-medium">Produits</span>
+                        </div>
+                        <span
+                            class="bg-blue-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $total_produits; ?></span>
+                    </a>
+
+                    <a href="#commandes" onclick="showSection('commandes')"
+                        class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
+                        <div class="flex items-center">
+                            <i class="fas fa-shopping-cart w-6 text-green-500"></i>
+                            <span class="ml-3 font-medium">Commandes</span>
+                        </div>
+                        <span
+                            class="bg-green-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $total_commandes_mois; ?></span>
+                    </a>
+
+                    <a href="#categories" onclick="showSection('categories')"
+                        class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
+                        <div class="flex items-center">
+                            <i class="fas fa-tags w-6 text-indigo-500"></i>
+                            <span class="ml-3 font-medium">Catégories</span>
+                        </div>
+                        <span
+                            class="bg-indigo-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $total_categories; ?></span>
+                    </a>
+
+                    <a href="#fournisseurs" onclick="showSection('fournisseurs')"
+                        class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
+                        <div class="flex items-center">
+                            <i class="fas fa-truck w-6 text-purple-500"></i>
+                            <span class="ml-3 font-medium">Fournisseurs</span>
+                        </div>
+                        <span
+                            class="bg-purple-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $total_fournisseurs; ?></span>
+                    </a>
+                </div>
+
+                <!-- Surveillance & Alertes -->
+                <div class="mt-4">
+                    <p class="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Surveillance</p>
+
+                    <a href="#alertes" onclick="showSection('alertes')"
+                        class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
+                        <div class="flex items-center">
+                            <i class="fas fa-bell w-6 text-red-500"></i>
+                            <span class="ml-3 font-medium">Alertes</span>
+                        </div>
+                        <?php if (count($alertes) > 0): ?>
+                            <span
+                                class="bg-red-500 text-white text-xs px-2 py-1 rounded-full"><?php echo count($alertes); ?></span>
+                        <?php endif; ?>
+                    </a>
+
+                    <a href="#lots" onclick="showSection('lots')"
+                        class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
+                        <div class="flex items-center">
+                            <i class="fas fa-boxes w-6 text-orange-500"></i>
+                            <span class="ml-3 font-medium">Gestion Lots</span>
+                        </div>
+                        <?php if ($stats_lots['expiration_proche'] > 0): ?>
+                            <span
+                                class="bg-orange-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $stats_lots['expiration_proche']; ?></span>
+                        <?php endif; ?>
+                    </a>
+                </div>
+
+                <!-- Rapports & Analyses -->
+                <div class="mt-4">
+                    <p class="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Rapports &
+                        Analyses</p>
+
+                    <a href="#finances" onclick="showSection('finances')"
+                        class="flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
+                        <i class="fas fa-chart-bar w-6 text-teal-500"></i>
+                        <span class="ml-3 font-medium">Analyse Financière</span>
+                    </a>
+
+                    <a href="#performance" onclick="showSection('performance')"
+                        class="flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
+                        <i class="fas fa-trophy w-6 text-yellow-500"></i>
+                        <span class="ml-3 font-medium">Performance Commerciale</span>
+                    </a>
+                </div>
+
+                <!-- Configuration système -->
+                <div class="mt-4">
+                    <p class="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Configuration</p>
+
+                    <a href="#utilisateurs" onclick="showSection('utilisateurs')"
+                        class="flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
+                        <i class="fas fa-users w-6 text-gray-500"></i>
+                        <span class="ml-3 font-medium">Utilisateurs</span>
+                    </a>
+
+                    <a href="#parametres" onclick="showSection('parametres')"
+                        class="flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
+                        <i class="fas fa-cog w-6 text-gray-500"></i>
+                        <span class="ml-3 font-medium">Paramètres</span>
+                    </a>
+                </div>
             </div>
         </nav>
 
@@ -788,7 +889,7 @@ function formatDate($date): string
                                         <th
                                             class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Date création</th>
-                                       
+
                                         </th>
                                         <th
                                             class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -833,7 +934,7 @@ function formatDate($date): string
                                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                                     <?php echo isset($user['date_creation']) ? formatDate($user['date_creation']) : 'Non définie'; ?>
                                                 </td>
-                                                
+
                                                 <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
                                                     <div class="flex space-x-2">
                                                         <!-- Bouton Modifier -->
@@ -967,9 +1068,11 @@ function formatDate($date): string
                             class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
                     </div>
                     <div class="mb-4">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">Adresse</label>
-                    <textarea name="edit_adresse" id="edit_adresse" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent" rows="3"></textarea>
-                </div>
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Adresse</label>
+                        <textarea name="edit_adresse" id="edit_adresse"
+                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                            rows="3"></textarea>
+                    </div>
 
                     <div class="mb-4">
                         <label class="block text-sm font-medium text-gray-700 mb-2">Rôle</label>
