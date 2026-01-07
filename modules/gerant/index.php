@@ -51,38 +51,78 @@ $commandes_attente = 0;
 
 try {
     error_log("=== DÉBUT CHARGEMENT DONNÉES DASHBOARD ===");
-    
+
     // 1. Récupérer les catégories
     $stmt = $db->prepare("SELECT * FROM categories ORDER BY nom");
     $stmt->execute();
     $categories = $stmt->fetchAll(PDO::FETCH_ASSOC);
     $total_categories = count($categories);
     error_log("Catégories chargées: " . $total_categories . " éléments");
-    
+
     // 2. Récupérer les produits avec leurs catégories
     $stmt = $db->prepare("
-        SELECT p.*, c.nom as categorie_nom 
-        FROM produits p 
-        LEFT JOIN categories c ON p.categorie_id = c.id 
-        ORDER BY p.created_at DESC
-    ");
+    SELECT p.*, 
+           c.nom as categorie_nom,
+           f.nom_societe as fournisseur_nom
+    FROM produits p 
+    LEFT JOIN categories c ON p.categorie_id = c.id 
+    LEFT JOIN fournisseurs f ON p.fournisseur_id = f.id
+    ORDER BY p.created_at ASC
+");
     $stmt->execute();
     $produits = $stmt->fetchAll(PDO::FETCH_ASSOC);
     $total_produits = count($produits);
     error_log("Produits chargés: " . $total_produits . " éléments");
-    
-    // 3. Récupérer les commandes avec leurs clients
-    $stmt = $db->prepare("
-        SELECT c.*, u.nom as client_nom, u.prenom as client_prenom
-        FROM commandes c 
-        LEFT JOIN utilisateurs u ON c.client_id = u.id 
-        ORDER BY c.date_commande DESC 
-        LIMIT 50
-    ");
-    $stmt->execute();
-    $commandes = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    error_log("Commandes chargées: " . count($commandes) . " éléments");
-    
+
+    // 3. Récupérer les commandes avec leurs clients - VERSION CORRIGÉE
+    // Vérifier d'abord si les tables existent
+    try {
+        // Test simple pour vérifier si la table commandes existe
+        $testStmt = $db->prepare("SHOW TABLES LIKE 'commandes'");
+        $testStmt->execute();
+        $tableExists = $testStmt->fetch();
+
+        if ($tableExists) {
+            // Vérifier si la colonne client_id existe
+            $testStmt = $db->prepare("SHOW COLUMNS FROM commandes LIKE 'client_id'");
+            $testStmt->execute();
+            $columnExists = $testStmt->fetch();
+
+            if ($columnExists) {
+                // Requête avec JOIN
+                $stmt = $db->prepare("
+                    SELECT c.*, u.nom as client_nom
+                    FROM commandes c 
+                    LEFT JOIN utilisateurs u ON c.client_id = u.id 
+                    ORDER BY c.date_commande DESC 
+                    LIMIT 50
+                ");
+            } else {
+                // Requête sans JOIN si client_id n'existe pas
+                $stmt = $db->prepare("
+                    SELECT c.*
+                    FROM commandes c 
+                    ORDER BY c.date_commande DESC 
+                    LIMIT 50
+                ");
+            }
+
+            $stmt->execute();
+            $commandes = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            error_log("Commandes chargées: " . count($commandes) . " éléments");
+
+            if (!empty($commandes)) {
+                error_log("Exemple de commande: " . json_encode($commandes[0]));
+            }
+        } else {
+            error_log("Table 'commandes' n'existe pas");
+            $commandes = [];
+        }
+    } catch (Exception $e) {
+        error_log("Erreur lors du chargement des commandes: " . $e->getMessage());
+        $commandes = [];
+    }
+
     // 4. Récupérer les fournisseurs
     try {
         $stmt = $db->prepare("SELECT * FROM fournisseurs ORDER BY created_at DESC");
@@ -94,61 +134,74 @@ try {
         error_log("Erreur fournisseurs: " . $e->getMessage());
         $fournisseurs = [];
     }
-    
+
     // 5. Statistiques des lots (calculs réels)
     try {
-        // Total lots
-        $stmt = $db->prepare("SELECT COUNT(*) as total_lots FROM lots");
-        $stmt->execute();
-        $stats_lots['total_lots'] = (int)$stmt->fetchColumn();
-        
-        // Stock total
-        $stmt = $db->prepare("SELECT COALESCE(SUM(quantite_actuelle), 0) as stock_total FROM lots");
-        $stmt->execute();
-        $stats_lots['stock_total'] = (int)$stmt->fetchColumn();
-        
-        // Lots épuisés
-        $stmt = $db->prepare("SELECT COUNT(*) as lots_epuises FROM lots WHERE statut = 'epuise'");
-        $stmt->execute();
-        $stats_lots['lots_epuises'] = (int)$stmt->fetchColumn();
-        
-        // Lots périmés
-        $stmt = $db->prepare("SELECT COUNT(*) as lots_perimes FROM lots WHERE statut = 'perime' OR date_expiration < CURDATE()");
-        $stmt->execute();
-        $stats_lots['lots_perimes'] = (int)$stmt->fetchColumn();
-        
-        // Expiration proche (30 jours)
-        $stmt = $db->prepare("SELECT COUNT(*) as expiration_proche FROM lots WHERE date_expiration BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)");
-        $stmt->execute();
-        $stats_lots['expiration_proche'] = (int)$stmt->fetchColumn();
-        
+        // Vérifier si la table lots existe
+        $testStmt = $db->prepare("SHOW TABLES LIKE 'lots'");
+        $testStmt->execute();
+        $tableExists = $testStmt->fetch();
+
+        if ($tableExists) {
+            // Total lots
+            $stmt = $db->prepare("SELECT COUNT(*) as total_lots FROM lots");
+            $stmt->execute();
+            $stats_lots['total_lots'] = (int) $stmt->fetchColumn();
+
+            // Stock total
+            $stmt = $db->prepare("SELECT COALESCE(SUM(quantite_actuelle), 0) as stock_total FROM lots");
+            $stmt->execute();
+            $stats_lots['stock_total'] = (int) $stmt->fetchColumn();
+
+            // Lots épuisés
+            $stmt = $db->prepare("SELECT COUNT(*) as lots_epuises FROM lots WHERE statut = 'epuise'");
+            $stmt->execute();
+            $stats_lots['lots_epuises'] = (int) $stmt->fetchColumn();
+
+            // Lots périmés
+            $stmt = $db->prepare("SELECT COUNT(*) as lots_perimes FROM lots WHERE statut = 'perime' OR date_expiration < CURDATE()");
+            $stmt->execute();
+            $stats_lots['lots_perimes'] = (int) $stmt->fetchColumn();
+
+            // Expiration proche (30 jours)
+            $stmt = $db->prepare("SELECT COUNT(*) as expiration_proche FROM lots WHERE date_expiration BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)");
+            $stmt->execute();
+            $stats_lots['expiration_proche'] = (int) $stmt->fetchColumn();
+        }
         error_log("Stats lots: " . json_encode($stats_lots));
     } catch (Exception $e) {
         error_log("Erreur stats lots: " . $e->getMessage());
     }
-    
+
     // 6. CA Mensuel (calcul réel)
     $ca_mensuel = 0;
     try {
-        $stmt = $db->prepare("SELECT COALESCE(SUM(montant_total), 0) as ca_mensuel FROM commandes WHERE MONTH(date_commande) = MONTH(CURDATE()) AND YEAR(date_commande) = YEAR(CURDATE())");
-        $stmt->execute();
-        $ca_mensuel = (float)$stmt->fetchColumn();
+        // Vérifier si la colonne montant_total existe
+        $testStmt = $db->prepare("SHOW COLUMNS FROM commandes LIKE 'montant_total'");
+        $testStmt->execute();
+        $columnExists = $testStmt->fetch();
+
+        if ($columnExists) {
+            $stmt = $db->prepare("SELECT COALESCE(SUM(montant_total), 0) as ca_mensuel FROM commandes WHERE MONTH(date_commande) = MONTH(CURDATE()) AND YEAR(date_commande) = YEAR(CURDATE())");
+            $stmt->execute();
+            $ca_mensuel = (float) $stmt->fetchColumn();
+        }
         error_log("CA mensuel: " . $ca_mensuel);
     } catch (Exception $e) {
         error_log("Erreur CA mensuel: " . $e->getMessage());
     }
-    
+
     // 7. CA Mois Précédent (calcul réel)
     $ca_mois_precedent = 0;
     try {
         $stmt = $db->prepare("SELECT COALESCE(SUM(montant_total), 0) as ca_mois_precedent FROM commandes WHERE MONTH(date_commande) = MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) AND YEAR(date_commande) = YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH))");
         $stmt->execute();
-        $ca_mois_precedent = (float)$stmt->fetchColumn();
+        $ca_mois_precedent = (float) $stmt->fetchColumn();
         error_log("CA mois précédent: " . $ca_mois_precedent);
     } catch (Exception $e) {
         error_log("Erreur CA mois précédent: " . $e->getMessage());
     }
-    
+
     // 8. Évolution CA (calcul automatique)
     if ($ca_mois_precedent > 0) {
         $evolution_ca = (($ca_mensuel - $ca_mois_precedent) / $ca_mois_precedent) * 100;
@@ -156,40 +209,47 @@ try {
         $evolution_ca = ($ca_mensuel > 0) ? 100 : 0;
     }
     error_log("Évolution CA: " . $evolution_ca . "%");
-    
+
     // 9. Marge Moyenne (calcul simplifié)
     try {
         $stmt = $db->prepare("SELECT 15.5 as marge_moyenne");
         $stmt->execute();
-        $marge_moyenne = (float)$stmt->fetchColumn();
+        $marge_moyenne = (float) $stmt->fetchColumn();
         error_log("Marge moyenne: " . $marge_moyenne);
     } catch (Exception $e) {
         error_log("Erreur marge moyenne: " . $e->getMessage());
         $marge_moyenne = 15.5;
     }
-    
+
     // 10. Valeur Stock (calcul réel si possible)
     $valeur_stock = 0;
     try {
-        $stmt = $db->prepare("SELECT COALESCE(SUM(quantite_actuelle * prix_achat), 0) as valeur_stock FROM lots WHERE quantite_actuelle > 0");
-        $stmt->execute();
-        $valeur_stock = (float)$stmt->fetchColumn();
+        // Vérifier si les colonnes nécessaires existent
+        $testStmt = $db->prepare("SHOW COLUMNS FROM lots LIKE 'prix_achat'");
+        $testStmt->execute();
+        $columnExists = $testStmt->fetch();
+
+        if ($columnExists) {
+            $stmt = $db->prepare("SELECT COALESCE(SUM(quantite_actuelle * prix_achat), 0) as valeur_stock FROM lots WHERE quantite_actuelle > 0");
+            $stmt->execute();
+            $valeur_stock = (float) $stmt->fetchColumn();
+        }
         error_log("Valeur stock: " . $valeur_stock);
     } catch (Exception $e) {
         error_log("Erreur valeur stock: " . $e->getMessage());
     }
-    
+
     // 11. Produits en Rupture (calcul automatique)
     $produits_rupture = 0;
     try {
         $stmt = $db->prepare("SELECT COUNT(DISTINCT p.id) as nb_ruptures FROM produits p LEFT JOIN lots l ON p.id = l.produit_id GROUP BY p.id HAVING COALESCE(SUM(l.quantite_actuelle), 0) = 0");
         $stmt->execute();
-        $produits_rupture = (int)$stmt->fetchColumn();
+        $produits_rupture = (int) $stmt->fetchColumn();
         error_log("Produits rupture: " . $produits_rupture);
     } catch (Exception $e) {
         error_log("Erreur produits rupture: " . $e->getMessage());
     }
-    
+
     // 12. Commandes aujourd'hui (calcul automatique)
     $commandes_aujourdhui = 0;
     $ca_aujourdhui = 0;
@@ -197,55 +257,63 @@ try {
         $stmt = $db->prepare("SELECT COUNT(*) as commandes_aujourdhui, COALESCE(SUM(montant_total), 0) as ca_aujourdhui FROM commandes WHERE DATE(date_commande) = CURDATE()");
         $stmt->execute();
         $commandes_aujourdhui_data = $stmt->fetch(PDO::FETCH_ASSOC);
-        $commandes_aujourdhui = (int)($commandes_aujourdhui_data['commandes_aujourdhui'] ?? 0);
-        $ca_aujourdhui = (float)($commandes_aujourdhui_data['ca_aujourdhui'] ?? 0);
+        $commandes_aujourdhui = (int) ($commandes_aujourdhui_data['commandes_aujourdhui'] ?? 0);
+        $ca_aujourdhui = (float) ($commandes_aujourdhui_data['ca_aujourdhui'] ?? 0);
         error_log("Commandes aujourd'hui: " . $commandes_aujourdhui . ", CA: " . $ca_aujourdhui);
     } catch (Exception $e) {
         error_log("Erreur commandes aujourd'hui: " . $e->getMessage());
     }
-    
+
     // 13. Nombre total de commandes ce mois (calcul automatique)
     $total_commandes_mois = 0;
     try {
         $stmt = $db->prepare("SELECT COUNT(*) as total FROM commandes WHERE MONTH(date_commande) = MONTH(CURDATE()) AND YEAR(date_commande) = YEAR(CURDATE())");
         $stmt->execute();
-        $total_commandes_mois = (int)$stmt->fetchColumn();
+        $total_commandes_mois = (int) $stmt->fetchColumn();
         error_log("Total commandes mois: " . $total_commandes_mois);
     } catch (Exception $e) {
         error_log("Erreur total commandes mois: " . $e->getMessage());
     }
-    
+
     // 14. Commandes en attente (calcul automatique)
     $commandes_attente = 0;
-    foreach ($commandes as $cmd) {
-        if ($cmd['statut'] == 'en_attente') {
-            $commandes_attente++;
+    if (!empty($commandes)) {
+        foreach ($commandes as $cmd) {
+            if (isset($cmd['statut']) && $cmd['statut'] == 'en_attente') {
+                $commandes_attente++;
+            }
         }
     }
     error_log("Commandes en attente: " . $commandes_attente);
-    
+
     // 15. Produits les plus vendus
     $top_produits = [];
     try {
-        $limit = 5;
-        $stmt = $db->prepare("
-            SELECT p.nom, 
-                   (SELECT COUNT(*) FROM commande_details cd WHERE cd.produit_id = p.id) as total_vendu,
-                   (SELECT COALESCE(SUM(sous_total), 0) FROM commande_details cd WHERE cd.produit_id = p.id) as ca_total 
-            FROM produits p 
-            WHERE p.statut = 'actif'
-            ORDER BY total_vendu DESC 
-            LIMIT :limit
-        ");
-        $stmt->bindParam(':limit', $limit, PDO::PARAM_INT);
-        $stmt->execute();
-        $top_produits = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
+        // Vérifier si la table commande_details existe
+        $testStmt = $db->prepare("SHOW TABLES LIKE 'commande_details'");
+        $testStmt->execute();
+        $tableExists = $testStmt->fetch();
+
+        if ($tableExists) {
+            $limit = 5;
+            $stmt = $db->prepare("
+                SELECT p.nom, 
+                       (SELECT COUNT(*) FROM commande_details cd WHERE cd.produit_id = p.id) as total_vendu,
+                       (SELECT COALESCE(SUM(sous_total), 0) FROM commande_details cd WHERE cd.produit_id = p.id) as ca_total 
+                FROM produits p 
+                WHERE p.statut = 'actif'
+                ORDER BY total_vendu DESC 
+                LIMIT :limit
+            ");
+            $stmt->bindParam(':limit', $limit, PDO::PARAM_INT);
+            $stmt->execute();
+            $top_produits = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
         error_log("Top produits chargés: " . count($top_produits));
     } catch (Exception $e) {
         error_log("Erreur top produits: " . $e->getMessage());
     }
-    
+
     // 16. Évolution CA sur 6 mois
     $evolution_ca_data = [];
     try {
@@ -264,12 +332,12 @@ try {
         $stmt->bindParam(':months', $months, PDO::PARAM_INT);
         $stmt->execute();
         $evolution_ca_data = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
+
         error_log("Évolution CA chargée: " . count($evolution_ca_data));
     } catch (Exception $e) {
         error_log("Erreur évolution CA: " . $e->getMessage());
     }
-    
+
     // 17. Produits en expiration proche
     $produits_expiration = [];
     try {
@@ -285,62 +353,83 @@ try {
         ");
         $stmt->execute();
         $produits_expiration = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
+
         error_log("Produits expiration chargés: " . count($produits_expiration));
     } catch (Exception $e) {
         error_log("Erreur produits expiration: " . $e->getMessage());
     }
-    
+
     error_log("=== FIN CHARGEMENT DONNÉES SUCCÈS ===");
-    
+
 } catch (Exception $e) {
     error_log("=== ERREUR CRITIQUE DANS CHARGEMENT DONNÉES ===");
     error_log("Message: " . $e->getMessage());
     error_log("Fichier: " . $e->getFile());
     error_log("Ligne: " . $e->getLine());
+    // Ne pas arrêter l'exécution du script
 }
 
 // ============================================================================
 // FONCTIONS UTILITAIRES POUR LE FORMATAGE
 // ============================================================================
 
-function formatMontant($montant) {
-    if ($montant == 0) return '0 FC';
+function formatMontant($montant)
+{
+    if ($montant == 0)
+        return '0 FC';
     return number_format($montant, 0, ',', ' ') . ' FC';
 }
 
-function formatPourcentage($valeur) {
+function formatPourcentage($valeur)
+{
     return number_format($valeur, 1, ',', ' ') . '%';
 }
 
-function getEvolutionIcon($valeur) {
-    if ($valeur > 0) return ['fas fa-arrow-up', 'text-green-600', 'bg-green-100'];
-    if ($valeur < 0) return ['fas fa-arrow-down', 'text-red-600', 'bg-red-100'];
+function getEvolutionIcon($valeur)
+{
+    if ($valeur > 0)
+        return ['fas fa-arrow-up', 'text-green-600', 'bg-green-100'];
+    if ($valeur < 0)
+        return ['fas fa-arrow-down', 'text-red-600', 'bg-red-100'];
     return ['fas fa-minus', 'text-gray-600', 'bg-gray-100'];
 }
 
-function getStatutCommandeClass($statut) {
+function getStatutCommandeClass($statut)
+{
     switch ($statut) {
-        case 'paye': return 'bg-green-100 text-green-800';
-        case 'en_attente': return 'bg-yellow-100 text-yellow-800';
-        case 'annule': return 'bg-red-100 text-red-800';
-        case 'rembourse': return 'bg-blue-100 text-blue-800';
-        default: return 'bg-gray-100 text-gray-800';
+        case 'paye':
+            return 'bg-green-100 text-green-800';
+        case 'en_attente':
+            return 'bg-yellow-100 text-yellow-800';
+        case 'annule':
+            return 'bg-red-100 text-red-800';
+        case 'rembourse':
+            return 'bg-blue-100 text-blue-800';
+        default:
+            return 'bg-gray-100 text-gray-800';
     }
 }
 
-function getStatutProduitClass($statut) {
+function getStatutProduitClass($statut)
+{
     switch ($statut) {
-        case 'actif': return 'bg-green-100 text-green-800';
-        case 'inactif': return 'bg-red-100 text-red-800';
-        case 'en_attente': return 'bg-yellow-100 text-yellow-800';
-        default: return 'bg-gray-100 text-gray-800';
+        case 'actif':
+            return 'bg-green-100 text-green-800';
+        case 'inactif':
+            return 'bg-red-100 text-red-800';
+        case 'en_attente':
+            return 'bg-yellow-100 text-yellow-800';
+        default:
+            return 'bg-gray-100 text-gray-800';
     }
 }
 
-function getJoursRestantsClass($jours) {
-    if ($jours <= 7) return 'bg-red-100 text-red-800';
-    if ($jours <= 15) return 'bg-orange-100 text-orange-800';
+function getJoursRestantsClass($jours)
+{
+    if ($jours <= 7)
+        return 'bg-red-100 text-red-800';
+    if ($jours <= 15)
+        return 'bg-orange-100 text-orange-800';
     return 'bg-yellow-100 text-yellow-800';
 }
 ?>
@@ -356,14 +445,41 @@ function getJoursRestantsClass($jours) {
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&display=swap"
+        rel="stylesheet">
     <style>
-        .sidebar { transition: all 0.3s ease; }
-        .active { background-color: #10B981; color: white; }
-        .sidebar-item:hover { background-color: #D1FAE5; }
-        .chart-bar { transition: all 0.3s ease; }
-        .fade-in { animation: fadeIn 0.5s ease-in; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .sidebar {
+            transition: all 0.3s ease;
+        }
+
+        .active {
+            background-color: #10B981;
+            color: white;
+        }
+
+        .sidebar-item:hover {
+            background-color: #D1FAE5;
+        }
+
+        .chart-bar {
+            transition: all 0.3s ease;
+        }
+
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
     </style>
 </head>
 
@@ -386,45 +502,55 @@ function getJoursRestantsClass($jours) {
         <!-- Navigation -->
         <nav class="mt-6">
             <div class="px-4 space-y-2">
-                <a href="#dashboard" onclick="showSection('dashboard')" class="active flex items-center px-4 py-3 text-gray-700 rounded-lg transition-colors">
+                <a href="#dashboard" onclick="showSection('dashboard'); return false;"
+                    class="active flex items-center px-4 py-3 text-gray-700 rounded-lg transition-colors">
                     <i class="fas fa-tachometer-alt w-6"></i>
                     <span class="ml-3 font-medium">Tableau de bord</span>
                 </a>
 
                 <!-- Gestion des données -->
                 <div class="mt-4">
-                    <p class="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Gestion des Données</p>
-                    
-                    <a href="#produits" onclick="showSection('produits')" class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
+                    <p class="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Gestion des
+                        Données</p>
+
+                    <a href="#produits" onclick="showSection('produits'); return false;"
+                        class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
                         <div class="flex items-center">
                             <i class="fas fa-pills w-6 text-blue-500"></i>
                             <span class="ml-3 font-medium">Produits</span>
                         </div>
-                        <span class="bg-blue-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $total_produits; ?></span>
+                        <span
+                            class="bg-blue-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $total_produits; ?></span>
                     </a>
-                    
-                    <a href="#commandes" onclick="showSection('commandes')" class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
+
+                    <a href="#commandes" onclick="showSection('commandes'); return false;"
+                        class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
                         <div class="flex items-center">
                             <i class="fas fa-shopping-cart w-6 text-green-500"></i>
                             <span class="ml-3 font-medium">Commandes</span>
                         </div>
-                        <span class="bg-green-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $total_commandes_mois; ?></span>
+                        <span
+                            class="bg-green-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $total_commandes_mois; ?></span>
                     </a>
-                    
-                    <a href="#categories" onclick="showSection('categories')" class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
+
+                    <a href="#categories" onclick="showSection('categories'); return false;"
+                        class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
                         <div class="flex items-center">
                             <i class="fas fa-tags w-6 text-indigo-500"></i>
                             <span class="ml-3 font-medium">Catégories</span>
                         </div>
-                        <span class="bg-indigo-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $total_categories; ?></span>
+                        <span
+                            class="bg-indigo-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $total_categories; ?></span>
                     </a>
-                    
-                    <a href="#fournisseurs" onclick="showSection('fournisseurs')" class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
+
+                    <a href="#fournisseurs" onclick="showSection('fournisseurs'); return false;"
+                        class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
                         <div class="flex items-center">
                             <i class="fas fa-truck w-6 text-purple-500"></i>
                             <span class="ml-3 font-medium">Fournisseurs</span>
                         </div>
-                        <span class="bg-purple-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $total_fournisseurs; ?></span>
+                        <span
+                            class="bg-purple-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $total_fournisseurs; ?></span>
                     </a>
                 </div>
             </div>
@@ -437,10 +563,12 @@ function getJoursRestantsClass($jours) {
                     <i class="fas fa-chart-line text-indigo-600"></i>
                 </div>
                 <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-gray-900 truncate"><?php echo htmlspecialchars($user_name); ?></p>
+                    <p class="text-sm font-medium text-gray-900 truncate"><?php echo htmlspecialchars($user_name); ?>
+                    </p>
                     <p class="text-xs text-indigo-600 truncate"><?php echo htmlspecialchars(ucfirst($user_role)); ?></p>
                 </div>
-                <a href="../utilisateurs/logout.php" class="text-gray-400 hover:text-red-500 transition-colors" title="Déconnexion">
+                <a href="../utilisateurs/logout.php" class="text-gray-400 hover:text-red-500 transition-colors"
+                    title="Déconnexion">
                     <i class="fas fa-sign-out-alt"></i>
                 </a>
             </div>
@@ -459,7 +587,8 @@ function getJoursRestantsClass($jours) {
                 <div class="flex items-center space-x-4">
                     <div class="text-sm text-gray-600">
                         <i class="fas fa-user-circle mr-2"></i>
-                        Connecté en tant que <span class="font-semibold"><?php echo htmlspecialchars(ucfirst($user_role)); ?></span>
+                        Connecté en tant que <span
+                            class="font-semibold"><?php echo htmlspecialchars(ucfirst($user_role)); ?></span>
                     </div>
                     <div class="text-xs text-gray-500">
                         <?php echo date('d/m/Y H:i'); ?>
@@ -500,7 +629,9 @@ function getJoursRestantsClass($jours) {
                         <div class="flex items-center justify-between">
                             <div>
                                 <p class="text-sm font-medium text-gray-600">CA Mensuel</p>
-                                <p class="text-2xl font-bold text-gray-900 mt-1"><?php echo formatMontant($ca_mensuel); ?></p>
+                                <p class="text-2xl font-bold text-gray-900 mt-1">
+                                    <?php echo formatMontant($ca_mensuel); ?>
+                                </p>
                             </div>
                             <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
                                 <i class="fas fa-euro-sign text-green-600 text-xl"></i>
@@ -508,7 +639,8 @@ function getJoursRestantsClass($jours) {
                         </div>
                         <div class="mt-4 flex items-center">
                             <?php list($icon, $textColor, $bgColor) = getEvolutionIcon($evolution_ca); ?>
-                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <?php echo $bgColor . ' ' . $textColor; ?>">
+                            <span
+                                class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium <?php echo $bgColor . ' ' . $textColor; ?>">
                                 <i class="<?php echo $icon; ?> mr-1"></i>
                                 <?php echo formatPourcentage(abs($evolution_ca)); ?>
                             </span>
@@ -521,7 +653,8 @@ function getJoursRestantsClass($jours) {
                         <div class="flex items-center justify-between">
                             <div>
                                 <p class="text-sm font-medium text-gray-600">Commandes Aujourd'hui</p>
-                                <p class="text-2xl font-bold text-gray-900 mt-1"><?php echo $commandes_aujourdhui; ?></p>
+                                <p class="text-2xl font-bold text-gray-900 mt-1"><?php echo $commandes_aujourdhui; ?>
+                                </p>
                             </div>
                             <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
                                 <i class="fas fa-shopping-cart text-blue-600 text-xl"></i>
@@ -537,7 +670,9 @@ function getJoursRestantsClass($jours) {
                         <div class="flex items-center justify-between">
                             <div>
                                 <p class="text-sm font-medium text-gray-600">Valeur Stock</p>
-                                <p class="text-2xl font-bold text-gray-900 mt-1"><?php echo formatMontant($valeur_stock); ?></p>
+                                <p class="text-2xl font-bold text-gray-900 mt-1">
+                                    <?php echo formatMontant($valeur_stock); ?>
+                                </p>
                             </div>
                             <div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
                                 <i class="fas fa-boxes text-purple-600 text-xl"></i>
@@ -553,7 +688,9 @@ function getJoursRestantsClass($jours) {
                         <div class="flex items-center justify-between">
                             <div>
                                 <p class="text-sm font-medium text-gray-600">Marge Moyenne</p>
-                                <p class="text-2xl font-bold text-gray-900 mt-1"><?php echo formatPourcentage($marge_moyenne); ?></p>
+                                <p class="text-2xl font-bold text-gray-900 mt-1">
+                                    <?php echo formatPourcentage($marge_moyenne); ?>
+                                </p>
                             </div>
                             <div class="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
                                 <i class="fas fa-percent text-yellow-600 text-xl"></i>
@@ -585,7 +722,9 @@ function getJoursRestantsClass($jours) {
                         <div class="flex items-center justify-between">
                             <div>
                                 <p class="text-sm font-medium text-gray-600">Expiration Proche</p>
-                                <p class="text-2xl font-bold text-gray-900 mt-1"><?php echo $stats_lots['expiration_proche']; ?></p>
+                                <p class="text-2xl font-bold text-gray-900 mt-1">
+                                    <?php echo $stats_lots['expiration_proche']; ?>
+                                </p>
                             </div>
                             <div class="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
                                 <i class="fas fa-clock text-orange-600 text-xl"></i>
@@ -598,7 +737,9 @@ function getJoursRestantsClass($jours) {
                         <div class="flex items-center justify-between">
                             <div>
                                 <p class="text-sm font-medium text-gray-600">Stock Total</p>
-                                <p class="text-2xl font-bold text-gray-900 mt-1"><?php echo $stats_lots['stock_total']; ?></p>
+                                <p class="text-2xl font-bold text-gray-900 mt-1">
+                                    <?php echo $stats_lots['stock_total']; ?>
+                                </p>
                             </div>
                             <div class="w-12 h-12 bg-pink-100 rounded-lg flex items-center justify-center">
                                 <i class="fas fa-box text-pink-600 text-xl"></i>
@@ -627,26 +768,26 @@ function getJoursRestantsClass($jours) {
                         <h3 class="text-lg font-semibold text-gray-900 mb-4">Évolution du CA (6 derniers mois)</h3>
                         <div class="h-64 flex items-end justify-between">
                             <?php if (!empty($evolution_ca_data)): ?>
-                                <?php 
-                                    $max_ca = max(array_column($evolution_ca_data, 'ca'));
-                                    if ($max_ca == 0) $max_ca = 1;
+                                <?php
+                                $max_ca = max(array_column($evolution_ca_data, 'ca'));
+                                if ($max_ca == 0)
+                                    $max_ca = 1;
                                 ?>
                                 <?php foreach ($evolution_ca_data as $mois): ?>
-                                <div class="flex flex-col items-center flex-1">
-                                    <div class="text-xs text-gray-500 mb-2">
-                                        <?php echo substr($mois['mois_format'], 0, 3); ?>
+                                    <div class="flex flex-col items-center flex-1">
+                                        <div class="text-xs text-gray-500 mb-2">
+                                            <?php echo substr($mois['mois_format'], 0, 3); ?>
+                                        </div>
+                                        <div class="w-3/4">
+                                            <div class="bg-gradient-to-t from-indigo-500 to-indigo-600 rounded-t hover:from-indigo-600 hover:to-indigo-700 cursor-pointer mx-auto"
+                                                style="height: <?php echo ($mois['ca'] / $max_ca) * 100; ?>%; min-height: 5px;"
+                                                title="<?php echo $mois['mois_format']; ?>: <?php echo formatMontant($mois['ca']); ?>">
+                                            </div>
+                                        </div>
+                                        <div class="text-xs text-gray-600 mt-2">
+                                            <?php echo formatMontant($mois['ca']); ?>
+                                        </div>
                                     </div>
-                                    <div class="w-3/4">
-                                        <div 
-                                            class="bg-gradient-to-t from-indigo-500 to-indigo-600 rounded-t hover:from-indigo-600 hover:to-indigo-700 cursor-pointer mx-auto"
-                                            style="height: <?php echo ($mois['ca'] / $max_ca) * 100; ?>%; min-height: 5px;"
-                                            title="<?php echo $mois['mois_format']; ?>: <?php echo formatMontant($mois['ca']); ?>"
-                                        ></div>
-                                    </div>
-                                    <div class="text-xs text-gray-600 mt-2">
-                                        <?php echo formatMontant($mois['ca']); ?>
-                                    </div>
-                                </div>
                                 <?php endforeach; ?>
                             <?php else: ?>
                                 <div class="text-center w-full py-8 text-gray-500">
@@ -663,22 +804,27 @@ function getJoursRestantsClass($jours) {
                         <div class="space-y-3">
                             <?php if (!empty($top_produits)): ?>
                                 <?php foreach ($top_produits as $index => $produit): ?>
-                                <div class="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
-                                    <div class="flex items-center">
-                                        <span class="w-6 h-6 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-xs font-bold mr-3">
-                                            <?php echo $index + 1; ?>
-                                        </span>
-                                        <div>
-                                            <span class="font-medium text-gray-900"><?php echo htmlspecialchars($produit['nom']); ?></span>
-                                            <div class="text-xs text-gray-500">
-                                                <?php echo $produit['total_vendu'] ?? 0; ?> unités vendues
+                                    <div
+                                        class="flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:bg-gray-50">
+                                        <div class="flex items-center">
+                                            <span
+                                                class="w-6 h-6 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-xs font-bold mr-3">
+                                                <?php echo $index + 1; ?>
+                                            </span>
+                                            <div>
+                                                <span
+                                                    class="font-medium text-gray-900"><?php echo htmlspecialchars($produit['nom']); ?></span>
+                                                <div class="text-xs text-gray-500">
+                                                    <?php echo $produit['total_vendu'] ?? 0; ?> unités vendues
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="text-right">
+                                            <div class="font-semibold text-green-600">
+                                                <?php echo formatMontant($produit['ca_total'] ?? 0); ?>
                                             </div>
                                         </div>
                                     </div>
-                                    <div class="text-right">
-                                        <div class="font-semibold text-green-600"><?php echo formatMontant($produit['ca_total'] ?? 0); ?></div>
-                                    </div>
-                                </div>
                                 <?php endforeach; ?>
                             <?php else: ?>
                                 <div class="text-center py-8 text-gray-500">
@@ -695,8 +841,10 @@ function getJoursRestantsClass($jours) {
             <div id="produits" class="section hidden">
                 <div class="bg-white rounded-2xl shadow-sm">
                     <div class="px-6 py-4 border-b flex justify-between items-center">
-                        <h3 class="text-xl font-semibold text-gray-900">Liste des Produits (<?php echo $total_produits; ?> produits)</h3>
-                        <button onclick="exportToExcel('produits')" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center transition-colors">
+                        <h3 class="text-xl font-semibold text-gray-900">Liste des Produits
+                            (<?php echo $total_produits; ?> produits)</h3>
+                        <button onclick="exportToExcel('produits')"
+                            class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center transition-colors">
                             <i class="fas fa-file-excel mr-2"></i>
                             Exporter Excel
                         </button>
@@ -704,14 +852,28 @@ function getJoursRestantsClass($jours) {
                     <div class="p-6">
                         <!-- Filtres -->
                         <div class="flex flex-wrap gap-4 mb-6">
-                            <input type="text" id="searchProduit" placeholder="Rechercher un produit..." class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1 min-w-[200px]">
-                            <select id="filterCategorie" class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <input type="text" id="searchProduit" placeholder="Rechercher un produit..."
+                                class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 flex-1 min-w-[200px]">
+                            <select id="filterCategorie"
+                                class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
                                 <option value="">Toutes catégories</option>
                                 <?php foreach ($categories as $categorie): ?>
-                                <option value="<?php echo $categorie['id']; ?>"><?php echo htmlspecialchars($categorie['nom']); ?></option>
+                                    <option value="<?php echo $categorie['id']; ?>">
+                                        <?php echo htmlspecialchars($categorie['nom']); ?>
+                                    </option>
                                 <?php endforeach; ?>
                             </select>
-                            <select id="filterStatut" class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <select id="filterFournisseur"
+                                class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="">Tous fournisseurs</option>
+                                <?php foreach ($fournisseurs as $fournisseur): ?>
+                                    <option value="<?php echo $fournisseur['id']; ?>">
+                                        <?php echo htmlspecialchars($fournisseur['nom_societe']); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <select id="filterStatut"
+                                class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
                                 <option value="">Tous statuts</option>
                                 <option value="actif">Actif</option>
                                 <option value="inactif">Inactif</option>
@@ -724,62 +886,80 @@ function getJoursRestantsClass($jours) {
                             <table class="w-full text-sm" id="produitsTable">
                                 <thead class="bg-gray-50">
                                     <tr>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Produit</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Catégorie</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code Barre</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ordonnance</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Statut</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Créé le</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID
+                                        </th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                            Produit</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                            Catégorie</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                            Fournisseur</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code
+                                            Barre</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                            Ordonnance</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                            Statut</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Créé
+                                            le</th>
                                     </tr>
                                 </thead>
                                 <tbody class="bg-white divide-y divide-gray-200">
                                     <?php if (!empty($produits)): ?>
                                         <?php foreach ($produits as $produit): ?>
-                                        <tr class="produit-row hover:bg-gray-50" 
-                                            data-id="<?php echo $produit['id']; ?>"
-                                            data-nom="<?php echo htmlspecialchars($produit['nom']); ?>"
-                                            data-categorie="<?php echo $produit['categorie_id']; ?>"
-                                            data-statut="<?php echo $produit['statut']; ?>">
-                                            <td class="px-4 py-3 font-mono text-gray-500">
-                                                <?php echo $produit['id']; ?>
-                                            </td>
-                                            <td class="px-4 py-3">
-                                                <div class="font-medium text-gray-900"><?php echo htmlspecialchars($produit['nom']); ?></div>
-                                                <div class="text-xs text-gray-500 truncate max-w-xs"><?php echo htmlspecialchars(substr($produit['description'] ?: 'Aucune description', 0, 50)); ?>...</div>
-                                            </td>
-                                            <td class="px-4 py-3 text-gray-500">
-                                                <?php echo htmlspecialchars($produit['categorie_nom'] ?? 'Non classé'); ?>
-                                            </td>
-                                            <td class="px-4 py-3 text-gray-500">
-                                                <?php echo htmlspecialchars($produit['code_barre'] ?? 'N/A'); ?>
-                                            </td>
-                                            <td class="px-4 py-3">
-                                                <?php if ($produit['necessite_ordonnance']): ?>
-                                                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                                                        <i class="fas fa-prescription-bottle-alt mr-1"></i>
-                                                        Oui
+                                            <tr class="produit-row hover:bg-gray-50" data-id="<?php echo $produit['id']; ?>"
+                                                data-nom="<?php echo htmlspecialchars($produit['nom']); ?>"
+                                                data-categorie="<?php echo $produit['categorie_id']; ?>"
+                                                data-fournisseur="<?php echo $produit['fournisseur_id']; ?>"
+                                                data-statut="<?php echo $produit['statut']; ?>">
+                                                <td class="px-4 py-3 font-mono text-gray-500">
+                                                    <?php echo $produit['id']; ?>
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    <div class="font-medium text-gray-900">
+                                                        <?php echo htmlspecialchars($produit['nom']); ?></div>
+                                                    <div class="text-xs text-gray-500 truncate max-w-xs">
+                                                        <?php echo htmlspecialchars(substr($produit['description'] ?: 'Aucune description', 0, 50)); ?>...
+                                                    </div>
+                                                </td>
+                                                <td class="px-4 py-3 text-gray-500">
+                                                    <?php echo htmlspecialchars($produit['categorie_nom'] ?? 'Non classé'); ?>
+                                                </td>
+                                                <td class="px-4 py-3 text-gray-500">
+                                                    <?php echo htmlspecialchars($produit['fournisseur_nom'] ?? 'Non défini'); ?>
+                                                </td>
+                                                <td class="px-4 py-3 text-gray-500">
+                                                    <?php echo htmlspecialchars($produit['code_barre'] ?? 'N/A'); ?>
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    <?php if ($produit['necessite_ordonnance']): ?>
+                                                        <span
+                                                            class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                                                            <i class="fas fa-prescription-bottle-alt mr-1"></i>
+                                                            Oui
+                                                        </span>
+                                                    <?php else: ?>
+                                                        <span
+                                                            class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                                            <i class="fas fa-check mr-1"></i>
+                                                            Non
+                                                        </span>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    <span
+                                                        class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium <?php echo getStatutProduitClass($produit['statut']); ?>">
+                                                        <?php echo ucfirst($produit['statut']); ?>
                                                     </span>
-                                                <?php else: ?>
-                                                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                                                        <i class="fas fa-check mr-1"></i>
-                                                        Non
-                                                    </span>
-                                                <?php endif; ?>
-                                            </td>
-                                            <td class="px-4 py-3">
-                                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium <?php echo getStatutProduitClass($produit['statut']); ?>">
-                                                    <?php echo ucfirst($produit['statut']); ?>
-                                                </span>
-                                            </td>
-                                            <td class="px-4 py-3 text-gray-500">
-                                                <?php echo date('d/m/Y', strtotime($produit['created_at'])); ?>
-                                            </td>
-                                        </tr>
+                                                </td>
+                                                <td class="px-4 py-3 text-gray-500">
+                                                    <?php echo date('d/m/Y', strtotime($produit['created_at'])); ?>
+                                                </td>
+                                            </tr>
                                         <?php endforeach; ?>
                                     <?php else: ?>
                                         <tr>
-                                            <td colspan="7" class="px-4 py-8 text-center text-gray-500">
+                                            <td colspan="8" class="px-4 py-8 text-center text-gray-500">
                                                 <i class="fas fa-pills text-2xl mb-2"></i>
                                                 <p>Aucun produit trouvé</p>
                                             </td>
@@ -796,8 +976,10 @@ function getJoursRestantsClass($jours) {
             <div id="commandes" class="section hidden">
                 <div class="bg-white rounded-2xl shadow-sm">
                     <div class="px-6 py-4 border-b flex justify-between items-center">
-                        <h3 class="text-xl font-semibold text-gray-900">Liste des Commandes (<?php echo $total_commandes_mois; ?> ce mois)</h3>
-                        <button onclick="exportToExcel('commandes')" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center transition-colors">
+                        <h3 class="text-xl font-semibold text-gray-900">Liste des Commandes
+                            (<?php echo $total_commandes_mois; ?> ce mois)</h3>
+                        <button onclick="exportToExcel('commandes')"
+                            class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center transition-colors">
                             <i class="fas fa-file-excel mr-2"></i>
                             Exporter Excel
                         </button>
@@ -805,15 +987,18 @@ function getJoursRestantsClass($jours) {
                     <div class="p-6">
                         <!-- Filtres -->
                         <div class="flex flex-wrap gap-4 mb-6">
-                            <input type="text" id="searchCommande" placeholder="Rechercher une commande..." class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 flex-1 min-w-[200px]">
-                            <select id="filterStatutCommande" class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500">
+                            <input type="text" id="searchCommande" placeholder="Rechercher une commande..."
+                                class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 flex-1 min-w-[200px]">
+                            <select id="filterStatutCommande"
+                                class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500">
                                 <option value="">Tous statuts</option>
                                 <option value="en_attente">En attente</option>
                                 <option value="paye">Payé</option>
                                 <option value="annule">Annulé</option>
                                 <option value="rembourse">Remboursé</option>
                             </select>
-                            <input type="date" id="filterDate" class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500">
+                            <input type="date" id="filterDate"
+                                class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500">
                         </div>
 
                         <!-- Liste des commandes -->
@@ -821,45 +1006,57 @@ function getJoursRestantsClass($jours) {
                             <table class="w-full text-sm" id="commandesTable">
                                 <thead class="bg-gray-50">
                                     <tr>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">N° Commande</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Client</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Montant</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Mode Paiement</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Statut</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">N°
+                                            Commande</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                            Client</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date
+                                        </th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                            Montant</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Mode
+                                            Paiement</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                            Statut</th>
                                     </tr>
                                 </thead>
                                 <tbody class="bg-white divide-y divide-gray-200">
                                     <?php if (!empty($commandes)): ?>
                                         <?php foreach ($commandes as $commande): ?>
-                                        <tr class="commande-row hover:bg-gray-50"
-                                            data-id="<?php echo $commande['id']; ?>"
-                                            data-numero="<?php echo htmlspecialchars($commande['numero_commande']); ?>"
-                                            data-statut="<?php echo $commande['statut']; ?>"
-                                            data-date="<?php echo date('Y-m-d', strtotime($commande['date_commande'])); ?>">
-                                            <td class="px-4 py-3 font-mono font-medium text-gray-900">
-                                                <?php echo htmlspecialchars($commande['numero_commande']); ?>
-                                            </td>
-                                            <td class="px-4 py-3">
-                                                <div class="font-medium text-gray-900">
-                                                    <?php echo htmlspecialchars($commande['client_nom'] . ' ' . $commande['client_prenom']); ?>
-                                                </div>
-                                            </td>
-                                            <td class="px-4 py-3 text-gray-500">
-                                                <?php echo date('d/m/Y H:i', strtotime($commande['date_commande'])); ?>
-                                            </td>
-                                            <td class="px-4 py-3 font-semibold text-green-600">
-                                                <?php echo formatMontant($commande['montant_total']); ?>
-                                            </td>
-                                            <td class="px-4 py-3 text-gray-500">
-                                                <?php echo ucfirst($commande['mode_paiement'] ?? 'especes'); ?>
-                                            </td>
-                                            <td class="px-4 py-3">
-                                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium <?php echo getStatutCommandeClass($commande['statut']); ?>">
-                                                    <?php echo ucfirst(str_replace('_', ' ', $commande['statut'])); ?>
-                                                </span>
-                                            </td>
-                                        </tr>
+                                            <tr class="commande-row hover:bg-gray-50" 
+                                                data-id="<?php echo $commande['id']; ?>"
+                                                data-numero="<?php echo htmlspecialchars($commande['numero_commande'] ?? $commande['id']); ?>"
+                                                data-statut="<?php echo htmlspecialchars($commande['statut'] ?? ''); ?>"
+                                                data-date="<?php echo date('Y-m-d', strtotime($commande['date_commande'] ?? 'now')); ?>">
+                                                <td class="px-4 py-3 font-mono text-gray-900 font-medium">
+                                                    #<?php echo $commande['id']; ?>
+                                                    <?php if (!empty($commande['numero_commande'])): ?>
+                                                        <div class="text-xs text-gray-500"><?php echo htmlspecialchars($commande['numero_commande']); ?></div>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    <div class="font-medium text-gray-900">
+                                                        <?php echo htmlspecialchars($commande['client_nom'] ?? 'Client #' . ($commande['client_id'] ?? 'N/A')); ?>
+                                                    </div>
+                                                </td>
+                                                <td class="px-4 py-3 text-gray-500">
+                                                    <?php echo date('d/m/Y H:i', strtotime($commande['date_commande'] ?? 'now')); ?>
+                                                </td>
+                                                <td class="px-4 py-3 font-semibold text-gray-900">
+                                                    <?php echo formatMontant($commande['montant_total'] ?? 0); ?>
+                                                </td>
+                                                <td class="px-4 py-3 text-gray-500">
+                                                    <?php 
+                                                    $mode_paiement = $commande['mode_paiement'] ?? 'non spécifié';
+                                                    echo ucfirst(str_replace('_', ' ', $mode_paiement));
+                                                    ?>
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium <?php echo getStatutCommandeClass($commande['statut'] ?? ''); ?>">
+                                                        <?php echo ucfirst(str_replace('_', ' ', $commande['statut'] ?? 'inconnu')); ?>
+                                                    </span>
+                                                </td>
+                                            </tr>
                                         <?php endforeach; ?>
                                     <?php else: ?>
                                         <tr>
@@ -880,8 +1077,10 @@ function getJoursRestantsClass($jours) {
             <div id="categories" class="section hidden">
                 <div class="bg-white rounded-2xl shadow-sm">
                     <div class="px-6 py-4 border-b flex justify-between items-center">
-                        <h3 class="text-xl font-semibold text-gray-900">Liste des Catégories (<?php echo $total_categories; ?> catégories)</h3>
-                        <button onclick="exportToExcel('categories')" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center transition-colors">
+                        <h3 class="text-xl font-semibold text-gray-900">Liste des Catégories
+                            (<?php echo $total_categories; ?> catégories)</h3>
+                        <button onclick="exportToExcel('categories')"
+                            class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center transition-colors">
                             <i class="fas fa-file-excel mr-2"></i>
                             Exporter Excel
                         </button>
@@ -892,11 +1091,16 @@ function getJoursRestantsClass($jours) {
                             <table class="w-full text-sm" id="categoriesTable">
                                 <thead class="bg-gray-50">
                                     <tr>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nom</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Statut</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Créé le</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID
+                                        </th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nom
+                                        </th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                            Description</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                            Statut</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Créé
+                                            le</th>
                                     </tr>
                                 </thead>
                                 <tbody class="bg-white divide-y divide-gray-200">
@@ -913,7 +1117,8 @@ function getJoursRestantsClass($jours) {
                                                     <?php echo htmlspecialchars($categorie['description'] ?: 'Aucune description'); ?>
                                                 </td>
                                                 <td class="px-4 py-3">
-                                                    <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium <?php echo $categorie['statut'] == 'actif' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'; ?>">
+                                                    <span
+                                                        class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium <?php echo $categorie['statut'] == 'actif' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'; ?>">
                                                         <?php echo ucfirst($categorie['statut']); ?>
                                                     </span>
                                                 </td>
@@ -941,8 +1146,10 @@ function getJoursRestantsClass($jours) {
             <div id="fournisseurs" class="section hidden">
                 <div class="bg-white rounded-2xl shadow-sm">
                     <div class="px-6 py-4 border-b flex justify-between items-center">
-                        <h3 class="text-xl font-semibold text-gray-900">Liste des Fournisseurs (<?php echo $total_fournisseurs; ?> fournisseurs)</h3>
-                        <button onclick="exportToExcel('fournisseurs')" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center transition-colors">
+                        <h3 class="text-xl font-semibold text-gray-900">Liste des Fournisseurs
+                            (<?php echo $total_fournisseurs; ?> fournisseurs)</h3>
+                        <button onclick="exportToExcel('fournisseurs')"
+                            class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center transition-colors">
                             <i class="fas fa-file-excel mr-2"></i>
                             Exporter Excel
                         </button>
@@ -953,46 +1160,63 @@ function getJoursRestantsClass($jours) {
                             <table class="w-full text-sm" id="fournisseursTable">
                                 <thead class="bg-gray-50">
                                     <tr>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Société</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Contact</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email/Téléphone</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Note Qualité</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Créé le</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID
+                                        </th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                            Société</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                            Contact</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                                            Email/Téléphone</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Note
+                                            Qualité</th>
+                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Créé
+                                            le</th>
                                     </tr>
                                 </thead>
                                 <tbody class="bg-white divide-y divide-gray-200">
                                     <?php if (!empty($fournisseurs)): ?>
                                         <?php foreach ($fournisseurs as $fournisseur): ?>
-                                        <tr class="hover:bg-gray-50">
-                                            <td class="px-4 py-3 font-mono text-gray-500">
-                                                <?php echo $fournisseur['id']; ?>
-                                            </td>
-                                            <td class="px-4 py-3">
-                                                <div class="font-medium text-gray-900"><?php echo htmlspecialchars($fournisseur['nom_societe']); ?></div>
-                                                <?php if ($fournisseur['adresse_siege']): ?>
-                                                <div class="text-xs text-gray-500"><?php echo htmlspecialchars($fournisseur['adresse_siege']); ?></div>
-                                                <?php endif; ?>
-                                            </td>
-                                            <td class="px-4 py-3 text-gray-500">
-                                                <?php echo htmlspecialchars($fournisseur['contact_principal'] ?? 'Non spécifié'); ?>
-                                            </td>
-                                            <td class="px-4 py-3">
-                                                <div class="text-sm text-gray-900"><?php echo htmlspecialchars($fournisseur['email'] ?? 'N/A'); ?></div>
-                                                <div class="text-xs text-gray-500"><?php echo htmlspecialchars($fournisseur['telephone'] ?? 'N/A'); ?></div>
-                                            </td>
-                                            <td class="px-4 py-3">
-                                                <div class="flex items-center">
-                                                    <div class="w-24 bg-gray-200 rounded-full h-2 mr-2">
-                                                        <div class="bg-green-600 h-2 rounded-full" style="width: <?php echo min(100, ($fournisseur['note_qualite'] ?? 0) * 20); ?>%"></div>
+                                            <tr class="hover:bg-gray-50">
+                                                <td class="px-4 py-3 font-mono text-gray-500">
+                                                    <?php echo $fournisseur['id']; ?>
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    <div class="font-medium text-gray-900">
+                                                        <?php echo htmlspecialchars($fournisseur['nom_societe']); ?>
                                                     </div>
-                                                    <span class="text-sm font-medium text-gray-700"><?php echo number_format($fournisseur['note_qualite'] ?? 0, 1); ?>/5</span>
-                                                </div>
-                                            </td>
-                                            <td class="px-4 py-3 text-gray-500">
-                                                <?php echo date('d/m/Y', strtotime($fournisseur['created_at'])); ?>
-                                            </td>
-                                        </tr>
+                                                    <?php if ($fournisseur['adresse_siege']): ?>
+                                                        <div class="text-xs text-gray-500">
+                                                            <?php echo htmlspecialchars($fournisseur['adresse_siege']); ?>
+                                                        </div>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <td class="px-4 py-3 text-gray-500">
+                                                    <?php echo htmlspecialchars($fournisseur['contact_principal'] ?? 'Non spécifié'); ?>
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    <div class="text-sm text-gray-900">
+                                                        <?php echo htmlspecialchars($fournisseur['email'] ?? 'N/A'); ?>
+                                                    </div>
+                                                    <div class="text-xs text-gray-500">
+                                                        <?php echo htmlspecialchars($fournisseur['telephone'] ?? 'N/A'); ?>
+                                                    </div>
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    <div class="flex items-center">
+                                                        <div class="w-24 bg-gray-200 rounded-full h-2 mr-2">
+                                                            <div class="bg-green-600 h-2 rounded-full"
+                                                                style="width: <?php echo min(100, ($fournisseur['note_qualite'] ?? 0) * 20); ?>%">
+                                                            </div>
+                                                        </div>
+                                                        <span
+                                                            class="text-sm font-medium text-gray-700"><?php echo number_format($fournisseur['note_qualite'] ?? 0, 1); ?>/5</span>
+                                                    </div>
+                                                </td>
+                                                <td class="px-4 py-3 text-gray-500">
+                                                    <?php echo date('d/m/Y', strtotime($fournisseur['created_at'])); ?>
+                                                </td>
+                                            </tr>
                                         <?php endforeach; ?>
                                     <?php else: ?>
                                         <tr>
@@ -1014,22 +1238,35 @@ function getJoursRestantsClass($jours) {
 
     <!-- Scripts JavaScript -->
     <script>
-        // Navigation entre sections
+        // Déclaration des fonctions en premier
         function showSection(sectionId) {
+            console.log('showSection appelée avec:', sectionId);
+            
             // Masquer toutes les sections
             document.querySelectorAll('.section').forEach(section => {
                 section.classList.add('hidden');
             });
-            
+
             // Afficher la section sélectionnée
-            document.getElementById(sectionId).classList.remove('hidden');
-            
+            const targetSection = document.getElementById(sectionId);
+            if (targetSection) {
+                targetSection.classList.remove('hidden');
+                console.log('Section affichée:', sectionId);
+            } else {
+                console.error('Section non trouvée:', sectionId);
+            }
+
             // Mettre à jour la navigation active
             document.querySelectorAll('nav a').forEach(link => {
                 link.classList.remove('active');
             });
-            event.currentTarget.classList.add('active');
             
+            // Trouver le lien correspondant
+            const activeLink = document.querySelector(`a[href="#${sectionId}"]`);
+            if (activeLink) {
+                activeLink.classList.add('active');
+            }
+
             // Mettre à jour le titre de la page
             const titles = {
                 'dashboard': 'Tableau de bord Gérant',
@@ -1038,14 +1275,19 @@ function getJoursRestantsClass($jours) {
                 'categories': 'Liste des Catégories',
                 'fournisseurs': 'Liste des Fournisseurs'
             };
-            document.getElementById('pageTitle').textContent = titles[sectionId] || 'Tableau de bord Gérant';
+            
+            const pageTitle = document.getElementById('pageTitle');
+            if (pageTitle) {
+                pageTitle.textContent = titles[sectionId] || 'Tableau de bord Gérant';
+            }
         }
 
         // Fonction pour exporter en Excel
         function exportToExcel(type) {
+            console.log('exportToExcel appelée avec:', type);
             let tableId, filename;
-            
-            switch(type) {
+
+            switch (type) {
                 case 'produits':
                     tableId = 'produitsTable';
                     filename = 'produits_' + new Date().toISOString().split('T')[0] + '.xls';
@@ -1063,50 +1305,104 @@ function getJoursRestantsClass($jours) {
                     filename = 'fournisseurs_' + new Date().toISOString().split('T')[0] + '.xls';
                     break;
                 default:
+                    console.error('Type inconnu:', type);
                     return;
             }
-            
+
             const table = document.getElementById(tableId);
-            let html = table.outerHTML;
+            if (!table) {
+                console.error('Tableau non trouvé:', tableId);
+                return;
+            }
             
+            let html = table.outerHTML;
+
             // Créer un blob et télécharger
             const blob = new Blob(['\ufeff', html], {
                 type: 'application/vnd.ms-excel'
             });
-            
+
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
             link.download = filename;
+            document.body.appendChild(link);
             link.click();
-            
+            document.body.removeChild(link);
+
             URL.revokeObjectURL(link.href);
         }
 
         // Filtrer les produits
-        document.addEventListener('DOMContentLoaded', function() {
-            // Initialisation
-            showSection('dashboard');
+        function filterProduits() {
+            const search = document.getElementById('searchProduit').value.toLowerCase();
+            const categorie = document.getElementById('filterCategorie').value;
+            const fournisseur = document.getElementById('filterFournisseur').value;
+            const statut = document.getElementById('filterStatut').value;
+
+            document.querySelectorAll('#produitsTable .produit-row').forEach(row => {
+                const nom = row.getAttribute('data-nom').toLowerCase();
+                const rowCategorie = row.getAttribute('data-categorie');
+                const rowFournisseur = row.getAttribute('data-fournisseur');
+                const rowStatut = row.getAttribute('data-statut');
+
+                const matchSearch = nom.includes(search);
+                const matchCategorie = !categorie || rowCategorie === categorie;
+                const matchFournisseur = !fournisseur || rowFournisseur === fournisseur;
+                const matchStatut = !statut || rowStatut === statut;
+
+                row.style.display = (matchSearch && matchCategorie && matchFournisseur && matchStatut) ? '' : 'none';
+            });
+        }
+
+        function filterCommandes() {
+            const search = document.getElementById('searchCommande').value.toLowerCase();
+            const statut = document.getElementById('filterStatutCommande').value;
+            const date = document.getElementById('filterDate').value;
+
+            document.querySelectorAll('#commandesTable .commande-row').forEach(row => {
+                const numero = row.getAttribute('data-numero').toLowerCase();
+                const rowStatut = row.getAttribute('data-statut');
+                const rowDate = row.getAttribute('data-date');
+
+                const matchSearch = numero.includes(search);
+                const matchStatut = !statut || rowStatut === statut;
+                const matchDate = !date || rowDate === date;
+
+                row.style.display = (matchSearch && matchStatut && matchDate) ? '' : 'none';
+            });
+        }
+
+        // Initialisation lorsque le DOM est chargé
+        document.addEventListener('DOMContentLoaded', function () {
+            console.log('DOM chargé, initialisation...');
             
+            // Initialisation - Afficher la section dashboard par défaut
+            showSection('dashboard');
+
             // Filtre produits
             const searchProduit = document.getElementById('searchProduit');
             const filterCategorie = document.getElementById('filterCategorie');
+            const filterFournisseur = document.getElementById('filterFournisseur');
             const filterStatut = document.getElementById('filterStatut');
-            
+
             if (searchProduit) {
                 searchProduit.addEventListener('input', filterProduits);
             }
             if (filterCategorie) {
                 filterCategorie.addEventListener('change', filterProduits);
             }
+            if (filterFournisseur) {
+                filterFournisseur.addEventListener('change', filterProduits);
+            }
             if (filterStatut) {
                 filterStatut.addEventListener('change', filterProduits);
             }
-            
+
             // Filtre commandes
             const searchCommande = document.getElementById('searchCommande');
             const filterStatutCommande = document.getElementById('filterStatutCommande');
             const filterDate = document.getElementById('filterDate');
-            
+
             if (searchCommande) {
                 searchCommande.addEventListener('input', filterCommandes);
             }
@@ -1116,43 +1412,12 @@ function getJoursRestantsClass($jours) {
             if (filterDate) {
                 filterDate.addEventListener('change', filterCommandes);
             }
+
+            console.log('Initialisation terminée');
         });
-
-        function filterProduits() {
-            const search = document.getElementById('searchProduit').value.toLowerCase();
-            const categorie = document.getElementById('filterCategorie').value;
-            const statut = document.getElementById('filterStatut').value;
-            
-            document.querySelectorAll('#produitsTable .produit-row').forEach(row => {
-                const nom = row.getAttribute('data-nom').toLowerCase();
-                const rowCategorie = row.getAttribute('data-categorie');
-                const rowStatut = row.getAttribute('data-statut');
-                
-                const matchSearch = nom.includes(search);
-                const matchCategorie = !categorie || rowCategorie === categorie;
-                const matchStatut = !statut || rowStatut === statut;
-                
-                row.style.display = (matchSearch && matchCategorie && matchStatut) ? '' : 'none';
-            });
-        }
-
-        function filterCommandes() {
-            const search = document.getElementById('searchCommande').value.toLowerCase();
-            const statut = document.getElementById('filterStatutCommande').value;
-            const date = document.getElementById('filterDate').value;
-            
-            document.querySelectorAll('#commandesTable .commande-row').forEach(row => {
-                const numero = row.getAttribute('data-numero').toLowerCase();
-                const rowStatut = row.getAttribute('data-statut');
-                const rowDate = row.getAttribute('data-date');
-                
-                const matchSearch = numero.includes(search);
-                const matchStatut = !statut || rowStatut === statut;
-                const matchDate = !date || rowDate === date;
-                
-                row.style.display = (matchSearch && matchStatut && matchDate) ? '' : 'none';
-            });
-        }
     </script>
 </body>
+
+</html>
+
 </html>
