@@ -401,7 +401,7 @@ function getRoleBadgeClass($role): string
         'stockiste' => 'bg-purple-100 text-purple-800',
         'gerant' => 'bg-indigo-100 text-indigo-800',
         'fournisseur' => 'bg-teal-100 text-teal-800',
-        'client' => 'bg-gray-100 text-gray-800' // NOUVEAU RÔLE
+        'client' => 'bg-gray-100 text-gray-800'
     ];
     return $classes[$role] ?? 'bg-gray-100 text-gray-800';
 }
@@ -470,6 +470,54 @@ function formatDate($date): string
             border-color: #EF4444;
             color: #7F1D1D;
         }
+
+        .modal-backdrop {
+            background-color: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+        }
+
+        .modal-content {
+            animation: modalSlideIn 0.3s ease-out;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-50px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .fade-out {
+            animation: fadeOut 0.3s ease-out;
+        }
+
+        @keyframes fadeOut {
+            from {
+                opacity: 1;
+            }
+            to {
+                opacity: 0;
+            }
+        }
+
+        .action-btn {
+            transition: all 0.2s ease;
+            padding: 6px 12px;
+            border-radius: 6px;
+        }
+
+        .action-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .table-row-hover:hover {
+            background-color: #f9fafb;
+        }
     </style>
 </head>
 
@@ -489,7 +537,7 @@ function formatDate($date): string
             </div>
         </div>
 
-        <!-- Navigation -->
+        <!-- Navigation (ONLY ORIGINAL SECTIONS) -->
         <nav class="mt-6">
             <div class="px-4 space-y-2">
                 <!-- Tableau de bord -->
@@ -499,115 +547,19 @@ function formatDate($date): string
                     <span class="ml-3 font-medium">Tableau de bord</span>
                 </a>
 
-                <!-- Gestion des données -->
-                <div class="mt-4">
-                    <p class="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Gestion des
-                        Données</p>
+                <!-- Gestion des utilisateurs -->
+                <a href="#utilisateurs" onclick="showSection('utilisateurs')"
+                    class="flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
+                    <i class="fas fa-users w-6"></i>
+                    <span class="ml-3 font-medium">Gestion Utilisateurs</span>
+                </a>
 
-                    <a href="#produits" onclick="showSection('produits')"
-                        class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
-                        <div class="flex items-center">
-                            <i class="fas fa-pills w-6 text-blue-500"></i>
-                            <span class="ml-3 font-medium">Produits</span>
-                        </div>
-                        <span
-                            class="bg-blue-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $total_produits; ?></span>
-                    </a>
-
-                    <a href="#commandes" onclick="showSection('commandes')"
-                        class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
-                        <div class="flex items-center">
-                            <i class="fas fa-shopping-cart w-6 text-green-500"></i>
-                            <span class="ml-3 font-medium">Commandes</span>
-                        </div>
-                        <span
-                            class="bg-green-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $total_commandes_mois; ?></span>
-                    </a>
-
-                    <a href="#categories" onclick="showSection('categories')"
-                        class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
-                        <div class="flex items-center">
-                            <i class="fas fa-tags w-6 text-indigo-500"></i>
-                            <span class="ml-3 font-medium">Catégories</span>
-                        </div>
-                        <span
-                            class="bg-indigo-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $total_categories; ?></span>
-                    </a>
-
-                    <a href="#fournisseurs" onclick="showSection('fournisseurs')"
-                        class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
-                        <div class="flex items-center">
-                            <i class="fas fa-truck w-6 text-purple-500"></i>
-                            <span class="ml-3 font-medium">Fournisseurs</span>
-                        </div>
-                        <span
-                            class="bg-purple-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $total_fournisseurs; ?></span>
-                    </a>
-                </div>
-
-                <!-- Surveillance & Alertes -->
-                <div class="mt-4">
-                    <p class="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Surveillance</p>
-
-                    <a href="#alertes" onclick="showSection('alertes')"
-                        class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
-                        <div class="flex items-center">
-                            <i class="fas fa-bell w-6 text-red-500"></i>
-                            <span class="ml-3 font-medium">Alertes</span>
-                        </div>
-                        <?php if (count($alertes) > 0): ?>
-                            <span
-                                class="bg-red-500 text-white text-xs px-2 py-1 rounded-full"><?php echo count($alertes); ?></span>
-                        <?php endif; ?>
-                    </a>
-
-                    <a href="#lots" onclick="showSection('lots')"
-                        class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
-                        <div class="flex items-center">
-                            <i class="fas fa-boxes w-6 text-orange-500"></i>
-                            <span class="ml-3 font-medium">Gestion Lots</span>
-                        </div>
-                        <?php if ($stats_lots['expiration_proche'] > 0): ?>
-                            <span
-                                class="bg-orange-500 text-white text-xs px-2 py-1 rounded-full"><?php echo $stats_lots['expiration_proche']; ?></span>
-                        <?php endif; ?>
-                    </a>
-                </div>
-
-                <!-- Rapports & Analyses -->
-                <div class="mt-4">
-                    <p class="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Rapports &
-                        Analyses</p>
-
-                    <a href="#finances" onclick="showSection('finances')"
-                        class="flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
-                        <i class="fas fa-chart-bar w-6 text-teal-500"></i>
-                        <span class="ml-3 font-medium">Analyse Financière</span>
-                    </a>
-
-                    <a href="#performance" onclick="showSection('performance')"
-                        class="flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
-                        <i class="fas fa-trophy w-6 text-yellow-500"></i>
-                        <span class="ml-3 font-medium">Performance Commerciale</span>
-                    </a>
-                </div>
-
-                <!-- Configuration système -->
-                <div class="mt-4">
-                    <p class="px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Configuration</p>
-
-                    <a href="#utilisateurs" onclick="showSection('utilisateurs')"
-                        class="flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
-                        <i class="fas fa-users w-6 text-gray-500"></i>
-                        <span class="ml-3 font-medium">Utilisateurs</span>
-                    </a>
-
-                    <a href="#parametres" onclick="showSection('parametres')"
-                        class="flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
-                        <i class="fas fa-cog w-6 text-gray-500"></i>
-                        <span class="ml-3 font-medium">Paramètres</span>
-                    </a>
-                </div>
+                <!-- Historique des actions -->
+                <a href="#historique" onclick="showSection('historique')"
+                    class="flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
+                    <i class="fas fa-history w-6"></i>
+                    <span class="ml-3 font-medium">Historique des Actions</span>
+                </a>
             </div>
         </nav>
 
@@ -860,7 +812,7 @@ function formatDate($date): string
 
                                 <div class="md:col-span-2">
                                     <button type="submit"
-                                        class="pharma-green text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors flex items-center justify-center">
+                                        class="pharma-green text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-700 transition-colors flex items-center justify-center action-btn">
                                         <i class="fas fa-user-plus mr-2"></i>
                                         Créer l'utilisateur
                                     </button>
@@ -878,7 +830,7 @@ function formatDate($date): string
                                             Utilisateur</th>
                                         <th
                                             class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Adresse
+                                            Contact
                                         </th>
                                         <th
                                             class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -889,8 +841,6 @@ function formatDate($date): string
                                         <th
                                             class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Date création</th>
-
-                                        </th>
                                         <th
                                             class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Actions</th>
@@ -899,7 +849,7 @@ function formatDate($date): string
                                 <tbody class="bg-white divide-y divide-gray-200">
                                     <?php if (!empty($users)): ?>
                                         <?php foreach ($users as $user): ?>
-                                            <tr class="hover:bg-gray-50">
+                                            <tr class="table-row-hover">
                                                 <td class="px-6 py-4 whitespace-nowrap">
                                                     <div class="flex items-center">
                                                         <div
@@ -917,7 +867,18 @@ function formatDate($date): string
                                                     </div>
                                                 </td>
                                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                                    <?php echo htmlspecialchars($user['adresse'] ?? 'Non définie'); ?>
+                                                    <?php if (!empty($user['telephone'])): ?>
+                                                        <div class="mb-1">
+                                                            <i class="fas fa-phone mr-1 text-gray-400"></i>
+                                                            <?php echo htmlspecialchars($user['telephone']); ?>
+                                                        </div>
+                                                    <?php endif; ?>
+                                                    <?php if (!empty($user['adresse'])): ?>
+                                                        <div>
+                                                            <i class="fas fa-map-marker-alt mr-1 text-gray-400"></i>
+                                                            <?php echo htmlspecialchars($user['adresse']); ?>
+                                                        </div>
+                                                    <?php endif; ?>
                                                 </td>
                                                 <td class="px-6 py-4 whitespace-nowrap">
                                                     <span
@@ -940,39 +901,36 @@ function formatDate($date): string
                                                         <!-- Bouton Modifier -->
                                                         <button
                                                             onclick="openEditModal(<?php echo htmlspecialchars(json_encode($user)); ?>)"
-                                                            class="text-blue-600 hover:text-blue-900" title="Modifier">
+                                                            class="text-blue-600 hover:text-blue-900 action-btn bg-blue-50 hover:bg-blue-100"
+                                                            title="Modifier">
                                                             <i class="fas fa-edit"></i>
                                                         </button>
 
                                                         <!-- Bouton Activer/Désactiver -->
-                                                        <form method="POST" class="inline">
-                                                            <input type="hidden" name="user_id"
-                                                                value="<?php echo $user['id'] ?? ''; ?>">
-                                                            <input type="hidden" name="new_status"
-                                                                value="<?php echo ($user['statut'] ?? '') === 'actif' ? 'inactif' : 'actif'; ?>">
-                                                            <button type="submit" name="toggle_status"
-                                                                class="<?php echo ($user['statut'] ?? '') === 'actif' ? 'text-yellow-600 hover:text-yellow-900' : 'text-green-600 hover:text-green-900'; ?>"
-                                                                title="<?php echo ($user['statut'] ?? '') === 'actif' ? 'Désactiver' : 'Activer'; ?>">
-                                                                <i
-                                                                    class="fas fa-<?php echo ($user['statut'] ?? '') === 'actif' ? 'pause' : 'play'; ?>"></i>
-                                                            </button>
-                                                        </form>
-
-                                                        <!-- Bouton Supprimer -->
                                                         <?php if (($user['id'] ?? 0) != ($_SESSION['user_id'] ?? 0)): ?>
-                                                            <form method="POST" class="inline"
-                                                                onsubmit="return confirm('Êtes-vous sûr de vouloir supprimer cet utilisateur ? Cette action est irréversible.')">
+                                                            <form method="POST" class="inline">
                                                                 <input type="hidden" name="user_id"
                                                                     value="<?php echo $user['id'] ?? ''; ?>">
-                                                                <button type="submit" name="delete_user"
-                                                                    class="text-red-600 hover:text-red-900" title="Supprimer">
-                                                                    <i class="fas fa-trash"></i>
+                                                                <input type="hidden" name="new_status"
+                                                                    value="<?php echo ($user['statut'] ?? '') === 'actif' ? 'inactif' : 'actif'; ?>">
+                                                                <button type="submit" name="toggle_status"
+                                                                    class="<?php echo ($user['statut'] ?? '') === 'actif' ? 'text-yellow-600 hover:text-yellow-900 bg-yellow-50 hover:bg-yellow-100' : 'text-green-600 hover:text-green-900 bg-green-50 hover:bg-green-100'; ?> action-btn"
+                                                                    title="<?php echo ($user['statut'] ?? '') === 'actif' ? 'Désactiver' : 'Activer'; ?>">
+                                                                    <i
+                                                                        class="fas fa-<?php echo ($user['statut'] ?? '') === 'actif' ? 'pause' : 'play'; ?>"></i>
                                                                 </button>
                                                             </form>
-                                                        <?php else: ?>
-                                                            <span class="text-gray-400 cursor-not-allowed"
-                                                                title="Vous ne pouvez pas supprimer votre propre compte">
+
+                                                            <!-- Bouton Supprimer (avec modal au lieu de confirmation JS) -->
+                                                            <button onclick="openDeleteModal(<?php echo htmlspecialchars(json_encode($user)); ?>)"
+                                                                class="text-red-600 hover:text-red-900 action-btn bg-red-50 hover:bg-red-100"
+                                                                title="Supprimer">
                                                                 <i class="fas fa-trash"></i>
+                                                            </button>
+                                                        <?php else: ?>
+                                                            <span class="text-gray-400 cursor-not-allowed px-3 py-1 text-sm"
+                                                                title="Vous ne pouvez pas modifier votre propre compte">
+                                                                Votre compte
                                                             </span>
                                                         <?php endif; ?>
                                                     </div>
@@ -981,7 +939,7 @@ function formatDate($date): string
                                         <?php endforeach; ?>
                                     <?php else: ?>
                                         <tr>
-                                            <td colspan="5" class="px-6 py-4 text-center text-gray-500">
+                                            <td colspan="6" class="px-6 py-4 text-center text-gray-500">
                                                 Aucun utilisateur trouvé dans la base de données.
                                             </td>
                                         </tr>
@@ -1042,64 +1000,156 @@ function formatDate($date): string
     </div>
 
     <!-- Modal de modification d'utilisateur -->
-    <div id="editModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full hidden z-50">
-        <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
-            <div class="mt-3">
-                <h3 class="text-lg font-medium text-gray-900 mb-4">Modifier l'utilisateur</h3>
-                <form method="POST" id="editForm">
-                    <input type="hidden" name="edit_user" value="1">
-                    <input type="hidden" name="user_id" id="edit_user_id">
-
-                    <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Nom</label>
-                        <input type="text" name="edit_nom" id="edit_nom" required
-                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+    <div id="editModal" class="fixed inset-0 z-50 hidden">
+        <div class="modal-backdrop fixed inset-0"></div>
+        <div class="fixed inset-0 flex items-center justify-center p-4">
+            <div class="modal-content bg-white rounded-2xl shadow-2xl w-full max-w-md">
+                <div class="p-6">
+                    <!-- En-tête -->
+                    <div class="flex items-center justify-between mb-6">
+                        <div class="flex items-center">
+                            <div class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center mr-3">
+                                <i class="fas fa-edit text-blue-600"></i>
+                            </div>
+                            <div>
+                                <h3 class="text-lg font-semibold text-gray-900">Modifier l'utilisateur</h3>
+                                <p class="text-sm text-gray-500">Mettez à jour les informations</p>
+                            </div>
+                        </div>
+                        <button onclick="closeEditModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
+                            <i class="fas fa-times text-xl"></i>
+                        </button>
                     </div>
 
-                    <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Email</label>
-                        <input type="email" name="edit_email" id="edit_email" required
-                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                    <!-- Formulaire -->
+                    <form method="POST" id="editForm">
+                        <input type="hidden" name="edit_user" value="1">
+                        <input type="hidden" name="user_id" id="edit_user_id">
+
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Nom</label>
+                                <input type="text" name="edit_nom" id="edit_nom" required
+                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                                    placeholder="Nom complet">
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                                <input type="email" name="edit_email" id="edit_email" required
+                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                                    placeholder="email@example.com">
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Téléphone</label>
+                                <input type="tel" name="edit_telephone" id="edit_telephone"
+                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                                    placeholder="+1234567890">
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Adresse</label>
+                                <textarea name="edit_adresse" id="edit_adresse"
+                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                                    rows="3" placeholder="Adresse complète"></textarea>
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">Rôle</label>
+                                <select name="edit_role" id="edit_role" required
+                                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all">
+                                    <option value="">Sélectionnez un rôle</option>
+                                    <option value="admin">Admin</option>
+                                    <option value="pharmacien">Pharmacien</option>
+                                    <option value="caissier">Caissier</option>
+                                    <option value="stockiste">Stockiste</option>
+                                    <option value="gerant">Gerant</option>
+                                    <option value="fournisseur">Fournisseur</option>
+                                    <option value="client">Client</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="flex justify-end space-x-3 mt-8 pt-6 border-t">
+                            <button type="button" onclick="closeEditModal()"
+                                class="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium action-btn">
+                                Annuler
+                            </button>
+                            <button type="submit"
+                                class="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium action-btn shadow-md">
+                                <i class="fas fa-save mr-2"></i>
+                                Enregistrer
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de suppression d'utilisateur -->
+    <div id="deleteModal" class="fixed inset-0 z-50 hidden">
+        <div class="modal-backdrop fixed inset-0"></div>
+        <div class="fixed inset-0 flex items-center justify-center p-4">
+            <div class="modal-content bg-white rounded-2xl shadow-2xl w-full max-w-md">
+                <div class="p-6">
+                    <!-- Icône d'alerte -->
+                    <div class="text-center mb-6">
+                        <div class="mx-auto flex items-center justify-center w-16 h-16 bg-red-100 rounded-full mb-4">
+                            <i class="fas fa-exclamation-triangle text-red-600 text-2xl"></i>
+                        </div>
+                    </div>
+                    
+                    <!-- Message de confirmation -->
+                    <div class="text-center mb-6">
+                        <h3 class="text-lg font-semibold text-gray-900 mb-2">Confirmer la suppression</h3>
+                        <p class="text-gray-600 mb-4" id="deleteModalText">
+                            Êtes-vous sûr de vouloir supprimer cet utilisateur ?
+                        </p>
+                        <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                            <div class="flex items-center">
+                                <i class="fas fa-info-circle text-red-500 mr-2"></i>
+                                <p class="text-sm text-red-700 font-medium">Cette action est irréversible !</p>
+                            </div>
+                            <p class="text-xs text-left text-red-600 mt-2">
+                                Toutes les données associées à cet utilisateur seront définitivement supprimées.
+                            </p>
+                        </div>
                     </div>
 
-                    <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Téléphone</label>
-                        <input type="tel" name="edit_telephone" id="edit_telephone"
-                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
-                    </div>
-                    <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Adresse</label>
-                        <textarea name="edit_adresse" id="edit_adresse"
-                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                            rows="3"></textarea>
-                    </div>
-
-                    <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-2">Rôle</label>
-                        <select name="edit_role" id="edit_role" required
-                            class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
-                            <option value="">Sélectionnez un rôle</option>
-                            <option value="admin">Admin</option>
-                            <option value="pharmacien">Pharmacien</option>
-                            <option value="caissier">Caissier</option>
-                            <option value="stockiste">Stockiste</option>
-                            <option value="gerant">Gerant</option>
-                            <option value="fournisseur">Fournisseur</option>
-                            <option value="client">Client</option>
-                        </select>
+                    <!-- Informations de l'utilisateur -->
+                    <div class="bg-gray-50 rounded-lg p-4 mb-6">
+                        <div class="flex items-center">
+                            <div class="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center mr-3">
+                                <i class="fas fa-user text-gray-600"></i>
+                            </div>
+                            <div>
+                                <p class="font-medium text-gray-900" id="deleteUserName"></p>
+                                <p class="text-sm text-gray-500" id="deleteUserEmail"></p>
+                                <p class="text-xs text-gray-400" id="deleteUserRole"></p>
+                            </div>
+                        </div>
                     </div>
 
-                    <div class="flex justify-end space-x-3 mt-6">
-                        <button type="button" onclick="closeEditModal()"
-                            class="px-4 py-2 bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400 transition-colors">
+                    <!-- Boutons d'action -->
+                    <div class="flex justify-end space-x-3">
+                        <button type="button" onclick="closeDeleteModal()"
+                            class="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium action-btn">
+                            <i class="fas fa-times mr-2"></i>
                             Annuler
                         </button>
-                        <button type="submit"
-                            class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
-                            Enregistrer
-                        </button>
+                        <form method="POST" id="deleteForm">
+                            <input type="hidden" name="delete_user" value="1">
+                            <input type="hidden" name="user_id" id="delete_user_id">
+                            <button type="submit"
+                                class="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium action-btn shadow-md">
+                                <i class="fas fa-trash mr-2"></i>
+                                Supprimer définitivement
+                            </button>
+                        </form>
                     </div>
-                </form>
+                </div>
             </div>
         </div>
     </div>
@@ -1135,17 +1185,48 @@ function formatDate($date): string
             document.getElementById('edit_telephone').value = user.telephone || '';
             document.getElementById('edit_role').value = user.role || '';
             document.getElementById('edit_adresse').value = user.adresse || '';
+            
             document.getElementById('editModal').classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
         }
 
         function closeEditModal() {
             document.getElementById('editModal').classList.add('hidden');
+            document.body.style.overflow = 'auto';
         }
 
-        // Fermer le modal en cliquant à l'extérieur
-        document.getElementById('editModal').addEventListener('click', function (e) {
-            if (e.target.id === 'editModal') {
+        // Gestion du modal de suppression
+        function openDeleteModal(user) {
+            document.getElementById('delete_user_id').value = user.id;
+            document.getElementById('deleteUserName').textContent = user.nom || 'Non défini';
+            document.getElementById('deleteUserEmail').textContent = user.email || 'Non défini';
+            document.getElementById('deleteUserRole').textContent = 'Rôle: ' + (user.role || 'Non défini');
+            
+            document.getElementById('deleteModalText').innerHTML = 
+                `Êtes-vous sûr de vouloir supprimer l'utilisateur <strong>${user.nom}</strong> ?`;
+            
+            document.getElementById('deleteModal').classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeDeleteModal() {
+            document.getElementById('deleteModal').classList.add('hidden');
+            document.body.style.overflow = 'auto';
+        }
+
+        // Fermer les modals en cliquant à l'extérieur
+        document.addEventListener('click', function(e) {
+            if (e.target.classList.contains('modal-backdrop')) {
                 closeEditModal();
+                closeDeleteModal();
+            }
+        });
+
+        // Fermer les modals avec la touche Échap
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeEditModal();
+                closeDeleteModal();
             }
         });
 
@@ -1161,20 +1242,32 @@ function formatDate($date): string
                             label: 'Connexions',
                             data: [12, 19, 8, 15, 12, 5, 9],
                             backgroundColor: '#10B981',
+                            borderRadius: 6
                         }]
                     },
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
-                        plugins: { legend: { display: false } },
-                        scales: { y: { beginAtZero: true } }
+                        plugins: { 
+                            legend: { display: false }
+                        },
+                        scales: { 
+                            y: { 
+                                beginAtZero: true,
+                                grid: { display: true },
+                                ticks: { stepSize: 5 }
+                            },
+                            x: {
+                                grid: { display: false }
+                            }
+                        }
                     }
                 });
             }
 
+            // Afficher la section dashboard par défaut
             showSection('dashboard');
         });
     </script>
 </body>
-
 </html>
