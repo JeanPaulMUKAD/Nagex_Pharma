@@ -2,6 +2,7 @@
 declare(strict_types=1);
 session_start();
 require_once __DIR__ . '/../../config/database.php';
+require_once __DIR__ . '/../../config/journal_functions.php';
 
 // Traitement du formulaire de connexion
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -64,37 +65,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         error_log("Erreur mise à jour dernière connexion: " . $e->getMessage());
                     }
                     
-                    // Journaliser la connexion
+                    
+                    // Journaliser la connexion réussie
                     try {
-                        // Créer la table de logs si elle n'existe pas
-                        $createTable = "CREATE TABLE IF NOT EXISTS user_logs (
-                            id INT PRIMARY KEY AUTO_INCREMENT,
-                            user_id INT NOT NULL,
-                            action VARCHAR(50) NOT NULL,
-                            details TEXT,
-                            ip_address VARCHAR(45),
-                            user_agent TEXT,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                        )";
-                        
-                        $db->exec($createTable);
-                        
-                        // Insérer le log
-                        $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-                        $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
-                        $action = 'CONNEXION';
-                        $details = 'Utilisateur connecté avec succès';
-                        
-                        $logQuery = "INSERT INTO user_logs (user_id, action, details, ip_address, user_agent) 
-                                  VALUES (:user_id, :action, :details, :ip_address, :user_agent)";
-                        
-                        $logStmt = $db->prepare($logQuery);
-                        $logStmt->bindParam(':user_id', $user['id']);
-                        $logStmt->bindParam(':action', $action);
-                        $logStmt->bindParam(':details', $details);
-                        $logStmt->bindParam(':ip_address', $ip);
-                        $logStmt->bindParam(':user_agent', $userAgent);
-                        $logStmt->execute();
+                        loggerConnexion($db, $user['id'], $user['nom'], $user['role'], true);
                     } catch (Exception $e) {
                         error_log("Erreur de journalisation: " . $e->getMessage());
                     }

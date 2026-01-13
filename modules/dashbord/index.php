@@ -19,6 +19,7 @@ $userEmail = $_SESSION['user_email'] ?? '';
 $errors = [];
 $success = '';
 $users = [];
+$inactiveUsers = []; // Nouveau tableau pour les utilisateurs désactivés
 $activityLogs = [];
 
 // Connexion à la base de données
@@ -29,12 +30,13 @@ try {
     error_log("Erreur connexion DB: " . $e->getMessage());
 }
 
-// RÉCUPÉRATION DES UTILISATEURS
+// RÉCUPÉRATION DES UTILISATEURS ACTIFS
 if (isset($db)) {
     try {
-        // MODIFICATION : Ajout des nouvelles colonnes dans la requête
+        // Utilisateurs actifs (statut = 'actif')
         $query = "SELECT id, nom, email, role, statut, telephone, adresse, date_creation, date_modification 
                   FROM utilisateurs 
+                  WHERE statut = 'actif'
                   ORDER BY date_creation ASC";
 
         $stmt = $db->prepare($query);
@@ -44,6 +46,24 @@ if (isset($db)) {
     } catch (Exception $e) {
         $errors[] = "Erreur lors de la récupération des utilisateurs: " . $e->getMessage();
         error_log("Erreur récupération utilisateurs: " . $e->getMessage());
+    }
+}
+
+// RÉCUPÉRATION DES UTILISATEURS DÉSACTIVÉS
+if (isset($db)) {
+    try {
+        // Utilisateurs désactivés (statut = 'inactif')
+        $query = "SELECT id, nom, email, role, statut, telephone, adresse, date_creation, date_modification 
+                  FROM utilisateurs 
+                  WHERE statut = 'inactif'
+                  ORDER BY date_modification DESC";
+
+        $stmt = $db->prepare($query);
+        $stmt->execute();
+        $inactiveUsers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    } catch (Exception $e) {
+        error_log("Erreur récupération utilisateurs désactivés: " . $e->getMessage());
     }
 }
 
@@ -77,7 +97,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($db)) {
         $fullname = trim($_POST['fullname'] ?? '');
         $email = trim($_POST['email'] ?? '');
         $telephone = trim($_POST['telephone'] ?? '');
-        $adresse = trim($_POST['adresse'] ?? ''); // NOUVELLE COLONNE
+        $adresse = trim($_POST['adresse'] ?? '');
         $role = $_POST['role'] ?? '';
         $password = $_POST['password'] ?? '';
         $confirm_password = $_POST['confirm_password'] ?? '';
@@ -115,7 +135,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($db)) {
             try {
                 $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
 
-                // MODIFICATION : Ajout de la colonne adresse dans l'insertion
                 $query = "INSERT INTO utilisateurs (nom, email, mot_de_passe, role, telephone, adresse, statut, date_creation) 
                           VALUES (:nom, :email, :mot_de_passe, :role, :telephone, :adresse, 'actif', NOW())";
 
@@ -160,10 +179,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($db)) {
                         error_log("Erreur journalisation: " . $e->getMessage());
                     }
 
-                    // Recharger la liste des utilisateurs
-                    // MODIFICATION : Ajout des nouvelles colonnes dans la requête
+                    // Recharger les listes
                     $query = "SELECT id, nom, email, role, statut, telephone, adresse, date_creation, date_modification 
                               FROM utilisateurs 
+                              WHERE statut = 'actif'
                               ORDER BY date_creation ASC";
                     $stmt = $db->prepare($query);
                     $stmt->execute();
@@ -185,7 +204,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($db)) {
 
         try {
             // Récupérer l'utilisateur avant modification pour le log
-            $query = "SELECT nom, email FROM utilisateurs WHERE id = :id";
+            $query = "SELECT nom, email, role FROM utilisateurs WHERE id = :id";
             $stmt = $db->prepare($query);
             $stmt->bindParam(':id', $userId);
             $stmt->execute();
@@ -193,7 +212,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($db)) {
 
             if ($user) {
                 // Mettre à jour le statut
-                $query = "UPDATE utilisateurs SET statut = :statut WHERE id = :id";
+                $query = "UPDATE utilisateurs SET statut = :statut, date_modification = NOW() WHERE id = :id";
                 $stmt = $db->prepare($query);
                 $stmt->bindParam(':statut', $newStatus);
                 $stmt->bindParam(':id', $userId);
@@ -213,7 +232,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($db)) {
                         $stmt = $db->prepare($query);
                         $stmt->bindParam(':user_id', $_SESSION['user_id']);
                         $stmt->bindValue(':action', $action);
-                        $stmt->bindValue(':details', "Utilisateur: {$user['nom']} ({$user['email']}) - Statut: $newStatus");
+                        $stmt->bindValue(':details', "Utilisateur: {$user['nom']} ({$user['email']}) - Rôle: {$user['role']} - Nouveau statut: $newStatus");
                         $stmt->bindParam(':ip_address', $ip);
                         $stmt->bindParam(':user_agent', $userAgent);
                         $stmt->execute();
@@ -221,81 +240,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($db)) {
                         error_log("Erreur journalisation: " . $e->getMessage());
                     }
 
-                    // Recharger la liste des utilisateurs
-                    // MODIFICATION : Ajout des nouvelles colonnes dans la requête
+                    // Recharger les listes
                     $query = "SELECT id, nom, email, role, statut, telephone, adresse, date_creation, date_modification 
                               FROM utilisateurs 
+                              WHERE statut = 'actif'
                               ORDER BY date_creation ASC";
                     $stmt = $db->prepare($query);
                     $stmt->execute();
                     $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+                    $query = "SELECT id, nom, email, role, statut, telephone, adresse, date_creation, date_modification 
+                              FROM utilisateurs 
+                              WHERE statut = 'inactif'
+                              ORDER BY date_modification DESC";
+                    $stmt = $db->prepare($query);
+                    $stmt->execute();
+                    $inactiveUsers = $stmt->fetchAll(PDO::FETCH_ASSOC);
                 }
             } else {
                 $errors[] = "Utilisateur non trouvé.";
             }
         } catch (PDOException $e) {
             $errors[] = "Erreur lors de la modification du statut: " . $e->getMessage();
-        }
-    }
-
-    // SUPPRESSION D'UTILISATEUR
-    if (isset($_POST['delete_user'])) {
-        $userId = $_POST['user_id'];
-
-        try {
-            if ($userId == $_SESSION['user_id']) {
-                $errors[] = "Vous ne pouvez pas supprimer votre propre compte.";
-            } else {
-                // Récupérer l'utilisateur avant suppression pour le log
-                $query = "SELECT nom, email FROM utilisateurs WHERE id = :id";
-                $stmt = $db->prepare($query);
-                $stmt->bindParam(':id', $userId);
-                $stmt->execute();
-                $user = $stmt->fetch(PDO::FETCH_ASSOC);
-
-                if ($user) {
-                    // Supprimer l'utilisateur
-                    $query = "DELETE FROM utilisateurs WHERE id = :id";
-                    $stmt = $db->prepare($query);
-                    $stmt->bindParam(':id', $userId);
-
-                    if ($stmt->execute()) {
-                        $success = "Utilisateur supprimé avec succès!";
-
-                        // Journaliser l'action
-                        try {
-                            $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-                            $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
-
-                            $query = "INSERT INTO user_logs (user_id, action, details, ip_address, user_agent) 
-                                      VALUES (:user_id, :action, :details, :ip_address, :user_agent)";
-
-                            $stmt = $db->prepare($query);
-                            $stmt->bindParam(':user_id', $_SESSION['user_id']);
-                            $stmt->bindValue(':action', 'SUPPRESSION_UTILISATEUR');
-                            $stmt->bindValue(':details', "Utilisateur supprimé: {$user['nom']} ({$user['email']})");
-                            $stmt->bindParam(':ip_address', $ip);
-                            $stmt->bindParam(':user_agent', $userAgent);
-                            $stmt->execute();
-                        } catch (Exception $e) {
-                            error_log("Erreur journalisation: " . $e->getMessage());
-                        }
-
-                        // Recharger la liste des utilisateurs
-                        // MODIFICATION : Ajout des nouvelles colonnes dans la requête
-                        $query = "SELECT id, nom, email, role, statut, telephone, adresse, date_creation, date_modification 
-                                  FROM utilisateurs 
-                                  ORDER BY date_creation ASC";
-                        $stmt = $db->prepare($query);
-                        $stmt->execute();
-                        $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                    }
-                } else {
-                    $errors[] = "Utilisateur non trouvé.";
-                }
-            }
-        } catch (PDOException $e) {
-            $errors[] = "Erreur lors de la suppression de l'utilisateur: " . $e->getMessage();
         }
     }
 
@@ -328,13 +294,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($db)) {
                 if ($checkStmt->rowCount() > 0) {
                     $errors[] = "Cet email est déjà utilisé par un autre utilisateur.";
                 } else {
-                    // MODIFICATION : Ajout de la colonne adresse dans la mise à jour
-                    $query = "UPDATE utilisateurs SET nom = :nom, email = :email, telephone = :telephone, adresse = :adresse, role = :role WHERE id = :id";
+                    $query = "UPDATE utilisateurs SET nom = :nom, email = :email, telephone = :telephone, adresse = :adresse, role = :role, date_modification = NOW() WHERE id = :id";
                     $stmt = $db->prepare($query);
                     $stmt->bindParam(':nom', $nom);
                     $stmt->bindParam(':email', $email);
                     $stmt->bindParam(':telephone', $telephone);
-                    $stmt->bindParam(':adresse', $adresse); // NOUVEAU BINDPARAM
+                    $stmt->bindParam(':adresse', $adresse);
                     $stmt->bindParam(':role', $role);
                     $stmt->bindParam(':id', $userId);
 
@@ -360,14 +325,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($db)) {
                             error_log("Erreur journalisation: " . $e->getMessage());
                         }
 
-                        // Recharger la liste des utilisateurs
-                        // MODIFICATION : Ajout des nouvelles colonnes dans la requête
+                        // Recharger les listes
                         $query = "SELECT id, nom, email, role, statut, telephone, adresse, date_creation, date_modification 
                                   FROM utilisateurs 
+                                  WHERE statut = 'actif'
                                   ORDER BY date_creation ASC";
                         $stmt = $db->prepare($query);
                         $stmt->execute();
                         $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+                        $query = "SELECT id, nom, email, role, statut, telephone, adresse, date_creation, date_modification 
+                                  FROM utilisateurs 
+                                  WHERE statut = 'inactif'
+                                  ORDER BY date_modification DESC";
+                        $stmt = $db->prepare($query);
+                        $stmt->execute();
+                        $inactiveUsers = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     }
                 }
             } catch (PDOException $e) {
@@ -386,8 +359,7 @@ function getLogIcon($action): string
         'AJOUT_UTILISATEUR' => 'user-plus',
         'MODIFICATION_UTILISATEUR' => 'edit',
         'ACTIVATION' => 'play',
-        'DESACTIVATION' => 'pause',
-        'SUPPRESSION_UTILISATEUR' => 'trash'
+        'DESACTIVATION' => 'pause'
     ];
     return $icons[$action] ?? 'history';
 }
@@ -491,32 +463,26 @@ function formatDate($date): string
             }
         }
 
-        .fade-out {
-            animation: fadeOut 0.3s ease-out;
-        }
-
-        @keyframes fadeOut {
-            from {
-                opacity: 1;
-            }
-            to {
-                opacity: 0;
-            }
-        }
-
         .action-btn {
             transition: all 0.2s ease;
-            padding: 6px 12px;
-            border-radius: 6px;
         }
 
         .action-btn:hover {
             transform: translateY(-1px);
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
 
         .table-row-hover:hover {
             background-color: #f9fafb;
+        }
+
+        .badge-inactive {
+            background-color: #FEE2E2;
+            color: #DC2626;
+        }
+
+        .badge-active {
+            background-color: #D1FAE5;
+            color: #059669;
         }
     </style>
 </head>
@@ -537,7 +503,7 @@ function formatDate($date): string
             </div>
         </div>
 
-        <!-- Navigation (ONLY ORIGINAL SECTIONS) -->
+        <!-- Navigation -->
         <nav class="mt-6">
             <div class="px-4 space-y-2">
                 <!-- Tableau de bord -->
@@ -547,11 +513,32 @@ function formatDate($date): string
                     <span class="ml-3 font-medium">Tableau de bord</span>
                 </a>
 
-                <!-- Gestion des utilisateurs -->
+                <!-- Gestion des utilisateurs actifs -->
                 <a href="#utilisateurs" onclick="showSection('utilisateurs')"
-                    class="flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
-                    <i class="fas fa-users w-6"></i>
-                    <span class="ml-3 font-medium">Gestion Utilisateurs</span>
+                    class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
+                    <div class="flex items-center">
+                        <i class="fas fa-users w-6"></i>
+                        <span class="ml-3 font-medium">Utilisateurs Actifs</span>
+                    </div>
+                    <?php if (count($users) > 0): ?>
+                        <span class="bg-green-500 text-white text-xs px-2 py-1 rounded-full">
+                            <?php echo count($users); ?>
+                        </span>
+                    <?php endif; ?>
+                </a>
+
+                <!-- Gestion des utilisateurs désactivés -->
+                <a href="#utilisateurs-desactives" onclick="showSection('utilisateurs-desactives')"
+                    class="flex items-center justify-between px-4 py-3 text-gray-700 rounded-lg hover:bg-indigo-50 transition-colors">
+                    <div class="flex items-center">
+                        <i class="fas fa-user-slash w-6"></i>
+                        <span class="ml-3 font-medium">Utilisateurs Désactivés</span>
+                    </div>
+                    <?php if (count($inactiveUsers) > 0): ?>
+                        <span class="bg-red-500 text-white text-xs px-2 py-1 rounded-full">
+                            <?php echo count($inactiveUsers); ?>
+                        </span>
+                    <?php endif; ?>
                 </a>
 
                 <!-- Historique des actions -->
@@ -643,6 +630,18 @@ function formatDate($date): string
                         </div>
                     </div>
 
+                    <div class="bg-white rounded-2xl shadow-sm p-6 border-l-4 border-red-500">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <p class="text-sm text-gray-600">Utilisateurs désactivés</p>
+                                <p class="text-2xl font-bold text-gray-900"><?php echo count($inactiveUsers); ?></p>
+                            </div>
+                            <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
+                                <i class="fas fa-user-slash text-red-600 text-xl"></i>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="bg-white rounded-2xl shadow-sm p-6 border-l-4 border-blue-500">
                         <div class="flex items-center justify-between">
                             <div>
@@ -658,25 +657,6 @@ function formatDate($date): string
                             </div>
                             <div class="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
                                 <i class="fas fa-chart-line text-blue-600 text-xl"></i>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="bg-white rounded-2xl shadow-sm p-6 border-l-4 border-yellow-500">
-                        <div class="flex items-center justify-between">
-                            <div>
-                                <p class="text-sm text-gray-600">Admins</p>
-                                <p class="text-2xl font-bold text-gray-900">
-                                    <?php
-                                    $adminCount = array_filter($users, function ($user) {
-                                        return ($user['role'] ?? '') === 'admin';
-                                    });
-                                    echo count($adminCount);
-                                    ?>
-                                </p>
-                            </div>
-                            <div class="w-12 h-12 bg-yellow-100 rounded-full flex items-center justify-center">
-                                <i class="fas fa-user-shield text-yellow-600 text-xl"></i>
                             </div>
                         </div>
                     </div>
@@ -699,10 +679,10 @@ function formatDate($date): string
                     <!-- Chart -->
                     <div class="bg-white rounded-2xl shadow-sm p-6">
                         <div class="flex items-center justify-between mb-6">
-                            <h3 class="text-lg font-semibold text-gray-900">Activité des utilisateurs (7 jours)</h3>
+                            <h3 class="text-lg font-semibold text-gray-900">Statut des utilisateurs</h3>
                         </div>
                         <div class="h-80">
-                            <canvas id="activityChart"></canvas>
+                            <canvas id="userStatusChart"></canvas>
                         </div>
                     </div>
 
@@ -738,18 +718,21 @@ function formatDate($date): string
                 </div>
             </div>
 
-            <!-- Section Gestion des Utilisateurs -->
+            <!-- Section Gestion des Utilisateurs Actifs -->
             <div id="utilisateurs" class="section hidden">
                 <div class="bg-white rounded-2xl shadow-sm">
                     <div class="px-6 py-4 border-b">
                         <div class="flex items-center justify-between">
-                            <h3 class="text-xl font-semibold text-gray-900">Gestion des Utilisateurs</h3>
+                            <h3 class="text-xl font-semibold text-gray-900">Gestion des Utilisateurs Actifs</h3>
+                            <span class="text-sm text-gray-600">
+                                <?php echo count($users); ?> utilisateur(s) actif(s)
+                            </span>
                         </div>
                     </div>
 
                     <div class="p-6">
                         <!-- Formulaire d'ajout d'utilisateur -->
-                        <div class="mb-8">
+                        <div class="mb-8 p-6 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl border border-green-200">
                             <h4 class="text-lg font-semibold text-gray-900 mb-4">Ajouter un nouvel utilisateur</h4>
                             <form method="POST" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <input type="hidden" name="add_user" value="1">
@@ -774,7 +757,7 @@ function formatDate($date): string
                                         class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                                         value="<?php echo htmlspecialchars($_POST['telephone'] ?? ''); ?>">
                                 </div>
-                                <!-- Ajouter ce champ après le champ téléphone -->
+                                
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-2">Adresse</label>
                                     <textarea name="adresse"
@@ -804,8 +787,7 @@ function formatDate($date): string
                                 </div>
 
                                 <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-2">Confirmer le mot de
-                                        passe</label>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Confirmer le mot de passe</label>
                                     <input type="password" name="confirm_password" required
                                         class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
                                 </div>
@@ -820,29 +802,22 @@ function formatDate($date): string
                             </form>
                         </div>
 
-                        <!-- Tableau des utilisateurs -->
-                        <div class="overflow-x-auto">
+                        <!-- Tableau des utilisateurs actifs -->
+                        <div class="overflow-x-auto rounded-xl border border-gray-200">
                             <table class="w-full">
-                                <thead class="bg-gray-50">
+                                <thead class="bg-gradient-to-r from-green-50 to-emerald-50">
                                     <tr>
-                                        <th
-                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Utilisateur</th>
-                                        <th
-                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                            Contact
-                                        </th>
-                                        <th
-                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Contact</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Rôle</th>
-                                        <th
-                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Statut</th>
-                                        <th
-                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Date création</th>
-                                        <th
-                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Actions</th>
                                     </tr>
                                 </thead>
@@ -887,9 +862,9 @@ function formatDate($date): string
                                                     </span>
                                                 </td>
                                                 <td class="px-6 py-4 whitespace-nowrap">
-                                                    <span
-                                                        class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full <?php echo ($user['statut'] ?? '') === 'actif' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'; ?>">
-                                                        <?php echo htmlspecialchars($user['statut'] ?? 'inactif'); ?>
+                                                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full badge-active">
+                                                        <i class="fas fa-check-circle mr-1"></i>
+                                                        <?php echo htmlspecialchars($user['statut'] ?? 'actif'); ?>
                                                     </span>
                                                 </td>
                                                 <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -899,37 +874,27 @@ function formatDate($date): string
                                                 <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
                                                     <div class="flex space-x-2">
                                                         <!-- Bouton Modifier -->
-                                                        <button
-                                                            onclick="openEditModal(<?php echo htmlspecialchars(json_encode($user)); ?>)"
-                                                            class="text-blue-600 hover:text-blue-900 action-btn bg-blue-50 hover:bg-blue-100"
-                                                            title="Modifier">
-                                                            <i class="fas fa-edit"></i>
-                                                        </button>
-
-                                                        <!-- Bouton Activer/Désactiver -->
                                                         <?php if (($user['id'] ?? 0) != ($_SESSION['user_id'] ?? 0)): ?>
+                                                            <button
+                                                                onclick="openEditModal(<?php echo htmlspecialchars(json_encode($user)); ?>)"
+                                                                class="text-blue-600 hover:text-blue-900 action-btn bg-blue-50 hover:bg-blue-100 px-3 py-2 rounded"
+                                                                title="Modifier">
+                                                                <i class="fas fa-edit"></i>
+                                                            </button>
+
+                                                            <!-- Bouton Désactiver -->
                                                             <form method="POST" class="inline">
                                                                 <input type="hidden" name="user_id"
                                                                     value="<?php echo $user['id'] ?? ''; ?>">
-                                                                <input type="hidden" name="new_status"
-                                                                    value="<?php echo ($user['statut'] ?? '') === 'actif' ? 'inactif' : 'actif'; ?>">
+                                                                <input type="hidden" name="new_status" value="inactif">
                                                                 <button type="submit" name="toggle_status"
-                                                                    class="<?php echo ($user['statut'] ?? '') === 'actif' ? 'text-yellow-600 hover:text-yellow-900 bg-yellow-50 hover:bg-yellow-100' : 'text-green-600 hover:text-green-900 bg-green-50 hover:bg-green-100'; ?> action-btn"
-                                                                    title="<?php echo ($user['statut'] ?? '') === 'actif' ? 'Désactiver' : 'Activer'; ?>">
-                                                                    <i
-                                                                        class="fas fa-<?php echo ($user['statut'] ?? '') === 'actif' ? 'pause' : 'play'; ?>"></i>
+                                                                    class="text-yellow-600 hover:text-yellow-900 action-btn bg-yellow-50 hover:bg-yellow-100 px-3 py-2 rounded"
+                                                                    title="Désactiver cet utilisateur">
+                                                                    <i class="fas fa-user-slash"></i>
                                                                 </button>
                                                             </form>
-
-                                                            <!-- Bouton Supprimer (avec modal au lieu de confirmation JS) -->
-                                                            <button onclick="openDeleteModal(<?php echo htmlspecialchars(json_encode($user)); ?>)"
-                                                                class="text-red-600 hover:text-red-900 action-btn bg-red-50 hover:bg-red-100"
-                                                                title="Supprimer">
-                                                                <i class="fas fa-trash"></i>
-                                                            </button>
                                                         <?php else: ?>
-                                                            <span class="text-gray-400 cursor-not-allowed px-3 py-1 text-sm"
-                                                                title="Vous ne pouvez pas modifier votre propre compte">
+                                                            <span class="px-3 py-2 text-sm text-gray-400 italic">
                                                                 Votre compte
                                                             </span>
                                                         <?php endif; ?>
@@ -939,14 +904,148 @@ function formatDate($date): string
                                         <?php endforeach; ?>
                                     <?php else: ?>
                                         <tr>
-                                            <td colspan="6" class="px-6 py-4 text-center text-gray-500">
-                                                Aucun utilisateur trouvé dans la base de données.
+                                            <td colspan="6" class="px-6 py-12 text-center">
+                                                <div class="flex flex-col items-center justify-center">
+                                                    <i class="fas fa-users text-gray-300 text-5xl mb-4"></i>
+                                                    <h3 class="text-lg font-semibold text-gray-500 mb-2">Aucun utilisateur actif</h3>
+                                                    <p class="text-gray-400">Ajoutez un nouvel utilisateur pour commencer</p>
+                                                </div>
                                             </td>
                                         </tr>
                                     <?php endif; ?>
                                 </tbody>
                             </table>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Section Utilisateurs Désactivés -->
+            <div id="utilisateurs-desactives" class="section hidden">
+                <div class="bg-white rounded-2xl shadow-sm">
+                    <div class="px-6 py-4 border-b">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-xl font-semibold text-gray-900">Utilisateurs Désactivés</h3>
+                            <span class="text-sm text-gray-600">
+                                <?php echo count($inactiveUsers); ?> utilisateur(s) désactivé(s)
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="p-6">
+                        <!-- Tableau des utilisateurs désactivés -->
+                        <div class="overflow-x-auto rounded-xl border border-gray-200">
+                            <table class="w-full">
+                                <thead class="bg-gradient-to-r from-red-50 to-pink-50">
+                                    <tr>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Utilisateur</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Contact</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Rôle</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Statut</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Date désactivation</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                            Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="bg-white divide-y divide-gray-200">
+                                    <?php if (!empty($inactiveUsers)): ?>
+                                        <?php foreach ($inactiveUsers as $user): ?>
+                                            <tr class="table-row-hover">
+                                                <td class="px-6 py-4 whitespace-nowrap">
+                                                    <div class="flex items-center">
+                                                        <div
+                                                            class="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center mr-3">
+                                                            <i class="fas fa-user-slash text-red-600"></i>
+                                                        </div>
+                                                        <div>
+                                                            <div class="text-sm font-medium text-gray-900">
+                                                                <?php echo htmlspecialchars($user['nom'] ?? 'Non défini'); ?>
+                                                            </div>
+                                                            <div class="text-sm text-gray-500">
+                                                                <?php echo htmlspecialchars($user['email'] ?? 'Non défini'); ?>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                    <?php if (!empty($user['telephone'])): ?>
+                                                        <div class="mb-1">
+                                                            <i class="fas fa-phone mr-1 text-gray-400"></i>
+                                                            <?php echo htmlspecialchars($user['telephone']); ?>
+                                                        </div>
+                                                    <?php endif; ?>
+                                                    <?php if (!empty($user['adresse'])): ?>
+                                                        <div>
+                                                            <i class="fas fa-map-marker-alt mr-1 text-gray-400"></i>
+                                                            <?php echo htmlspecialchars($user['adresse']); ?>
+                                                        </div>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <td class="px-6 py-4 whitespace-nowrap">
+                                                    <span
+                                                        class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full <?php echo getRoleBadgeClass($user['role'] ?? ''); ?>">
+                                                        <?php echo htmlspecialchars($user['role'] ?? 'Non défini'); ?>
+                                                    </span>
+                                                </td>
+                                                <td class="px-6 py-4 whitespace-nowrap">
+                                                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full badge-inactive">
+                                                        <i class="fas fa-times-circle mr-1"></i>
+                                                        <?php echo htmlspecialchars($user['statut'] ?? 'inactif'); ?>
+                                                    </span>
+                                                </td>
+                                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                    <?php echo isset($user['date_modification']) ? formatDate($user['date_modification']) : 'Non définie'; ?>
+                                                </td>
+
+                                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                                    <div class="flex space-x-2">
+                                                        <!-- Bouton Réactiver -->
+                                                        <form method="POST" class="inline">
+                                                            <input type="hidden" name="user_id"
+                                                                value="<?php echo $user['id'] ?? ''; ?>">
+                                                            <input type="hidden" name="new_status" value="actif">
+                                                            <button type="submit" name="toggle_status"
+                                                                class="text-green-600 hover:text-green-900 action-btn bg-green-50 hover:bg-green-100 px-3 py-2 rounded"
+                                                                title="Réactiver cet utilisateur">
+                                                                <i class="fas fa-user-check"></i>
+                                                            </button>
+                                                        </form>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    <?php else: ?>
+                                        <tr>
+                                            <td colspan="6" class="px-6 py-12 text-center">
+                                                <div class="flex flex-col items-center justify-center">
+                                                    <i class="fas fa-user-check text-gray-300 text-5xl mb-4"></i>
+                                                    <h3 class="text-lg font-semibold text-gray-500 mb-2">Aucun utilisateur désactivé</h3>
+                                                    <p class="text-gray-400">Tous les utilisateurs sont actifs</p>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    <?php endif; ?>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Note informative -->
+                        <?php if (!empty($inactiveUsers)): ?>
+                            <div class="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                <div class="flex items-center">
+                                    <i class="fas fa-info-circle text-blue-500 mr-2"></i>
+                                    <p class="text-sm text-blue-700">
+                                        <strong>Note :</strong> Les utilisateurs désactivés ne peuvent plus se connecter au système. 
+                                        Vous pouvez les réactiver à tout moment en cliquant sur l'icône <i class="fas fa-user-check text-green-600"></i>.
+                                    </p>
+                                </div>
+                            </div>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -1088,72 +1187,6 @@ function formatDate($date): string
         </div>
     </div>
 
-    <!-- Modal de suppression d'utilisateur -->
-    <div id="deleteModal" class="fixed inset-0 z-50 hidden">
-        <div class="modal-backdrop fixed inset-0"></div>
-        <div class="fixed inset-0 flex items-center justify-center p-4">
-            <div class="modal-content bg-white rounded-2xl shadow-2xl w-full max-w-md">
-                <div class="p-6">
-                    <!-- Icône d'alerte -->
-                    <div class="text-center mb-6">
-                        <div class="mx-auto flex items-center justify-center w-16 h-16 bg-red-100 rounded-full mb-4">
-                            <i class="fas fa-exclamation-triangle text-red-600 text-2xl"></i>
-                        </div>
-                    </div>
-                    
-                    <!-- Message de confirmation -->
-                    <div class="text-center mb-6">
-                        <h3 class="text-lg font-semibold text-gray-900 mb-2">Confirmer la suppression</h3>
-                        <p class="text-gray-600 mb-4" id="deleteModalText">
-                            Êtes-vous sûr de vouloir supprimer cet utilisateur ?
-                        </p>
-                        <div class="bg-red-50 border border-red-200 rounded-lg p-4">
-                            <div class="flex items-center">
-                                <i class="fas fa-info-circle text-red-500 mr-2"></i>
-                                <p class="text-sm text-red-700 font-medium">Cette action est irréversible !</p>
-                            </div>
-                            <p class="text-xs text-left text-red-600 mt-2">
-                                Toutes les données associées à cet utilisateur seront définitivement supprimées.
-                            </p>
-                        </div>
-                    </div>
-
-                    <!-- Informations de l'utilisateur -->
-                    <div class="bg-gray-50 rounded-lg p-4 mb-6">
-                        <div class="flex items-center">
-                            <div class="w-10 h-10 bg-gray-200 rounded-full flex items-center justify-center mr-3">
-                                <i class="fas fa-user text-gray-600"></i>
-                            </div>
-                            <div>
-                                <p class="font-medium text-gray-900" id="deleteUserName"></p>
-                                <p class="text-sm text-gray-500" id="deleteUserEmail"></p>
-                                <p class="text-xs text-gray-400" id="deleteUserRole"></p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Boutons d'action -->
-                    <div class="flex justify-end space-x-3">
-                        <button type="button" onclick="closeDeleteModal()"
-                            class="px-6 py-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium action-btn">
-                            <i class="fas fa-times mr-2"></i>
-                            Annuler
-                        </button>
-                        <form method="POST" id="deleteForm">
-                            <input type="hidden" name="delete_user" value="1">
-                            <input type="hidden" name="user_id" id="delete_user_id">
-                            <button type="submit"
-                                class="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium action-btn shadow-md">
-                                <i class="fas fa-trash mr-2"></i>
-                                Supprimer définitivement
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <script>
         // Navigation entre sections
         function showSection(sectionName) {
@@ -1164,7 +1197,8 @@ function formatDate($date): string
 
             const titles = {
                 'dashboard': 'Tableau de bord Admin',
-                'utilisateurs': 'Gestion des Utilisateurs',
+                'utilisateurs': 'Gestion des Utilisateurs Actifs',
+                'utilisateurs-desactives': 'Utilisateurs Désactivés',
                 'historique': 'Historique des Actions'
             };
             document.getElementById('pageTitle').textContent = titles[sectionName] || 'Tableau de bord Admin';
@@ -1195,30 +1229,10 @@ function formatDate($date): string
             document.body.style.overflow = 'auto';
         }
 
-        // Gestion du modal de suppression
-        function openDeleteModal(user) {
-            document.getElementById('delete_user_id').value = user.id;
-            document.getElementById('deleteUserName').textContent = user.nom || 'Non défini';
-            document.getElementById('deleteUserEmail').textContent = user.email || 'Non défini';
-            document.getElementById('deleteUserRole').textContent = 'Rôle: ' + (user.role || 'Non défini');
-            
-            document.getElementById('deleteModalText').innerHTML = 
-                `Êtes-vous sûr de vouloir supprimer l'utilisateur <strong>${user.nom}</strong> ?`;
-            
-            document.getElementById('deleteModal').classList.remove('hidden');
-            document.body.style.overflow = 'hidden';
-        }
-
-        function closeDeleteModal() {
-            document.getElementById('deleteModal').classList.add('hidden');
-            document.body.style.overflow = 'auto';
-        }
-
         // Fermer les modals en cliquant à l'extérieur
         document.addEventListener('click', function(e) {
             if (e.target.classList.contains('modal-backdrop')) {
                 closeEditModal();
-                closeDeleteModal();
             }
         });
 
@@ -1226,41 +1240,52 @@ function formatDate($date): string
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
                 closeEditModal();
-                closeDeleteModal();
             }
         });
 
         // Chart.js Initialization
         document.addEventListener('DOMContentLoaded', function () {
-            const ctx = document.getElementById('activityChart');
+            const ctx = document.getElementById('userStatusChart');
             if (ctx) {
                 new Chart(ctx.getContext('2d'), {
-                    type: 'bar',
+                    type: 'doughnut',
                     data: {
-                        labels: ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'],
+                        labels: ['Actifs', 'Désactivés'],
                         datasets: [{
-                            label: 'Connexions',
-                            data: [12, 19, 8, 15, 12, 5, 9],
-                            backgroundColor: '#10B981',
-                            borderRadius: 6
+                            data: [<?php echo count($users); ?>, <?php echo count($inactiveUsers); ?>],
+                            backgroundColor: [
+                                '#10B981', // Vert pour actifs
+                                '#EF4444'  // Rouge pour désactivés
+                            ],
+                            borderWidth: 2,
+                            borderColor: '#ffffff'
                         }]
                     },
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
                         plugins: { 
-                            legend: { display: false }
-                        },
-                        scales: { 
-                            y: { 
-                                beginAtZero: true,
-                                grid: { display: true },
-                                ticks: { stepSize: 5 }
+                            legend: {
+                                position: 'bottom',
+                                labels: {
+                                    padding: 20,
+                                    usePointStyle: true,
+                                }
                             },
-                            x: {
-                                grid: { display: false }
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.label || '';
+                                        if (label) {
+                                            label += ': ';
+                                        }
+                                        label += context.raw + ' utilisateur(s)';
+                                        return label;
+                                    }
+                                }
                             }
-                        }
+                        },
+                        cutout: '60%'
                     }
                 });
             }
@@ -1269,5 +1294,8 @@ function formatDate($date): string
             showSection('dashboard');
         });
     </script>
+    <!-- Email : nagexpharma@gmail.com -->
+    <!-- Mot de passe : N@gexPh4rma#2026 -->
 </body>
 </html>
+
