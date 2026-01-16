@@ -32,6 +32,31 @@ $current_page = $_GET['page'] ?? 'dashboard';
 try {
     $database = new Database();
     $pdo = $database->getConnection();
+    if (!isset($_SESSION['already_logged_activity'])) {
+        logActivity(
+            $pdo,
+            $_SESSION['user_id'],
+            $_SESSION['user_nom'] ?? 'Caissier',
+            'caissier',
+            'connexion_reussie',
+            "Caissier connecté au dashboard",
+            'utilisateurs',
+            $_SESSION['user_id']
+        );
+        $_SESSION['already_logged_activity'] = true;
+    }
+
+    // Journaliser la consultation de la page actuelle
+    logActivity(
+        $pdo,
+        $_SESSION['user_id'],
+        $_SESSION['user_nom'] ?? 'Caissier',
+        'caissier',
+        'visualisation_page',
+        "Consultation de la page: " . $current_page,
+        'dashboard',
+        null
+    );
 } catch (Exception $e) {
     error_log("Erreur de connexion à la base de données: " . $e->getMessage());
     die("Erreur de connexion à la base de données. Veuillez contacter l'administrateur.");
