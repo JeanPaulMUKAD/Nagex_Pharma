@@ -176,7 +176,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $stmt = $pdo->prepare("SELECT nom, code_barre FROM produits WHERE id = :produit_id");
                         $stmt->execute([':produit_id' => intval($_POST['produit_id'] ?? 0)]);
                         $produit_info = $stmt->fetch();
-            
+
                         if ($produit_info) {
                             logActivity(
                                 $pdo,
@@ -213,7 +213,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $_SESSION['user_nom'] ?? 'Caissier',
                             'caissier',
                             'erreur_definition_prix',
-                            "Échec définition prix - Produit ID: " . intval($_POST['produit_id'] ?? 0) . 
+                            "Échec définition prix - Produit ID: " . intval($_POST['produit_id'] ?? 0) .
                             " - Erreur: " . $e->getMessage(),
                             'produits',
                             intval($_POST['produit_id'] ?? 0)
@@ -221,7 +221,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     } catch (Exception $logError) {
                         error_log("Erreur journalisation échec: " . $logError->getMessage());
                     }
-                    
+
                 }
                 break;
 
@@ -262,35 +262,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                         // Enregistrer les mouvements de stock
                         $stmt = $pdo->prepare("
-    INSERT INTO mouvements_stock (
-        produit_id, lot_id, type_mouvement, quantite,
-        quantite_avant, quantite_apres, raison, created_by
-    )
-    SELECT 
-        cd.produit_id,
-        cd.lot_id,
-        'sortie',
-        cd.quantite,
-        l.quantite_actuelle + cd.quantite,
-        l.quantite_actuelle,
-        CONCAT('Vente commande #', :commande_id),
-        :created_by
-    FROM commande_details cd
-    JOIN lots l ON cd.lot_id = l.id
-    WHERE cd.commande_id = :commande_id2
-");
+                            INSERT INTO mouvements_stock (
+                                produit_id, lot_id, type_mouvement, quantite,
+                                quantite_avant, quantite_apres, raison, created_by
+                            )
+                            SELECT 
+                                cd.produit_id,
+                                cd.lot_id,
+                                'sortie',
+                                cd.quantite,
+                                l.quantite_actuelle + cd.quantite,
+                                l.quantite_actuelle,
+                                CONCAT('Vente commande #', :commande_id),
+                                :created_by
+                            FROM commande_details cd
+                            JOIN lots l ON cd.lot_id = l.id
+                            WHERE cd.commande_id = :commande_id2
+                        ");
+
                         $stmt->execute([
                             ':commande_id' => intval($_POST['commande_id'] ?? 0),
                             ':created_by' => $_SESSION['user_id'],
                             ':commande_id2' => intval($_POST['commande_id'] ?? 0)
                         ]);
 
+                        $pdo->commit();
                         try {
                             // Récupérer les infos de la commande pour le journal
                             $stmt = $pdo->prepare("
-                                SELECT c.numero_commande, c.montant_total, u.nom as client_nom 
+                                SELECT c.numero_commande, c.montant_total, u.nom as client_nom, 
+                                       COUNT(cd.id) as nb_produits
                                 FROM commandes c 
                                 JOIN utilisateurs u ON c.client_id = u.id 
+                                LEFT JOIN commande_details cd ON c.id = cd.commande_id
                                 WHERE c.id = :commande_id
                             ");
                             $stmt->execute([':commande_id' => intval($_POST['commande_id'] ?? 0)]);
@@ -303,10 +307,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     $_SESSION['user_nom'] ?? 'Caissier',
                                     'caissier',
                                     'validation_paiement',
-                                    "Paiement validé - Commande: #" . $commande_info['numero_commande'] .
-                                    " - Montant: " . formatMontant($commande_info['montant_total']) .
-                                    " - Client: " . $commande_info['client_nom'] .
-                                    " - Mode: " . ($_POST['mode_paiement'] ?? 'especes'),
+                                    sprintf(
+                                        "Paiement validé - Commande: #%s - Montant: %s - Client: %s - Produits: %d - Mode: %s",
+                                        $commande_info['numero_commande'],
+                                        formatMontant($commande_info['montant_total']),
+                                        $commande_info['client_nom'],
+                                        $commande_info['nb_produits'],
+                                        ($_POST['mode_paiement'] ?? 'especes')
+                                    ),
                                     'commandes',
                                     intval($_POST['commande_id'] ?? 0)
                                 );
@@ -315,7 +323,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             error_log("Erreur journalisation validation paiement: " . $e->getMessage());
                         }
 
-                        $pdo->commit();
                         $message = "✅ Paiement validé avec succès!";
                     } else {
                         $pdo->rollBack();
@@ -325,6 +332,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } catch (Exception $e) {
                     $pdo->rollBack();
                     $error = "❌ Erreur lors de la validation du paiement: " . $e->getMessage();
+
+                    try {
+                        logActivity(
+                            $pdo,
+                            $_SESSION['user_id'],
+                            $_SESSION['user_nom'] ?? 'Caissier',
+                            'caissier',
+                            'erreur_validation_paiement',
+                            "Échec validation paiement - Commande ID: " . intval($_POST['commande_id'] ?? 0) .
+                            " - Erreur: " . $e->getMessage(),
+                            'commandes',
+                            intval($_POST['commande_id'] ?? 0)
+                        );
+                    } catch (Exception $logError) {
+                        error_log("Erreur journalisation échec: " . $logError->getMessage());
+                    }
                 }
                 break;
 
