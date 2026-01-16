@@ -1888,10 +1888,18 @@ function getJoursRestantsClass($jours)
                                     <tbody class="bg-white divide-y divide-gray-200">
                                         <?php if (!empty($data['activites'])): ?>
                                             <?php foreach ($data['activites'] as $activite): ?>
-                                                <tr class="journal-row hover:bg-gray-50"
+                                                <tr class="journal-row hover:bg-gray-50 <?php echo ($activite['utilisateur_id'] == $user_id) ? 'bg-blue-50 border-l-4 border-blue-500' : ''; ?>"
                                                     data-date="<?php echo date('Y-m-d', strtotime($activite['created_at'])); ?>"
                                                     data-utilisateur="<?php echo $activite['utilisateur_id']; ?>"
                                                     data-action="<?php echo $activite['action']; ?>">
+                                                    <td class="px-4 py-3">
+                                                        <div class="font-medium text-gray-900">
+                                                            <?php echo htmlspecialchars($activite['utilisateur_nom_complet'] ?? $activite['utilisateur_nom']); ?>
+                                                            <?php if ($activite['utilisateur_id'] == $user_id): ?>
+                                                                <span class="ml-1 text-xs text-blue-600 font-semibold">(Vous)</span>
+                                                            <?php endif; ?>
+                                                        </div>
+                                                    </td>
                                                     <td class="px-4 py-3 text-gray-500">
                                                         <div class="font-medium">
                                                             <?php echo date('d/m/Y', strtotime($activite['created_at'])); ?>
