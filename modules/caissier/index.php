@@ -377,19 +377,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ]);
 
                     $pdo->commit();
+
                     try {
                         // Récupérer le nom du produit pour le journal
                         $stmt = $pdo->prepare("SELECT nom FROM produits WHERE id = :produit_id");
                         $stmt->execute([':produit_id' => intval($_POST['produit_id'] ?? 0)]);
                         $produit_info = $stmt->fetch();
-
+            
                         if ($produit_info) {
                             $type_promo = $_POST['type_promotion'] ?? 'pourcentage';
                             $valeur = $_POST['valeur'] ?? 0;
-                            $details_promo = "Promotion " . $type_promo . " de " . $valeur .
-                                ($type_promo == 'pourcentage' ? '%' : ' FC') .
-                                " sur le produit: " . $produit_info['nom'];
-
+                            $date_debut = $_POST['date_debut'] ?? date('Y-m-d');
+                            $date_fin = $_POST['date_fin'] ?? 'Indéfinie';
+                            
+                            $details_promo = sprintf(
+                                "Promotion %s de %s%s sur %s - Période: %s à %s",
+                                $type_promo,
+                                $valeur,
+                                ($type_promo == 'pourcentage' ? '%' : ' FC'),
+                                $produit_info['nom'],
+                                $date_debut,
+                                $date_fin
+                            );
+            
                             logActivity(
                                 $pdo,
                                 $_SESSION['user_id'],
@@ -404,6 +414,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     } catch (Exception $e) {
                         error_log("Erreur journalisation application promotion: " . $e->getMessage());
                     }
+
                     $message = "✅ Promotion appliquée avec succès!";
 
                 } catch (Exception $e) {
