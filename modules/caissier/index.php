@@ -2188,6 +2188,55 @@ try {
                 setTimeout(() => alert.remove(), 500);
             });
         }, 5000);
+
+        function logClientAction(action, details) {
+            console.log('Action client journalisée:', action, details);
+
+            // Envoyer une requête au serveur pour logger
+            fetch('../config/log_client_action.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    action: action,
+                    details: details,
+                    page: '<?php echo $current_page; ?>',
+                    user_id: <?php echo $_SESSION['user_id']; ?>
+                })
+            }).catch(err => console.error('Erreur journalisation client:', err));
+        }
+
+        // Journaliser les clics importants
+        document.addEventListener('DOMContentLoaded', function () {
+            // Journaliser les clics sur les boutons de validation
+            document.querySelectorAll('button[onclick*="validerPaiement"]').forEach(button => {
+                button.addEventListener('click', function () {
+                    const onclick = this.getAttribute('onclick') || '';
+                    const match = onclick.match(/validerPaiement\((\d+)\)/);
+                    if (match) {
+                        logClientAction('click_valider_paiement', 'Commande ID: ' + match[1]);
+                    }
+                });
+            });
+
+            // Journaliser les clics sur les boutons de prix
+            document.querySelectorAll('button[onclick*="definirPrix"], button[onclick*="modifierPrix"]').forEach(button => {
+                button.addEventListener('click', function () {
+                    const onclick = this.getAttribute('onclick') || '';
+                    logClientAction('click_gerer_prix', 'Action: ' + onclick);
+                });
+            });
+
+            // Journaliser les recherches
+            document.querySelectorAll('input[type="text"][placeholder*="Rechercher"]').forEach(input => {
+                input.addEventListener('change', function () {
+                    if (this.value.trim()) {
+                        logClientAction('recherche', 'Terme: ' + this.value + ' - Page: <?php echo $current_page; ?>');
+                    }
+                });
+            });
+        });
     </script>
 </body>
 
