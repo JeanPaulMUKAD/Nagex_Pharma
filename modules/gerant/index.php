@@ -2,6 +2,7 @@
 declare(strict_types=1);
 session_start();
 require_once __DIR__ . '/../../config/database.php';
+require_once __DIR__ . '/../../config/journal_functions.php';
 
 // Activer l'affichage des erreurs pour debug
 error_reporting(E_ALL);
@@ -2028,13 +2029,13 @@ function getJoursRestantsClass($jours)
                     tableId = 'fournisseursTable';
                     filename = 'fournisseurs_' + new Date().toISOString().split('T')[0] + '.xls';
                     break;
-                case 'utilisateurs':  // AJOUTEZ CE CAS
+                case 'utilisateurs':
                     tableId = 'utilisateursTable';
                     filename = 'utilisateurs_' + new Date().toISOString().split('T')[0] + '.xls';
                     break;
-
                 case 'journal':
-                    $data = loadJournalData($db, $user_id);
+                    tableId = 'journalTable';
+                    filename = 'journal_' + new Date().toISOString().split('T')[0] + '.xls';
                     break;
                 default:
                     console.error('Type inconnu:', type);
@@ -2086,41 +2087,7 @@ function getJoursRestantsClass($jours)
             });
         }
 
-        // Filtrer le journal
-        function filterJournal() {
-            const date = document.getElementById('filterDateJournal').value;
-            const utilisateur = document.getElementById('filterUtilisateurJournal').value;
-            const action = document.getElementById('filterActionJournal').value;
-
-            document.querySelectorAll('#journalTable .journal-row').forEach(row => {
-                const rowDate = row.getAttribute('data-date');
-                const rowUtilisateur = row.getAttribute('data-utilisateur');
-                const rowAction = row.getAttribute('data-action');
-
-                const matchDate = !date || rowDate === date;
-                const matchUtilisateur = !utilisateur || rowUtilisateur === utilisateur;
-                const matchAction = !action || rowAction.includes(action);
-
-                row.style.display = (matchDate && matchUtilisateur && matchAction) ? '' : 'none';
-            });
-        }
-
-        function clearFiltersJournal() {
-            document.getElementById('filterDateJournal').value = '';
-            document.getElementById('filterUtilisateurJournal').value = '';
-            document.getElementById('filterActionJournal').value = '';
-            filterJournal();
-        }
-
-        // Dans DOMContentLoaded, ajoutez :
-        const filterDateJournal = document.getElementById('filterDateJournal');
-        const filterUtilisateurJournal = document.getElementById('filterUtilisateurJournal');
-        const filterActionJournal = document.getElementById('filterActionJournal');
-
-        if (filterDateJournal) filterDateJournal.addEventListener('change', filterJournal);
-        if (filterUtilisateurJournal) filterUtilisateurJournal.addEventListener('change', filterJournal);
-        if (filterActionJournal) filterActionJournal.addEventListener('change', filterJournal);
-
+        // Filtrer les commandes
         function filterCommandes() {
             const search = document.getElementById('searchCommande').value.toLowerCase();
             const statut = document.getElementById('filterStatutCommande').value;
@@ -2139,6 +2106,22 @@ function getJoursRestantsClass($jours)
             });
         }
 
+        // Filtrer les utilisateurs
+        function filterUtilisateurs() {
+            const search = document.getElementById('searchUtilisateur').value.toLowerCase();
+            const role = document.getElementById('filterRole').value;
+
+            document.querySelectorAll('#utilisateursTable .utilisateur-row').forEach(row => {
+                const nom = row.getAttribute('data-nom').toLowerCase();
+                const rowRole = row.getAttribute('data-role');
+
+                const matchSearch = nom.includes(search);
+                const matchRole = !role || rowRole === role;
+
+                row.style.display = (matchSearch && matchRole) ? '' : 'none';
+            });
+        }
+
         // Filtrer le journal
         function filterJournal() {
             const date = document.getElementById('filterDateJournal').value;
@@ -2165,107 +2148,41 @@ function getJoursRestantsClass($jours)
             filterJournal();
         }
 
-        // Dans DOMContentLoaded, ajoutez :
-        const filterDateJournal = document.getElementById('filterDateJournal');
-        const filterUtilisateurJournal = document.getElementById('filterUtilisateurJournal');
-        const filterActionJournal = document.getElementById('filterActionJournal');
+        // Fonction pour enregistrer une activité côté client (pour afficher des confirmations)
+        function logClientActivity(action, details = null) {
+            console.log('Activité client:', action, details);
 
-        if (filterDateJournal) filterDateJournal.addEventListener('change', filterJournal);
-        if (filterUtilisateurJournal) filterUtilisateurJournal.addEventListener('change', filterJournal);
-        if (filterActionJournal) filterActionJournal.addEventListener('change', filterJournal);
-
-        //Ajoutez cette fonction après les autres fonctions de filtrage
-        function filterUtilisateurs() {
-            const search = document.getElementById('searchUtilisateur').value.toLowerCase();
-            const role = document.getElementById('filterRole').value;
-
-            document.querySelectorAll('#utilisateursTable .utilisateur-row').forEach(row => {
-                const nom = row.getAttribute('data-nom').toLowerCase();
-                const rowRole = row.getAttribute('data-role');
-
-                const matchSearch = nom.includes(search);
-                const matchRole = !role || rowRole === role;
-
-                row.style.display = (matchSearch && matchRole) ? '' : 'none';
-            });
+            // Vous pouvez ici ajouter des notifications ou confirmations visuelles
+            // Exemple: afficher une petite notification
+            showNotification('Activité enregistrée: ' + action, 'success');
         }
 
-        function loadJournalData($db, $current_user_id) {
-            $data = [];
+        // Fonction pour afficher des notifications
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            notification.className = `fixed top-4 right-4 z-50 px-6 py-3 rounded-lg shadow-lg transition-opacity duration-300 ${type === 'success' ? 'bg-green-100 text-green-800 border border-green-200' :
+                    type === 'error' ? 'bg-red-100 text-red-800 border border-red-200' :
+                        'bg-blue-100 text-blue-800 border border-blue-200'
+                }`;
 
-            try {
-                // Récupérer toutes les activités (sauf celles du gérant actuel)
-                $sql = "
-            SELECT ja.*, u.nom as utilisateur_nom_complet 
-            FROM journal_activites ja
-            LEFT JOIN utilisateurs u ON ja.utilisateur_id = u.id
-                WHERE(ja.utilisateur_role != 'gerant' OR ja.utilisateur_id != ?)
-                    ORDER BY ja.created_at DESC 
-            LIMIT 100
-                ";
+            notification.innerHTML = `
+            <div class="flex items-center">
+                <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-triangle' : 'info-circle'} mr-2"></i>
+                <span>${message}</span>
+            </div>
+        `;
 
-                $stmt = $db -> prepare($sql);
-                $stmt -> execute([$current_user_id]);
-                $data['activites'] = $stmt -> fetchAll(PDO:: FETCH_ASSOC);
+            document.body.appendChild(notification);
 
-                // Statistiques par jour
-                $stmt = $db -> prepare("
-            SELECT DATE(created_at) as date,
-                    COUNT(*) as total,
-                    SUM(CASE WHEN action LIKE 'connexion_%' THEN 1 ELSE 0 END) as connexions,
-                    SUM(CASE WHEN action LIKE 'creation_%' THEN 1 ELSE 0 END) as creations,
-                    SUM(CASE WHEN action LIKE 'modification_%' THEN 1 ELSE 0 END) as modifications,
-                    SUM(CASE WHEN action LIKE 'suppression_%' THEN 1 ELSE 0 END) as suppressions
-            FROM journal_activites 
-            WHERE utilisateur_role != 'gerant' OR utilisateur_id != ?
-                    AND created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
-            GROUP BY DATE(created_at)
-            ORDER BY date DESC
-        ");
-        $stmt -> execute([$current_user_id]);
-                $data['stats_journal'] = $stmt -> fetchAll(PDO:: FETCH_ASSOC);
-
-            } catch (Exception $e) {
-                error_log("Erreur chargement journal: ".$e -> getMessage());
-                $data['activites'] = [];
-                $data['stats_journal'] = [];
-            }
-
-            return $data;
-        }
-
-
-        // ============================================================================
-        // FONCTION POUR ENREGISTRER LES ACTIVITÉS
-        // ============================================================================
-
-        function logActivity($db, $user_id, $user_name, $user_role, $action, $details = null, $table = null, $element_id = null) {
-            try {
-                $ip_adresse = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
-                $user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
-
-                $sql = "INSERT INTO journal_activites 
-                    (utilisateur_id, utilisateur_nom, utilisateur_role, action,
-                        details, table_concernee, element_id, ip_adresse, user_agent)
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)";
-
-                $stmt = $db -> prepare($sql);
-                return $stmt -> execute([
-                    $user_id,
-                    $user_name,
-                    $user_role,
-                    $action,
-                    $details,
-                    $table,
-                    $element_id,
-                    $ip_adresse,
-                    substr($user_agent, 0, 500) // Limiter la taille si nécessaire
-                ]);
-
-            } catch (Exception $e) {
-                error_log("Erreur lors de l'enregistrement de l'activité: ".$e -> getMessage());
-                return false;
-            }
+            // Supprimer la notification après 3 secondes
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                }, 300);
+            }, 3000);
         }
 
         // Initialisation lorsque le DOM est chargé
@@ -2317,7 +2234,73 @@ function getJoursRestantsClass($jours)
                 filterDate.addEventListener('change', filterCommandes);
             }
 
+            // Filtre journal
+            const filterDateJournal = document.getElementById('filterDateJournal');
+            const filterUtilisateurJournal = document.getElementById('filterUtilisateurJournal');
+            const filterActionJournal = document.getElementById('filterActionJournal');
+
+            if (filterDateJournal) {
+                filterDateJournal.addEventListener('change', filterJournal);
+            }
+            if (filterUtilisateurJournal) {
+                filterUtilisateurJournal.addEventListener('change', filterJournal);
+            }
+            if (filterActionJournal) {
+                filterActionJournal.addEventListener('change', filterJournal);
+            }
+
+            // Bouton effacer filtres journal
+            const clearFiltersBtn = document.querySelector('button[onclick="clearFiltersJournal()"]');
+            if (clearFiltersBtn) {
+                clearFiltersBtn.addEventListener('click', clearFiltersJournal);
+            }
+
+            // Logguer la consultation de la page actuelle
+            const currentSection = window.location.search.includes('section=')
+                ? window.location.search.split('section=')[1].split('&')[0]
+                : 'dashboard';
+
+            logClientActivity('Consultation de la section: ' + currentSection);
+
             console.log('Initialisation terminée');
+        });
+
+        // Fonction pour confirmer les actions importantes
+        function confirmAction(action, callback) {
+            const confirmed = confirm(`Êtes-vous sûr de vouloir ${action} ?`);
+            if (confirmed && callback) {
+                callback();
+
+                // Logguer l'action côté client
+                logClientAction('confirmation', `Action confirmée: ${action}`);
+            }
+            return confirmed;
+        }
+
+        // Exemple d'utilisation pour les boutons d'export
+        function exportWithConfirmation(type) {
+            confirmAction(`exporter les ${type}`, () => {
+                exportToExcel(type);
+
+                // Logguer l'export côté client
+                logClientActivity('export_excel', `Exportation des ${type}`);
+            });
+        }
+
+        // Remplacer les appels directs d'export par des versions avec confirmation
+        document.addEventListener('DOMContentLoaded', function () {
+            // Attacher les événements aux boutons d'export
+            document.querySelectorAll('button[onclick^="exportToExcel"]').forEach(button => {
+                const oldOnclick = button.getAttribute('onclick');
+                if (oldOnclick) {
+                    const match = oldOnclick.match(/exportToExcel\('([^']+)'\)/);
+                    if (match) {
+                        const type = match[1];
+                        button.removeAttribute('onclick');
+                        button.addEventListener('click', () => exportWithConfirmation(type));
+                    }
+                }
+            });
         });
     </script>
 </body>
