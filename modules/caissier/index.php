@@ -170,12 +170,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ]);
 
                     $pdo->commit();
+
                     try {
                         // Récupérer le nom du produit pour le journal
-                        $stmt = $pdo->prepare("SELECT nom FROM produits WHERE id = :produit_id");
+                        $stmt = $pdo->prepare("SELECT nom, code_barre FROM produits WHERE id = :produit_id");
                         $stmt->execute([':produit_id' => intval($_POST['produit_id'] ?? 0)]);
                         $produit_info = $stmt->fetch();
-
+            
                         if ($produit_info) {
                             logActivity(
                                 $pdo,
@@ -183,9 +184,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 $_SESSION['user_nom'] ?? 'Caissier',
                                 'caissier',
                                 'definition_prix',
-                                "Prix défini - Produit: " . $produit_info['nom'] .
-                                " - Prix FC: " . formatMontant($_POST['prix_fc'] ?? 0) .
-                                " - Prix USD: $" . number_format(floatval($_POST['prix_usd'] ?? 0), 2),
+                                sprintf(
+                                    "Prix défini - Produit: %s (Code: %s) - Prix FC: %s - Prix USD: $%.2f - Taux: %.4f",
+                                    $produit_info['nom'],
+                                    $produit_info['code_barre'],
+                                    formatMontant($_POST['prix_fc'] ?? 0),
+                                    floatval($_POST['prix_usd'] ?? 0),
+                                    floatval($_POST['taux_conversion'] ?? 1)
+                                ),
                                 'produits',
                                 intval($_POST['produit_id'] ?? 0)
                             );
@@ -193,11 +199,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     } catch (Exception $e) {
                         error_log("Erreur journalisation définition prix: " . $e->getMessage());
                     }
+
                     $message = "✅ Prix défini avec succès!";
 
                 } catch (Exception $e) {
                     $pdo->rollBack();
                     $error = "❌ Erreur lors de la définition du prix: " . $e->getMessage();
+
+                    try {
+                        logActivity(
+                            $pdo,
+                            $_SESSION['user_id'],
+                            $_SESSION['user_nom'] ?? 'Caissier',
+                            'caissier',
+                            'erreur_definition_prix',
+                            "Échec définition prix - Produit ID: " . intval($_POST['produit_id'] ?? 0) . 
+                            " - Erreur: " . $e->getMessage(),
+                            'produits',
+                            intval($_POST['produit_id'] ?? 0)
+                        );
+                    } catch (Exception $logError) {
+                        error_log("Erreur journalisation échec: " . $logError->getMessage());
+                    }
+                    
                 }
                 break;
 
