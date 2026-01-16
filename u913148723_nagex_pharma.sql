@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Hôte : 127.0.0.1:3306
--- Généré le : mar. 13 jan. 2026 à 07:45
+-- Généré le : ven. 16 jan. 2026 à 11:23
 -- Version du serveur : 11.8.3-MariaDB-log
 -- Version de PHP : 7.2.34
 
@@ -115,6 +115,26 @@ CREATE TABLE `fournisseurs` (
   `note_qualite` decimal(3,2) DEFAULT 0.00,
   `updated_at` timestamp NULL DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- --------------------------------------------------------
+
+--
+-- Structure de la table `journal_activites`
+--
+
+CREATE TABLE `journal_activites` (
+  `id` int(11) NOT NULL,
+  `utilisateur_id` int(11) NOT NULL,
+  `utilisateur_nom` varchar(100) NOT NULL,
+  `utilisateur_role` varchar(50) NOT NULL,
+  `action` varchar(100) NOT NULL,
+  `details` text DEFAULT NULL,
+  `table_concernee` varchar(50) DEFAULT NULL,
+  `element_id` int(11) DEFAULT NULL,
+  `ip_adresse` varchar(45) DEFAULT NULL,
+  `user_agent` text DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- --------------------------------------------------------
 
@@ -288,6 +308,45 @@ CREATE TABLE `user_logs` (
   `created_at` timestamp NULL DEFAULT current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+--
+-- Déchargement des données de la table `user_logs`
+--
+
+INSERT INTO `user_logs` (`id`, `user_id`, `action`, `details`, `ip_address`, `user_agent`, `created_at`) VALUES
+(1, 1, 'CONNEXION', 'Utilisateur connecté avec succès', '169.239.158.12', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0', '2026-01-13 08:39:48'),
+(2, 1, 'CONNEXION', 'Utilisateur connecté avec succès', '41.243.46.39', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 OPR/125.0.0.0 (Edition ms_store)', '2026-01-13 08:50:12'),
+(3, 1, 'AJOUT_UTILISATEUR', 'Nouvel utilisateur: Gabriel kiluba (pharmacien)', '41.243.46.39', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 OPR/125.0.0.0 (Edition ms_store)', '2026-01-13 08:57:37'),
+(4, 1, 'CONNEXION', 'Utilisateur connecté avec succès', '169.239.158.12', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0', '2026-01-13 08:57:55'),
+(5, 1, 'DESACTIVATION', 'Utilisateur: Gabriel kiluba (nathanaelnkl@gmail.com) - Rôle: pharmacien - Nouveau statut: inactif', '41.243.46.39', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 OPR/125.0.0.0 (Edition ms_store)', '2026-01-13 09:00:22'),
+(6, 1, 'ACTIVATION', 'Utilisateur: Gabriel kiluba (nathanaelnkl@gmail.com) - Rôle: pharmacien - Nouveau statut: actif', '41.243.46.39', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 OPR/125.0.0.0 (Edition ms_store)', '2026-01-13 09:00:45'),
+(7, 2, 'CONNEXION', 'Utilisateur connecté avec succès', '41.243.46.39', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 OPR/125.0.0.0 (Edition ms_store)', '2026-01-13 09:03:38'),
+(8, 1, 'CONNEXION', 'Utilisateur connecté avec succès', '41.243.46.39', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 OPR/125.0.0.0 (Edition ms_store)', '2026-01-13 09:05:15'),
+(9, 1, 'AJOUT_UTILISATEUR', 'Nouvel utilisateur: Nathanaël Lukas (gerant)', '41.243.46.39', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 OPR/125.0.0.0 (Edition ms_store)', '2026-01-13 09:06:11'),
+(10, 1, 'DECONNEXION', 'Utilisateur déconnecté avec succès', '169.239.158.12', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0', '2026-01-13 09:09:18'),
+(11, 3, 'CONNEXION', 'Utilisateur connecté avec succès', '169.239.158.12', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0', '2026-01-13 09:09:43'),
+(12, 3, 'CONNEXION', 'Utilisateur connecté avec succès', '169.239.158.12', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0', '2026-01-13 09:17:15'),
+(13, 3, 'DECONNEXION', 'Utilisateur déconnecté avec succès', '169.239.158.12', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0', '2026-01-13 10:37:52'),
+(14, 3, 'CONNEXION', 'Utilisateur connecté avec succès', '169.239.158.12', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0', '2026-01-13 10:38:38'),
+(15, 3, 'DECONNEXION', 'Utilisateur déconnecté avec succès', '169.239.158.12', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0', '2026-01-13 10:46:28'),
+(16, 3, 'CONNEXION', 'Utilisateur connecté avec succès', '169.239.158.12', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0', '2026-01-13 10:47:11'),
+(17, 3, 'DECONNEXION', 'Utilisateur déconnecté avec succès', '169.239.158.12', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0', '2026-01-13 10:49:18'),
+(18, 1, 'CONNEXION', 'Utilisateur connecté avec succès', '169.239.158.12', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0', '2026-01-13 10:49:39'),
+(19, 1, 'CONNEXION', 'Utilisateur connecté avec succès', '169.239.158.12', 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Mobile Safari/537.36', '2026-01-13 11:24:16'),
+(20, 1, 'DECONNEXION', 'Utilisateur déconnecté avec succès', '169.239.158.12', 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Mobile Safari/537.36', '2026-01-13 11:24:51'),
+(21, 3, 'CONNEXION', 'Utilisateur connecté avec succès', '169.239.158.12', 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Mobile Safari/537.36', '2026-01-13 11:25:29'),
+(22, 3, 'DECONNEXION', 'Utilisateur déconnecté avec succès', '169.239.158.12', 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Mobile Safari/537.36', '2026-01-13 11:26:27'),
+(23, 1, 'CONNEXION', 'Utilisateur connecté avec succès', '41.243.58.16', 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0.1 Mobile/15E148 Safari/604.1', '2026-01-14 09:38:29'),
+(24, 1, 'CONNEXION', 'Utilisateur connecté avec succès', '41.243.22.138', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 OPR/125.0.0.0 (Edition ms_store)', '2026-01-15 12:15:16'),
+(25, 2, 'CONNEXION', 'Utilisateur connecté avec succès', '41.243.22.138', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 OPR/125.0.0.0 (Edition ms_store)', '2026-01-15 12:18:18'),
+(26, 2, 'DECONNEXION', 'Utilisateur déconnecté avec succès', '41.243.22.138', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 OPR/125.0.0.0 (Edition ms_store)', '2026-01-15 12:29:55'),
+(27, 1, 'CONNEXION', 'Utilisateur connecté avec succès', '41.243.22.138', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 OPR/125.0.0.0 (Edition ms_store)', '2026-01-15 12:30:16'),
+(28, 1, 'CONNEXION', 'Utilisateur connecté avec succès', '41.243.46.57', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 OPR/125.0.0.0 (Edition ms_store)', '2026-01-16 10:12:19'),
+(29, 1, 'CONNEXION', 'Utilisateur connecté avec succès', '2605:59c0:9c5:cb08:814f:6746:152f:c3ad', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0', '2026-01-16 11:14:45'),
+(30, 1, 'DESACTIVATION', 'Utilisateur: Nathanaël Lukas (lukas452121@outlook.fr) - Rôle: gerant - Nouveau statut: inactif', '2605:59c0:9c5:cb08:814f:6746:152f:c3ad', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0', '2026-01-16 11:15:19'),
+(31, 1, 'ACTIVATION', 'Utilisateur: Nathanaël Lukas (lukas452121@outlook.fr) - Rôle: gerant - Nouveau statut: actif', '2605:59c0:9c5:cb08:814f:6746:152f:c3ad', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0', '2026-01-16 11:15:25'),
+(32, 1, 'DECONNEXION', 'Utilisateur déconnecté avec succès', '2605:59c0:9c5:cb08:814f:6746:152f:c3ad', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0', '2026-01-16 11:16:45'),
+(33, 3, 'CONNEXION', 'Utilisateur connecté avec succès', '2605:59c0:9c5:cb08:814f:6746:152f:c3ad', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:146.0) Gecko/20100101 Firefox/146.0', '2026-01-16 11:17:40');
+
 -- --------------------------------------------------------
 
 --
@@ -308,6 +367,14 @@ CREATE TABLE `utilisateurs` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 --
+-- Déchargement des données de la table `utilisateurs`
+--
+
+INSERT INTO `utilisateurs` (`id`, `nom`, `email`, `mot_de_passe`, `role`, `telephone`, `adresse`, `date_creation`, `date_modification`, `statut`) VALUES
+(1, 'Administrateur NAGEX Pharma', 'nagexpharma@gmail.com', '$2y$10$COr..vC0UgP9WFXHlqy/J.5vlZcuHnm4JKZl.nRStZo7guqLYgb8u', 'admin', '+243 81 000 0000', 'Siège Social NAGEX Pharma, Kinshasa', '2026-01-13 08:18:33', '2026-01-13 08:39:07', 'actif'),
+(2, 'Gabriel kiluba', 'nathanaelnkl@gmail.com', '$2y$10$kDapmue1zquBaorJccK9G.eOzfVhbZVqJsLW/JDX3XgvSUCIt1EDC', 'pharmacien', '0973920028', 'Kolwezi', '2026-01-13 08:57:37', '2026-01-13 09:00:45', 'actif'),
+(3, 'Nathanaël Lukas', 'lukas452121@outlook.fr', '$2y$10$Veif4eVVTMpmXtH1L5yXTOI48qvIBZYE4uR13ZZV5VJ70p.GseABC', 'gerant', '0978362223', 'Kolwezi', '2026-01-13 09:06:11', '2026-01-16 11:15:25', 'actif');
+
 --
 -- Index pour les tables déchargées
 --
@@ -359,6 +426,15 @@ ALTER TABLE `favoris`
 ALTER TABLE `fournisseurs`
   ADD PRIMARY KEY (`id`),
   ADD KEY `user_id` (`user_id`);
+
+--
+-- Index pour la table `journal_activites`
+--
+ALTER TABLE `journal_activites`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `idx_journal_utilisateur` (`utilisateur_id`),
+  ADD KEY `idx_journal_date` (`created_at`),
+  ADD KEY `idx_journal_action` (`action`);
 
 --
 -- Index pour la table `lots`
@@ -488,6 +564,12 @@ ALTER TABLE `fournisseurs`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
 
 --
+-- AUTO_INCREMENT pour la table `journal_activites`
+--
+ALTER TABLE `journal_activites`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+--
 -- AUTO_INCREMENT pour la table `lots`
 --
 ALTER TABLE `lots`
@@ -545,13 +627,13 @@ ALTER TABLE `taux_conversion`
 -- AUTO_INCREMENT pour la table `user_logs`
 --
 ALTER TABLE `user_logs`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=34;
 
 --
 -- AUTO_INCREMENT pour la table `utilisateurs`
 --
 ALTER TABLE `utilisateurs`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=2;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=4;
 
 --
 -- Contraintes pour les tables déchargées
@@ -597,6 +679,12 @@ ALTER TABLE `favoris`
 --
 ALTER TABLE `fournisseurs`
   ADD CONSTRAINT `fournisseurs_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `utilisateurs` (`id`) ON DELETE CASCADE;
+
+--
+-- Contraintes pour la table `journal_activites`
+--
+ALTER TABLE `journal_activites`
+  ADD CONSTRAINT `journal_activites_ibfk_1` FOREIGN KEY (`utilisateur_id`) REFERENCES `utilisateurs` (`id`) ON DELETE CASCADE;
 
 --
 -- Contraintes pour la table `lots`
@@ -661,5 +749,5 @@ ALTER TABLE `taux_conversion`
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
-/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
-/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;

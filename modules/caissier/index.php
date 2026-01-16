@@ -18,6 +18,7 @@ if (!isset($_SESSION['user_id']) || ($_SESSION['user_role'] ?? '') !== 'caissier
 
 // Inclure la classe Database
 require_once __DIR__ . '/../../config/database.php';
+require_once __DIR__ . '/../../config/journal_functions.php';
 
 // Initialisation des variables
 $message = '';
@@ -144,6 +145,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ]);
 
                     $pdo->commit();
+                    try {
+                        // Récupérer le nom du produit pour le journal
+                        $stmt = $pdo->prepare("SELECT nom FROM produits WHERE id = :produit_id");
+                        $stmt->execute([':produit_id' => intval($_POST['produit_id'] ?? 0)]);
+                        $produit_info = $stmt->fetch();
+
+                        if ($produit_info) {
+                            logActivity(
+                                $pdo,
+                                $_SESSION['user_id'],
+                                $_SESSION['user_nom'] ?? 'Caissier',
+                                'caissier',
+                                'definition_prix',
+                                "Prix défini - Produit: " . $produit_info['nom'] .
+                                " - Prix FC: " . formatMontant($_POST['prix_fc'] ?? 0) .
+                                " - Prix USD: $" . number_format(floatval($_POST['prix_usd'] ?? 0), 2),
+                                'produits',
+                                intval($_POST['produit_id'] ?? 0)
+                            );
+                        }
+                    } catch (Exception $e) {
+                        error_log("Erreur journalisation définition prix: " . $e->getMessage());
+                    }
                     $message = "✅ Prix défini avec succès!";
 
                 } catch (Exception $e) {
@@ -212,6 +236,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             ':commande_id2' => intval($_POST['commande_id'] ?? 0)
                         ]);
 
+                        try {
+                            // Récupérer les infos de la commande pour le journal
+                            $stmt = $pdo->prepare("
+                                SELECT c.numero_commande, c.montant_total, u.nom as client_nom 
+                                FROM commandes c 
+                                JOIN utilisateurs u ON c.client_id = u.id 
+                                WHERE c.id = :commande_id
+                            ");
+                            $stmt->execute([':commande_id' => intval($_POST['commande_id'] ?? 0)]);
+                            $commande_info = $stmt->fetch();
+
+                            if ($commande_info) {
+                                logActivity(
+                                    $pdo,
+                                    $_SESSION['user_id'],
+                                    $_SESSION['user_nom'] ?? 'Caissier',
+                                    'caissier',
+                                    'validation_paiement',
+                                    "Paiement validé - Commande: #" . $commande_info['numero_commande'] .
+                                    " - Montant: " . formatMontant($commande_info['montant_total']) .
+                                    " - Client: " . $commande_info['client_nom'] .
+                                    " - Mode: " . ($_POST['mode_paiement'] ?? 'especes'),
+                                    'commandes',
+                                    intval($_POST['commande_id'] ?? 0)
+                                );
+                            }
+                        } catch (Exception $e) {
+                            error_log("Erreur journalisation validation paiement: " . $e->getMessage());
+                        }
+
                         $pdo->commit();
                         $message = "✅ Paiement validé avec succès!";
                     } else {
@@ -251,6 +305,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ]);
 
                     $pdo->commit();
+                    try {
+                        // Récupérer le nom du produit pour le journal
+                        $stmt = $pdo->prepare("SELECT nom FROM produits WHERE id = :produit_id");
+                        $stmt->execute([':produit_id' => intval($_POST['produit_id'] ?? 0)]);
+                        $produit_info = $stmt->fetch();
+
+                        if ($produit_info) {
+                            $type_promo = $_POST['type_promotion'] ?? 'pourcentage';
+                            $valeur = $_POST['valeur'] ?? 0;
+                            $details_promo = "Promotion " . $type_promo . " de " . $valeur .
+                                ($type_promo == 'pourcentage' ? '%' : ' FC') .
+                                " sur le produit: " . $produit_info['nom'];
+
+                            logActivity(
+                                $pdo,
+                                $_SESSION['user_id'],
+                                $_SESSION['user_nom'] ?? 'Caissier',
+                                'caissier',
+                                'application_promotion',
+                                $details_promo,
+                                'promotions',
+                                $pdo->lastInsertId()
+                            );
+                        }
+                    } catch (Exception $e) {
+                        error_log("Erreur journalisation application promotion: " . $e->getMessage());
+                    }
                     $message = "✅ Promotion appliquée avec succès!";
 
                 } catch (Exception $e) {
@@ -311,6 +392,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             ':commande_id2' => intval($_POST['commande_id'] ?? 0)
                         ]);
 
+                        try {
+                            // Récupérer les infos de la commande pour le journal
+                            $stmt = $pdo->prepare("
+                                SELECT c.numero_commande, c.montant_total, u.nom as client_nom 
+                                FROM commandes c 
+                                JOIN utilisateurs u ON c.client_id = u.id 
+                                WHERE c.id = :commande_id
+                            ");
+                            $stmt->execute([':commande_id' => intval($_POST['commande_id'] ?? 0)]);
+                            $commande_info = $stmt->fetch();
+
+                            if ($commande_info) {
+                                logActivity(
+                                    $pdo,
+                                    $_SESSION['user_id'],
+                                    $_SESSION['user_nom'] ?? 'Caissier',
+                                    'caissier',
+                                    'traitement_retour',
+                                    "Retour traité - Commande: #" . $commande_info['numero_commande'] .
+                                    " - Montant remboursé: " . formatMontant($commande_info['montant_total']) .
+                                    " - Client: " . $commande_info['client_nom'],
+                                    'commandes',
+                                    intval($_POST['commande_id'] ?? 0)
+                                );
+                            }
+                        } catch (Exception $e) {
+                            error_log("Erreur journalisation traitement retour: " . $e->getMessage());
+                        }
+
                         $pdo->commit();
                         $message = "✅ Retour traité avec succès!";
                     } else {
@@ -345,6 +455,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         ':taux' => floatval($_POST['taux'] ?? 1),
                         ':created_by' => $_SESSION['user_id']
                     ]);
+
+                    try {
+                        logActivity(
+                            $pdo,
+                            $_SESSION['user_id'],
+                            $_SESSION['user_nom'] ?? 'Caissier',
+                            'caissier',
+                            'ajustement_taux_conversion',
+                            "Taux de conversion mis à jour: 1 USD = " . floatval($_POST['taux'] ?? 1) . " FC",
+                            'taux_conversion',
+                            $pdo->lastInsertId()
+                        );
+                    } catch (Exception $e) {
+                        error_log("Erreur journalisation ajustement taux: " . $e->getMessage());
+                    }
 
                     $message = "✅ Taux de conversion mis à jour avec succès!";
 
@@ -1058,7 +1183,7 @@ try {
                                     <div class="text-xs text-red-600 font-medium">En attente</div>
                                 </div>
                             <?php endif; ?>
-                           
+
                         </div>
                     </div>
 
@@ -1288,7 +1413,7 @@ try {
                                                             Valider
                                                         </button>
 
-                                                        
+
                                                     </div>
                                                 </td>
                                             </tr>
@@ -1297,7 +1422,7 @@ try {
                                 </table>
                             </div>
 
-                            
+
                         </div>
                     <?php else: ?>
                         <!-- Aucune commande en attente -->
@@ -1584,7 +1709,7 @@ try {
                                             <th
                                                 class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
                                                 Produits</th>
-                                           
+
                                         </tr>
                                     </thead>
 
@@ -1652,7 +1777,7 @@ try {
                                                     </span>
                                                 </td>
 
-                                                
+
                                             </tr>
                                         <?php endforeach; ?>
                                     </tbody>

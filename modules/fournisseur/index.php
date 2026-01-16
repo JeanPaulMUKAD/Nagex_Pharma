@@ -178,6 +178,41 @@ function formatDate(string $date): string
     return date('d/m/Y H:i', strtotime($date));
 }
 
+/**
+ * Enregistre une activité dans le journal
+ */
+function logActivity($db, $user_id, $user_name, $user_role, $action, $details = null, $table = null, $element_id = null) {
+    try {
+        // Obtenir la connexion PDO depuis l'objet Database
+        $pdo = $db->getConnection(); // ou $db->pdo selon votre implémentation
+        
+        $ip_adresse = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+        $user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
+        
+        $sql = "INSERT INTO journal_activites 
+                (utilisateur_id, utilisateur_nom, utilisateur_role, action, 
+                 details, table_concernee, element_id, ip_adresse, user_agent)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        
+        $stmt = $pdo->prepare($sql);
+        return $stmt->execute([
+            $user_id,
+            $user_name,
+            $user_role,
+            $action,
+            $details,
+            $table,
+            $element_id,
+            $ip_adresse,
+            substr($user_agent, 0, 500)
+        ]);
+        
+    } catch (Exception $e) {
+        error_log("Erreur logActivity: " . $e->getMessage());
+        return false;
+    }
+}
+
 // ============================================
 // GESTION FOURNISSEUR (Traitement POST)
 // ============================================
@@ -207,6 +242,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         ':email' => $_POST['email'] ?? '',
                         ':id' => $fournisseur_id
                     ]);
+
+                    // AJOUTER CETTE LIGNE POUR ENREGISTRER L'ACTIVITÉ
+                    logActivity(
+                        $pdo,
+                        $_SESSION['user_id'],
+                        $_SESSION['user_nom'] ?? 'Fournisseur',
+                        'fournisseur',
+                        'modification_profil',
+                        "Mise à jour du profil fournisseur: " . ($_POST['nom_societe'] ?? ''),
+                        'fournisseurs',
+                        $fournisseur_id
+                    );
 
                     $message = "✅ Profil mis à jour avec succès!";
 
@@ -250,6 +297,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         ':composition' => $_POST['composition'] ?? '',
                         ':created_by' => $_SESSION['user_id']
                     ]);
+
+                    $produit_id = $pdo->lastInsertId();
+
+                    // AJOUTER CETTE LIGNE POUR ENREGISTRER L'ACTIVITÉ
+                    logActivity(
+                        $pdo,
+                        $_SESSION['user_id'],
+                        $_SESSION['user_nom'] ?? 'Fournisseur',
+                        'fournisseur',
+                        'creation_produit',
+                        "Ajout produit: " . ($_POST['nom'] ?? '') . " (ID: $produit_id)",
+                        'produits',
+                        $produit_id
+                    );
 
                     $pdo->commit();
                     $message = "✅ Produit ajouté au catalogue! En attente de validation par le pharmacien.";
@@ -317,6 +378,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             ':type' => $_POST['type'] ?? 'information'
                         ]);
 
+                        // AJOUTER CETTE LIGNE POUR ENREGISTRER L'ACTIVITÉ
+                        logActivity(
+                            $pdo,
+                            $_SESSION['user_id'],
+                            $_SESSION['user_nom'] ?? 'Fournisseur',
+                            'fournisseur',
+                            'envoi_message',
+                            "Message envoyé: " . ($_POST['sujet'] ?? ''),
+                            'messages_fournisseur',
+                            $pdo->lastInsertId()
+                        );
+
                         $message = "✅ Message envoyé avec succès!";
                     } else {
                         $error = "❌ La table 'messages_fournisseur' n'existe pas.";
@@ -372,7 +445,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'get_produit' && isset($_GET['i
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     switch ($_POST['action']) {
-        // ... vos autres cas existants ...
+
 
         case 'modifier_produit':
             try {
@@ -386,6 +459,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 if (!$stmt->fetch()) {
                     throw new Exception("Vous n'avez pas la permission de modifier ce produit.");
                 }
+
+                // Récupérer l'ancien nom pour le journal
+                $stmt = $pdo->prepare("SELECT nom FROM produits WHERE id = :id");
+                $stmt->execute([':id' => intval($_POST['produit_id'] ?? 0)]);
+                $ancien_produit = $stmt->fetch();
+                $ancien_nom = $ancien_produit['nom'] ?? 'Produit inconnu';
 
                 // Mettre à jour le produit
                 $stmt = $pdo->prepare("
@@ -408,6 +487,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     ':id' => intval($_POST['produit_id'] ?? 0),
                     ':fournisseur_id' => $fournisseur_id
                 ]);
+
+                // AJOUTER CETTE LIGNE POUR ENREGISTRER L'ACTIVITÉ
+                logActivity(
+                    $pdo,
+                    $_SESSION['user_id'],
+                    $_SESSION['user_nom'] ?? 'Fournisseur',
+                    'fournisseur',
+                    'modification_produit',
+                    "Modification produit: $ancien_nom -> " . ($_POST['nom'] ?? ''),
+                    'produits',
+                    intval($_POST['produit_id'] ?? 0)
+                );
 
                 echo "✅ Produit modifié avec succès! Les changements seront validés par le pharmacien.";
 

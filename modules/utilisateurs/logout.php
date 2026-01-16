@@ -5,60 +5,92 @@ session_start();
 // Récupérer les informations de l'utilisateur avant de détruire la session
 $userName = $_SESSION['user_nom'] ?? 'Utilisateur';
 $userRole = $_SESSION['user_role'] ?? 'Rôle';
+$userId = $_SESSION['user_id'] ?? null;
 
 // Traitement de la déconnexion
 if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['confirm']) && $_GET['confirm'] === 'true')) {
-    // Journaliser la déconnexion (si possible)
-    if (isset($_SESSION['user_id'])) {
+    
+    // Journaliser la déconnexion dans la table journal_activites
+    if ($userId) {
         require_once __DIR__ . '/../../config/database.php';
+        require_once __DIR__ . '/../../config/journal_functions.php';
+
         try {
             $db = new Database();
-            
-            // Créer la table de logs si elle n'existe pas
-            $createTable = "CREATE TABLE IF NOT EXISTS user_logs (
-                id INT PRIMARY KEY AUTO_INCREMENT,
-                user_id INT NOT NULL,
-                action VARCHAR(50) NOT NULL,
-                details TEXT,
-                ip_address VARCHAR(45),
-                user_agent TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )";
-            $db->exec($createTable);
-            
-            // Insérer le log de déconnexion
-            $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-            $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
-            
-            $query = "INSERT INTO user_logs (user_id, action, details, ip_address, user_agent) 
-                      VALUES (:user_id, :action, :details, :ip_address, :user_agent)";
-            
-            $stmt = $db->prepare($query);
-            $stmt->bindParam(':user_id', $_SESSION['user_id']);
-            $stmt->bindValue(':action', 'DECONNEXION');
-            $stmt->bindValue(':details', 'Utilisateur déconnecté avec succès');
-            $stmt->bindParam(':ip_address', $ip);
-            $stmt->bindParam(':user_agent', $userAgent);
-            $stmt->execute();
+
+            // Utiliser la fonction spécifique pour la déconnexion
+            if (function_exists('loggerDeconnexion')) {
+                loggerDeconnexion(
+                    $db,
+                    $userId,
+                    $_SESSION['user_nom'] ?? 'Inconnu',
+                    $_SESSION['user_role'] ?? 'inconnu'
+                );
+            } elseif (function_exists('logActivity')) {
+                // Fallback vers la fonction générique
+                logActivity(
+                    $db,
+                    $userId,
+                    $_SESSION['user_nom'] ?? 'Inconnu',
+                    $_SESSION['user_role'] ?? 'inconnu',
+                    'deconnexion',
+                    "Déconnexion utilisateur - IP: " . ($_SERVER['REMOTE_ADDR'] ?? 'inconnue')
+                );
+            }
+
+            // Garder votre ancien code pour user_logs si nécessaire
+            try {
+                $createTable = "CREATE TABLE IF NOT EXISTS user_logs (
+                    id INT PRIMARY KEY AUTO_INCREMENT,
+                    user_id INT NOT NULL,
+                    action VARCHAR(50) NOT NULL,
+                    details TEXT,
+                    ip_address VARCHAR(45),
+                    user_agent TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )";
+                $db->exec($createTable);
+
+                $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+                $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? 'unknown';
+
+                $query = "INSERT INTO user_logs (user_id, action, details, ip_address, user_agent) 
+                          VALUES (:user_id, :action, :details, :ip_address, :user_agent)";
+
+                $stmt = $db->prepare($query);
+                $stmt->execute([
+                    ':user_id' => $userId,
+                    ':action' => 'DECONNEXION',
+                    ':details' => 'Utilisateur déconnecté avec succès',
+                    ':ip_address' => $ip,
+                    ':user_agent' => $userAgent
+                ]);
+
+            } catch (Exception $e) {
+                error_log("Erreur user_logs: " . $e->getMessage());
+            }
+
         } catch (Exception $e) {
             error_log("Erreur de journalisation déconnexion: " . $e->getMessage());
         }
     }
-    
+
     // Détruire la session
-    session_unset();
-    session_destroy();
-    session_write_close();
-    
-    // Supprimer le cookie de session
+    $_SESSION = []; // Vider le tableau de session
     if (ini_get("session.use_cookies")) {
         $params = session_get_cookie_params();
-        setcookie(session_name(), '', time() - 42000,
-            $params["path"], $params["domain"],
-            $params["secure"], $params["httponly"]
+        setcookie(
+            session_name(),
+            '',
+            time() - 42000,
+            $params["path"],
+            $params["domain"],
+            $params["secure"],
+            $params["httponly"]
         );
     }
-    
+    session_destroy();
+
     // Rediriger vers la page de connexion
     header('Location: login.php?logout=success');
     exit;
@@ -73,6 +105,7 @@ if (isset($_POST['cancel'])) {
 
 <!DOCTYPE html>
 <html lang="fr">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -80,10 +113,16 @@ if (isset($_POST['cancel'])) {
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        .pharma-green { background-color: #10B981; }
-        .pharma-green:hover { background-color: #059669; }
+        .pharma-green {
+            background-color: #10B981;
+        }
+
+        .pharma-green:hover {
+            background-color: #059669;
+        }
     </style>
 </head>
+
 <body class="bg-gray-900 bg-opacity-50 min-h-screen flex items-center justify-center p-4">
     <div class="max-w-md w-full bg-white rounded-2xl shadow-2xl overflow-hidden">
         <div class="p-8">
@@ -119,12 +158,12 @@ if (isset($_POST['cancel'])) {
             <!-- Boutons d'action -->
             <form method="POST" class="flex space-x-4">
                 <button type="submit" name="cancel"
-                        class="flex-1 py-3 px-4 border border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50 transition-colors duration-200 flex items-center justify-center">
+                    class="flex-1 py-3 px-4 border border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50 transition-colors duration-200 flex items-center justify-center">
                     <i class="fas fa-times mr-2"></i>
                     Annuler
                 </button>
                 <button type="submit" name="logout"
-                        class="flex-1 bg-red-600 text-white py-3 px-4 rounded-lg font-semibold hover:bg-red-700 transition-colors duration-200 flex items-center justify-center">
+                    class="flex-1 bg-red-600 text-white py-3 px-4 rounded-lg font-semibold hover:bg-red-700 transition-colors duration-200 flex items-center justify-center">
                     <i class="fas fa-sign-out-alt mr-2"></i>
                     Se déconnecter
                 </button>
@@ -133,8 +172,7 @@ if (isset($_POST['cancel'])) {
             <!-- Alternative avec lien GET -->
             <div class="mt-4 text-center">
                 <p class="text-xs text-gray-500">ou</p>
-                <a href="?confirm=true" 
-                   class="text-xs text-red-600 hover:text-red-800 underline">
+                <a href="?confirm=true" class="text-xs text-red-600 hover:text-red-800 underline">
                     Se déconnecter immédiatement
                 </a>
             </div>
@@ -151,7 +189,7 @@ if (isset($_POST['cancel'])) {
 
     <script>
         // Animation de chargement
-        document.querySelector('form').addEventListener('submit', function(e) {
+        document.querySelector('form').addEventListener('submit', function (e) {
             const buttons = this.querySelectorAll('button[type="submit"]');
             buttons.forEach(button => {
                 if (button.name === 'logout') {
@@ -180,4 +218,5 @@ if (isset($_POST['cancel'])) {
         resetInactivityTimer();
     </script>
 </body>
+
 </html>

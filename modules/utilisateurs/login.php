@@ -50,6 +50,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_SESSION['logged_in'] = true;
                     $_SESSION['login_time'] = time();
                     
+                    try {
+                        logActivity($db, $user['id'], $user['nom'], $user['role'], 
+                                   'connexion_reussie', 
+                                   "Connexion réussie - IP: " . ($_SERVER['REMOTE_ADDR'] ?? 'inconnue') . 
+                                   " - Navigateur: " . substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 100));
+                    } catch (Exception $e) {
+                        error_log("Erreur journal connexion: " . $e->getMessage());
+                    }
+                    
                     // Cookie "Se souvenir de moi"
                     if ($remember) {
                         setcookie('user_email', $email, time() + (30 * 24 * 60 * 60), '/'); // 30 jours
@@ -104,9 +113,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     
                 } else {
                     $errors[] = "Email ou mot de passe incorrect.";
-                }
+                    // ENREGISTRER LA TENTATIVE ÉCHOUÉE
+                    try {
+                        logActivity($db, 0, 'Anonyme', 'visiteur', 
+                                'connexion_echouee', 
+                                "Tentative de connexion échouée pour email: $email - IP: " . ($_SERVER['REMOTE_ADDR'] ?? 'inconnue'));
+                    } catch (Exception $e) {
+                        error_log("Erreur journal tentative échouée: " . $e->getMessage());
+                    }
+                                }
             } else {
                 $errors[] = "Email ou mot de passe incorrect.";
+                // ENREGISTRER LA TENTATIVE ÉCHOUÉE
+    try {
+        logActivity($db, 0, 'Anonyme', 'visiteur', 
+                   'connexion_echouee', 
+                   "Tentative de connexion échouée pour email: $email - IP: " . ($_SERVER['REMOTE_ADDR'] ?? 'inconnue'));
+    } catch (Exception $e) {
+        error_log("Erreur journal tentative échouée: " . $e->getMessage());
+    }
             }
             
         } catch (PDOException $e) {

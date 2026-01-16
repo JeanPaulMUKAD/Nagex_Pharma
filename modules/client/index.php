@@ -35,6 +35,7 @@ if (!isset($_SESSION['user_id']) || ($_SESSION['user_role'] ?? '') !== 'client')
 
 // Inclure la classe Database
 require_once __DIR__ . '/../../config/database.php';
+require_once __DIR__ . '/../../config/journal_functions.php';
 
 // Initialisation des variables
 $message = '';
@@ -82,14 +83,15 @@ function formatMontant($montant, string $devise = 'CDF'): string
 /**
  * Initialise les polices UTF-8 pour FPDF
  */
-function initialiserPolicesUTF8($pdf) {
+function initialiserPolicesUTF8($pdf)
+{
     // Chemin vers le dossier des polices
     $font_path = __DIR__ . '/../../font/';
-    
+
     // Vérifier si la police DejaVu existe (UTF-8 compatible)
     $dejavu_sans = $font_path . 'DejaVuSans.php';
     $dejavu_sans_bold = $font_path . 'DejaVuSans-Bold.php';
-    
+
     if (file_exists($dejavu_sans)) {
         // Utiliser DejaVu (UTF-8 compatible)
         $pdf->AddFont('DejaVu', '', 'DejaVuSans.php');
@@ -98,7 +100,7 @@ function initialiserPolicesUTF8($pdf) {
         $pdf->AddFont('DejaVu', 'BI', 'DejaVuSans-BoldOblique.php');
         return 'DejaVu';
     }
-    
+
     // Si DejaVu n'existe pas, télécharger ou utiliser Arial Unicode MS
     // Pour l'instant, on utilise Arial standard (avec conversion d'accents)
     return 'Arial';
@@ -107,49 +109,164 @@ function initialiserPolicesUTF8($pdf) {
 /**
  * Convertit les caractères accentués pour FPDF standard
  */
-function convertirAccents($texte) {
+function convertirAccents($texte)
+{
     $accented = array(
-        'à', 'á', 'â', 'ã', 'ä', 'å', 'æ',
+        'à',
+        'á',
+        'â',
+        'ã',
+        'ä',
+        'å',
+        'æ',
         'ç',
-        'è', 'é', 'ê', 'ë',
-        'ì', 'í', 'î', 'ï',
-        'ð', 'ñ',
-        'ò', 'ó', 'ô', 'õ', 'ö', 'ø',
-        'ù', 'ú', 'û', 'ü',
-        'ý', 'ÿ',
-        'À', 'Á', 'Â', 'Ã', 'Ä', 'Å', 'Æ',
+        'è',
+        'é',
+        'ê',
+        'ë',
+        'ì',
+        'í',
+        'î',
+        'ï',
+        'ð',
+        'ñ',
+        'ò',
+        'ó',
+        'ô',
+        'õ',
+        'ö',
+        'ø',
+        'ù',
+        'ú',
+        'û',
+        'ü',
+        'ý',
+        'ÿ',
+        'À',
+        'Á',
+        'Â',
+        'Ã',
+        'Ä',
+        'Å',
+        'Æ',
         'Ç',
-        'È', 'É', 'Ê', 'Ë',
-        'Ì', 'Í', 'Î', 'Ï',
-        'Ð', 'Ñ',
-        'Ò', 'Ó', 'Ô', 'Õ', 'Ö', 'Ø',
-        'Ù', 'Ú', 'Û', 'Ü',
+        'È',
+        'É',
+        'Ê',
+        'Ë',
+        'Ì',
+        'Í',
+        'Î',
+        'Ï',
+        'Ð',
+        'Ñ',
+        'Ò',
+        'Ó',
+        'Ô',
+        'Õ',
+        'Ö',
+        'Ø',
+        'Ù',
+        'Ú',
+        'Û',
+        'Ü',
         'Ý',
-        'œ', 'Œ', '€', '£', '¥', '§', '©', '®', '™',
-        '«', '»', '…', '–', '—', '¿', '¡'
+        'œ',
+        'Œ',
+        '€',
+        '£',
+        '¥',
+        '§',
+        '©',
+        '®',
+        '™',
+        '«',
+        '»',
+        '…',
+        '–',
+        '—',
+        '¿',
+        '¡'
     );
-    
+
     $unaccented = array(
-        'a', 'a', 'a', 'a', 'a', 'a', 'ae',
+        'a',
+        'a',
+        'a',
+        'a',
+        'a',
+        'a',
+        'ae',
         'c',
-        'e', 'e', 'e', 'e',
-        'i', 'i', 'i', 'i',
-        'd', 'n',
-        'o', 'o', 'o', 'o', 'o', 'o',
-        'u', 'u', 'u', 'u',
-        'y', 'y',
-        'A', 'A', 'A', 'A', 'A', 'A', 'AE',
+        'e',
+        'e',
+        'e',
+        'e',
+        'i',
+        'i',
+        'i',
+        'i',
+        'd',
+        'n',
+        'o',
+        'o',
+        'o',
+        'o',
+        'o',
+        'o',
+        'u',
+        'u',
+        'u',
+        'u',
+        'y',
+        'y',
+        'A',
+        'A',
+        'A',
+        'A',
+        'A',
+        'A',
+        'AE',
         'C',
-        'E', 'E', 'E', 'E',
-        'I', 'I', 'I', 'I',
-        'D', 'N',
-        'O', 'O', 'O', 'O', 'O', 'O',
-        'U', 'U', 'U', 'U',
+        'E',
+        'E',
+        'E',
+        'E',
+        'I',
+        'I',
+        'I',
+        'I',
+        'D',
+        'N',
+        'O',
+        'O',
+        'O',
+        'O',
+        'O',
+        'O',
+        'U',
+        'U',
+        'U',
+        'U',
         'Y',
-        'oe', 'OE', 'EUR', 'GBP', 'JPY', 'SS', '(c)', '(R)', 'TM',
-        '<<', '>>', '...', '-', '-', '?', '!'
+        'oe',
+        'OE',
+        'EUR',
+        'GBP',
+        'JPY',
+        'SS',
+        '(c)',
+        '(R)',
+        'TM',
+        '<<',
+        '>>',
+        '...',
+        '-',
+        '-',
+        '?',
+        '!'
     );
-    
+
     return str_replace($accented, $unaccented, $texte);
 }
 
@@ -208,10 +325,10 @@ function genererPDFRecu(PDO $pdo, int $commande_id, int $client_id): string
         // Créer le PDF
         $pdf = new FPDF('P', 'mm', 'A4');
         $pdf->AddPage();
-        
+
         // Initialiser la police UTF-8
         $font = initialiserPolicesUTF8($pdf);
-        
+
         // ========== EN-TÊTE ==========
         // Logo/En-tête
         $pdf->SetFont($font, 'B', 24);
@@ -917,6 +1034,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $message = "✅ Produit ajouté au panier!";
 
+                    // ENREGISTRER L'ACTIVITÉ
+                    logActivity(
+                        $pdo,
+                        $user_id,
+                        $user_name,
+                        $user_role,
+                        'ajout_panier',
+                        "Produit ID: {$produit_id}, Quantité: {$quantite}",
+                        'paniers',
+                        $produit_id
+                    );
+
                 } catch (Exception $e) {
                     $error = "❌ Erreur lors de l'ajout au panier: " . $e->getMessage();
                 }
@@ -931,6 +1060,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($quantite <= 0) {
                         unset($_SESSION['panier'][$produit_id]);
                         $message = "✅ Produit retiré du panier!";
+                        // ENREGISTRER L'ACTIVITÉ
+                        logActivity(
+                            $pdo,
+                            $user_id,
+                            $user_name,
+                            $user_role,
+                            'retrait_panier',
+                            "Produit ID: {$produit_id} retiré du panier",
+                            'paniers',
+                            $produit_id
+                        );
                     } else {
                         // Vérifier le stock
                         $stmt = $pdo->prepare("
@@ -951,6 +1091,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                         $_SESSION['panier'][$produit_id] = $quantite;
                         $message = "✅ Quantité modifiée!";
+
+                        // ENREGISTRER L'ACTIVITÉ
+                        logActivity(
+                            $pdo,
+                            $user_id,
+                            $user_name,
+                            $user_role,
+                            'modification_quantite_panier',
+                            "Produit ID: {$produit_id}, Nouvelle quantité: {$quantite}",
+                            'paniers',
+                            $produit_id
+                        );
                     }
 
                 } catch (Exception $e) {
@@ -962,6 +1114,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'vider_panier':
                 $_SESSION['panier'] = [];
                 $message = "✅ Panier vidé avec succès!";
+                // ENREGISTRER L'ACTIVITÉ
+                logActivity(
+                    $pdo,
+                    $user_id,
+                    $user_name,
+                    $user_role,
+                    'vider_panier',
+                    "Panier entièrement vidé",
+                    'paniers'
+                );
                 break;
 
             // PASSER COMMANDE
@@ -1060,6 +1222,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $commande_id = $pdo->lastInsertId();
 
+                    // ENREGISTRER L'ACTIVITÉ
+                    logActivity(
+                        $pdo,
+                        $user_id,
+                        $user_name,
+                        $user_role,
+                        'creation_commande',
+                        "Commande N°: {$numero_commande}, Montant: {$montant_total}",
+                        'commandes',
+                        $commande_id
+                    );
+
                     // Ajouter les détails de la commande
                     foreach ($details_commande as $detail) {
                         $stmt = $pdo->prepare("
@@ -1090,6 +1264,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } catch (Exception $e) {
                     $pdo->rollBack();
                     $error = "❌ Erreur lors de la commande: " . $e->getMessage();
+                    // ENREGISTRER L'ACTIVITÉ D'ERREUR
+                    logActivity(
+                        $pdo,
+                        $user_id,
+                        $user_name,
+                        $user_role,
+                        'erreur_commande',
+                        "Erreur lors de la commande: " . $e->getMessage(),
+                        'commandes'
+                    );
                 }
                 break;
 
@@ -1109,6 +1293,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ]);
 
                     $message = "✅ Ajouté aux favoris!";
+
+                    // ENREGISTRER L'ACTIVITÉ
+                    logActivity(
+                        $pdo,
+                        $user_id,
+                        $user_name,
+                        $user_role,
+                        'ajout_favori',
+                        "Produit ID: {$produit_id} ajouté aux favoris",
+                        'favoris',
+                        $produit_id
+                    );
 
                 } catch (Exception $e) {
                     $error = "❌ Erreur: " . $e->getMessage();
@@ -1131,6 +1327,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $message = "✅ Retiré des favoris!";
 
+                    // ENREGISTRER L'ACTIVITÉ
+                    logActivity(
+                        $pdo,
+                        $user_id,
+                        $user_name,
+                        $user_role,
+                        'retrait_favori',
+                        "Produit ID: {$produit_id} retiré des favoris",
+                        'favoris',
+                        $produit_id
+                    );
+
                 } catch (Exception $e) {
                     $error = "❌ Erreur: " . $e->getMessage();
                 }
@@ -1148,6 +1356,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (!$commande) {
                         throw new Exception("Commande non trouvée ou non autorisée");
                     }
+
+                    // ENREGISTRER L'ACTIVITÉ
+                    logActivity(
+                        $pdo,
+                        $user_id,
+                        $user_name,
+                        $user_role,
+                        'telechargement_recu',
+                        "Recu de la commande N°: {$commande['numero_commande']}",
+                        'commandes',
+                        $commande_id
+                    );
 
                     // Générer le PDF avec FPDF
                     $pdf_content = genererPDFRecu($pdo, $commande_id, $user_id);
@@ -1205,6 +1425,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_SESSION['user_email'] = $_POST['email'] ?? $_SESSION['user_email'];
 
                     $message = "✅ Profil mis à jour avec succès!";
+
+                    // ENREGISTRER L'ACTIVITÉ
+                    logActivity(
+                        $pdo,
+                        $user_id,
+                        $user_name,
+                        $user_role,
+                        'modification_profil',
+                        "Mise à jour des informations personnelles",
+                        'utilisateurs',
+                        $user_id
+                    );
 
                 } catch (Exception $e) {
                     $error = "❌ Erreur lors de la mise à jour: " . $e->getMessage();
@@ -1874,7 +2106,7 @@ try {
                         <div class="absolute -right-2 top-1/2 -translate-y-1/2 w-2 h-8 bg-emerald-500 rounded-l-lg"></div>
                     <?php endif; ?>
                 </a>
-                
+
                 <!-- Section Sécurité -->
                 <div class="section-title">
                     <div
@@ -4517,6 +4749,40 @@ try {
             `;
                     modalContent.appendChild(errorDiv);
                 });
+        }
+
+        /**
+ * Enregistre une activité dans le journal
+ */
+        function logActivity(PDO $pdo, int $user_id, string $user_name, string $user_role,
+            string $action, string $details = null, string $table = null,
+            int $element_id = null): bool {
+            try {
+                $ip_adresse = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+                $user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
+
+                $sql = "INSERT INTO journal_activites 
+                    (utilisateur_id, utilisateur_nom, utilisateur_role, action,
+                        details, table_concernee, element_id, ip_adresse, user_agent)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+                $stmt = $pdo -> prepare($sql);
+                return $stmt -> execute([
+                    $user_id,
+                    $user_name,
+                    $user_role,
+                    $action,
+                    $details,
+                    $table,
+                    $element_id,
+                    $ip_adresse,
+                    substr($user_agent, 0, 500)
+                ]);
+
+            } catch (Exception $e) {
+                error_log("Erreur lors de l'enregistrement de l'activité: ".$e -> getMessage());
+                return false;
+            }
         }
 
         // Fonction pour fermer le modal

@@ -9,6 +9,7 @@ if (!isset($_SESSION['logged_in']) || $_SESSION['logged_in'] !== true || $_SESSI
 }
 
 require_once __DIR__ . '/../../config/database.php';
+require_once __DIR__ . '/../../config/journal_functions.php';
 
 // Récupérer les informations de l'utilisateur connecté
 $userName = $_SESSION['user_nom'] ?? 'Administrateur';
@@ -148,6 +149,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($db)) {
 
                 if ($stmt->execute()) {
                     $success = "Utilisateur créé avec succès!";
+                    $new_user_id = $db->lastInsertId();
+
+                    // AJOUTEZ CE CODE POUR JOURNALISER DANS JOURNAL_ACTIVITES
+                    try {
+                        logActivity(
+                            $db,
+                            $_SESSION['user_id'],
+                            $_SESSION['user_nom'] ?? 'Admin',
+                            'admin',
+                            'creation_utilisateur',
+                            "Création utilisateur: $fullname ($role) - Email: $email",
+                            'utilisateurs',
+                            $new_user_id
+                        );
+                    } catch (Exception $e) {
+                        error_log("Erreur journalisation création utilisateur: " . $e->getMessage());
+                    }
 
                     // Journaliser l'action
                     try {
@@ -220,6 +238,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($db)) {
                 if ($stmt->execute()) {
                     $action = $newStatus === 'actif' ? 'ACTIVATION' : 'DESACTIVATION';
                     $success = "Utilisateur " . ($newStatus === 'actif' ? 'activé' : 'désactivé') . " avec succès!";
+
+                    // AJOUTEZ CE CODE POUR JOURNALISER DANS JOURNAL_ACTIVITES
+                    try {
+                        $action_type = $newStatus === 'actif' ? 'activation_utilisateur' : 'desactivation_utilisateur';
+                        logActivity(
+                            $db,
+                            $_SESSION['user_id'],
+                            $_SESSION['user_nom'] ?? 'Admin',
+                            'admin',
+                            $action_type,
+                            "$action: {$user['nom']} ({$user['email']}) - Rôle: {$user['role']}",
+                            'utilisateurs',
+                            $userId
+                        );
+                    } catch (Exception $e) {
+                        error_log("Erreur journalisation activation/désactivation: " . $e->getMessage());
+                    }
 
                     // Journaliser l'action
                     try {
@@ -305,6 +340,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($db)) {
 
                     if ($stmt->execute()) {
                         $success = "Utilisateur modifié avec succès!";
+
+                        // AJOUTEZ CE CODE POUR JOURNALISER DANS JOURNAL_ACTIVITES
+                        try {
+                            logActivity(
+                                $db,
+                                $_SESSION['user_id'],
+                                $_SESSION['user_nom'] ?? 'Admin',
+                                'admin',
+                                'modification_utilisateur',
+                                "Modification utilisateur: $nom ($email) - Rôle: $role",
+                                'utilisateurs',
+                                $userId
+                            );
+                        } catch (Exception $e) {
+                            error_log("Erreur journalisation modification utilisateur: " . $e->getMessage());
+                        }
 
                         // Journaliser l'action
                         try {
@@ -457,6 +508,7 @@ function formatDate($date): string
                 opacity: 0;
                 transform: translateY(-50px);
             }
+
             to {
                 opacity: 1;
                 transform: translateY(0);
@@ -732,7 +784,8 @@ function formatDate($date): string
 
                     <div class="p-6">
                         <!-- Formulaire d'ajout d'utilisateur -->
-                        <div class="mb-8 p-6 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl border border-green-200">
+                        <div
+                            class="mb-8 p-6 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl border border-green-200">
                             <h4 class="text-lg font-semibold text-gray-900 mb-4">Ajouter un nouvel utilisateur</h4>
                             <form method="POST" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <input type="hidden" name="add_user" value="1">
@@ -757,7 +810,7 @@ function formatDate($date): string
                                         class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                                         value="<?php echo htmlspecialchars($_POST['telephone'] ?? ''); ?>">
                                 </div>
-                                
+
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-2">Adresse</label>
                                     <textarea name="adresse"
@@ -787,7 +840,8 @@ function formatDate($date): string
                                 </div>
 
                                 <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-2">Confirmer le mot de passe</label>
+                                    <label class="block text-sm font-medium text-gray-700 mb-2">Confirmer le mot de
+                                        passe</label>
                                     <input type="password" name="confirm_password" required
                                         class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent">
                                 </div>
@@ -807,17 +861,23 @@ function formatDate($date): string
                             <table class="w-full">
                                 <thead class="bg-gradient-to-r from-green-50 to-emerald-50">
                                     <tr>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <th
+                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Utilisateur</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <th
+                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Contact</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <th
+                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Rôle</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <th
+                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Statut</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <th
+                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Date création</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <th
+                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Actions</th>
                                     </tr>
                                 </thead>
@@ -862,7 +922,8 @@ function formatDate($date): string
                                                     </span>
                                                 </td>
                                                 <td class="px-6 py-4 whitespace-nowrap">
-                                                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full badge-active">
+                                                    <span
+                                                        class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full badge-active">
                                                         <i class="fas fa-check-circle mr-1"></i>
                                                         <?php echo htmlspecialchars($user['statut'] ?? 'actif'); ?>
                                                     </span>
@@ -907,8 +968,10 @@ function formatDate($date): string
                                             <td colspan="6" class="px-6 py-12 text-center">
                                                 <div class="flex flex-col items-center justify-center">
                                                     <i class="fas fa-users text-gray-300 text-5xl mb-4"></i>
-                                                    <h3 class="text-lg font-semibold text-gray-500 mb-2">Aucun utilisateur actif</h3>
-                                                    <p class="text-gray-400">Ajoutez un nouvel utilisateur pour commencer</p>
+                                                    <h3 class="text-lg font-semibold text-gray-500 mb-2">Aucun utilisateur
+                                                        actif</h3>
+                                                    <p class="text-gray-400">Ajoutez un nouvel utilisateur pour commencer
+                                                    </p>
                                                 </div>
                                             </td>
                                         </tr>
@@ -938,17 +1001,23 @@ function formatDate($date): string
                             <table class="w-full">
                                 <thead class="bg-gradient-to-r from-red-50 to-pink-50">
                                     <tr>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <th
+                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Utilisateur</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <th
+                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Contact</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <th
+                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Rôle</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <th
+                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Statut</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <th
+                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Date désactivation</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        <th
+                                            class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                                             Actions</th>
                                     </tr>
                                 </thead>
@@ -993,7 +1062,8 @@ function formatDate($date): string
                                                     </span>
                                                 </td>
                                                 <td class="px-6 py-4 whitespace-nowrap">
-                                                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full badge-inactive">
+                                                    <span
+                                                        class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full badge-inactive">
                                                         <i class="fas fa-times-circle mr-1"></i>
                                                         <?php echo htmlspecialchars($user['statut'] ?? 'inactif'); ?>
                                                     </span>
@@ -1024,7 +1094,8 @@ function formatDate($date): string
                                             <td colspan="6" class="px-6 py-12 text-center">
                                                 <div class="flex flex-col items-center justify-center">
                                                     <i class="fas fa-user-check text-gray-300 text-5xl mb-4"></i>
-                                                    <h3 class="text-lg font-semibold text-gray-500 mb-2">Aucun utilisateur désactivé</h3>
+                                                    <h3 class="text-lg font-semibold text-gray-500 mb-2">Aucun utilisateur
+                                                        désactivé</h3>
                                                     <p class="text-gray-400">Tous les utilisateurs sont actifs</p>
                                                 </div>
                                             </td>
@@ -1040,8 +1111,10 @@ function formatDate($date): string
                                 <div class="flex items-center">
                                     <i class="fas fa-info-circle text-blue-500 mr-2"></i>
                                     <p class="text-sm text-blue-700">
-                                        <strong>Note :</strong> Les utilisateurs désactivés ne peuvent plus se connecter au système. 
-                                        Vous pouvez les réactiver à tout moment en cliquant sur l'icône <i class="fas fa-user-check text-green-600"></i>.
+                                        <strong>Note :</strong> Les utilisateurs désactivés ne peuvent plus se connecter au
+                                        système.
+                                        Vous pouvez les réactiver à tout moment en cliquant sur l'icône <i
+                                            class="fas fa-user-check text-green-600"></i>.
                                     </p>
                                 </div>
                             </div>
@@ -1219,7 +1292,7 @@ function formatDate($date): string
             document.getElementById('edit_telephone').value = user.telephone || '';
             document.getElementById('edit_role').value = user.role || '';
             document.getElementById('edit_adresse').value = user.adresse || '';
-            
+
             document.getElementById('editModal').classList.remove('hidden');
             document.body.style.overflow = 'hidden';
         }
@@ -1230,14 +1303,14 @@ function formatDate($date): string
         }
 
         // Fermer les modals en cliquant à l'extérieur
-        document.addEventListener('click', function(e) {
+        document.addEventListener('click', function (e) {
             if (e.target.classList.contains('modal-backdrop')) {
                 closeEditModal();
             }
         });
 
         // Fermer les modals avec la touche Échap
-        document.addEventListener('keydown', function(e) {
+        document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape') {
                 closeEditModal();
             }
@@ -1264,7 +1337,7 @@ function formatDate($date): string
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
-                        plugins: { 
+                        plugins: {
                             legend: {
                                 position: 'bottom',
                                 labels: {
@@ -1274,7 +1347,7 @@ function formatDate($date): string
                             },
                             tooltip: {
                                 callbacks: {
-                                    label: function(context) {
+                                    label: function (context) {
                                         let label = context.label || '';
                                         if (label) {
                                             label += ': ';
@@ -1297,5 +1370,5 @@ function formatDate($date): string
     <!-- Email : nagexpharma@gmail.com -->
     <!-- Mot de passe : N@gexPh4rma#2026 -->
 </body>
-</html>
 
+</html>

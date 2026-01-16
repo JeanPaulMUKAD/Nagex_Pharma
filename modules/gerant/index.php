@@ -51,8 +51,12 @@ try {
             $data = loadFournisseursData($db);
             break;
 
-        case 'utilisateurs':  // AJOUTEZ CE CAS
+        case 'utilisateurs':
             $data = loadUtilisateursData($db);
+            break;
+
+        case 'journal':
+            $data = loadJournalData($db, $user_id);
             break;
 
         default:
@@ -400,6 +404,51 @@ function loadUtilisateursData($db)
     return $data;
 }
 
+function loadJournalData($db, $current_user_id = null)
+{
+    $data = [];
+
+    try {
+        // Récupérer toutes les activités (sauf celles du gérant actuel)
+        $sql = "
+            SELECT ja.*, u.nom as utilisateur_nom_complet 
+            FROM journal_activites ja
+            LEFT JOIN utilisateurs u ON ja.utilisateur_id = u.id
+            WHERE (ja.utilisateur_role != 'gerant' OR ja.utilisateur_id != ?)
+            ORDER BY ja.created_at DESC 
+            LIMIT 100
+        ";
+
+        $stmt = $db->prepare($sql);
+        $stmt->execute([$current_user_id]);
+        $data['activites'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Statistiques par jour
+        $stmt = $db->prepare("
+            SELECT DATE(created_at) as date,
+                   COUNT(*) as total,
+                   SUM(CASE WHEN action LIKE 'connexion_%' THEN 1 ELSE 0 END) as connexions,
+                   SUM(CASE WHEN action LIKE 'creation_%' THEN 1 ELSE 0 END) as creations,
+                   SUM(CASE WHEN action LIKE 'modification_%' THEN 1 ELSE 0 END) as modifications,
+                   SUM(CASE WHEN action LIKE 'suppression_%' THEN 1 ELSE 0 END) as suppressions
+            FROM journal_activites 
+            WHERE (utilisateur_role != 'gerant' OR utilisateur_id != ?)
+                  AND created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+            GROUP BY DATE(created_at)
+            ORDER BY date DESC
+        ");
+        $stmt->execute([$current_user_id]);
+        $data['stats_journal'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    } catch (Exception $e) {
+        error_log("Erreur chargement journal: " . $e->getMessage());
+        $data['activites'] = [];
+        $data['stats_journal'] = [];
+    }
+
+    return $data;
+}
+
 // ============================================================================
 // FONCTIONS UTILITAIRES POUR LE FORMATAGE
 // ============================================================================
@@ -664,7 +713,8 @@ function getJoursRestantsClass($jours)
                             'commandes' => 'Liste des Commandes',
                             'categories' => 'Liste des Catégories',
                             'fournisseurs' => 'Liste des Fournisseurs',
-                            'utilisateurs' => 'Liste des Utilisateurs'  // AJOUTEZ CETTE LIGNE
+                            'utilisateurs' => 'Liste des Utilisateurs',
+                            'journal' => 'Journal des Activités'
                         ];
                         echo $titles[$section] ?? 'Tableau de bord Gérant';
                         ?>
@@ -1790,6 +1840,31 @@ function getJoursRestantsClass($jours)
                                 </button>
                             </div>
 
+                            <!-- Statistiques -->
+                            <?php if (!empty($data['stats_journal'])): ?>
+                                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                                    <?php foreach ($data['stats_journal'] as $stat): ?>
+                                        <div class="bg-gray-50 rounded-lg p-4 border">
+                                            <div class="text-sm font-medium text-gray-600">
+                                                <?php echo date('d/m/Y', strtotime($stat['date'])); ?>
+                                            </div>
+                                            <div class="mt-2 flex items-center justify-between">
+                                                <div>
+                                                    <div class="text-lg font-bold text-gray-900"><?php echo $stat['total']; ?></div>
+                                                    <div class="text-xs text-gray-500">activités</div>
+                                                </div>
+                                                <div class="text-right">
+                                                    <div class="text-sm text-blue-600"><?php echo $stat['connexions']; ?> connexions
+                                                    </div>
+                                                    <div class="text-sm text-green-600"><?php echo $stat['creations']; ?> créations
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
+
                             <!-- Liste des activités -->
                             <div class="overflow-x-auto">
                                 <table class="w-full text-sm" id="journalTable">
@@ -2064,6 +2139,41 @@ function getJoursRestantsClass($jours)
             });
         }
 
+        // Filtrer le journal
+        function filterJournal() {
+            const date = document.getElementById('filterDateJournal').value;
+            const utilisateur = document.getElementById('filterUtilisateurJournal').value;
+            const action = document.getElementById('filterActionJournal').value;
+
+            document.querySelectorAll('#journalTable .journal-row').forEach(row => {
+                const rowDate = row.getAttribute('data-date');
+                const rowUtilisateur = row.getAttribute('data-utilisateur');
+                const rowAction = row.getAttribute('data-action');
+
+                const matchDate = !date || rowDate === date;
+                const matchUtilisateur = !utilisateur || rowUtilisateur === utilisateur;
+                const matchAction = !action || rowAction.includes(action);
+
+                row.style.display = (matchDate && matchUtilisateur && matchAction) ? '' : 'none';
+            });
+        }
+
+        function clearFiltersJournal() {
+            document.getElementById('filterDateJournal').value = '';
+            document.getElementById('filterUtilisateurJournal').value = '';
+            document.getElementById('filterActionJournal').value = '';
+            filterJournal();
+        }
+
+        // Dans DOMContentLoaded, ajoutez :
+        const filterDateJournal = document.getElementById('filterDateJournal');
+        const filterUtilisateurJournal = document.getElementById('filterUtilisateurJournal');
+        const filterActionJournal = document.getElementById('filterActionJournal');
+
+        if (filterDateJournal) filterDateJournal.addEventListener('change', filterJournal);
+        if (filterUtilisateurJournal) filterUtilisateurJournal.addEventListener('change', filterJournal);
+        if (filterActionJournal) filterActionJournal.addEventListener('change', filterJournal);
+
         //Ajoutez cette fonction après les autres fonctions de filtrage
         function filterUtilisateurs() {
             const search = document.getElementById('searchUtilisateur').value.toLowerCase();
@@ -2124,7 +2234,11 @@ function getJoursRestantsClass($jours)
             return $data;
         }
 
-        // Fonction pour enregistrer une activité dans le journal
+
+        // ============================================================================
+        // FONCTION POUR ENREGISTRER LES ACTIVITÉS
+        // ============================================================================
+
         function logActivity($db, $user_id, $user_name, $user_role, $action, $details = null, $table = null, $element_id = null) {
             try {
                 $ip_adresse = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
