@@ -252,11 +252,10 @@ function loadDashboardData($db, $current_user_id = null)
             SELECT ja.*, u.nom as utilisateur_nom_complet 
             FROM journal_activites ja
             LEFT JOIN utilisateurs u ON ja.utilisateur_id = u.id
-            WHERE ja.utilisateur_role != 'gerant' OR ja.utilisateur_id != ?
             ORDER BY ja.created_at DESC 
             LIMIT 10
         ");
-        $stmt->execute([$current_user_id]); // UTILISEZ $current_user_id
+        $stmt->execute();
         $data['dernieres_activites'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (Exception $e) {
         error_log("Erreur chargement activités: " . $e->getMessage());
@@ -410,18 +409,17 @@ function loadJournalData($db, $current_user_id = null)
     $data = [];
 
     try {
-        // Récupérer toutes les activités (sauf celles du gérant actuel)
+        // Récupérer TOUTES les activités (y compris celles du gérant)
         $sql = "
             SELECT ja.*, u.nom as utilisateur_nom_complet 
             FROM journal_activites ja
             LEFT JOIN utilisateurs u ON ja.utilisateur_id = u.id
-            WHERE (ja.utilisateur_role != 'gerant' OR ja.utilisateur_id != ?)
             ORDER BY ja.created_at DESC 
             LIMIT 100
         ";
 
         $stmt = $db->prepare($sql);
-        $stmt->execute([$current_user_id]);
+        $stmt->execute();
         $data['activites'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         // Statistiques par jour
@@ -433,12 +431,11 @@ function loadJournalData($db, $current_user_id = null)
                    SUM(CASE WHEN action LIKE 'modification_%' THEN 1 ELSE 0 END) as modifications,
                    SUM(CASE WHEN action LIKE 'suppression_%' THEN 1 ELSE 0 END) as suppressions
             FROM journal_activites 
-            WHERE (utilisateur_role != 'gerant' OR utilisateur_id != ?)
-                  AND created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+            WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
             GROUP BY DATE(created_at)
             ORDER BY date DESC
         ");
-        $stmt->execute([$current_user_id]);
+        $stmt->execute();
         $data['stats_journal'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     } catch (Exception $e) {
@@ -668,8 +665,9 @@ function getJoursRestantsClass($jours)
                         <span class="bg-orange-500 text-white text-xs px-2 py-1 rounded-full">
                             <?php
                             try {
-                                $stmt = $db->prepare("SELECT COUNT(*) FROM journal_activites WHERE created_at >= CURDATE() AND (utilisateur_role != 'gerant' OR utilisateur_id != ?)");
-                                $stmt->execute([$user_id]);
+                                // Compter TOUTES les activités d'aujourd'hui
+                                $stmt = $db->prepare("SELECT COUNT(*) FROM journal_activites WHERE DATE(created_at) = CURDATE()");
+                                $stmt->execute();
                                 echo $stmt->fetchColumn();
                             } catch (Exception $e) {
                                 echo '0';
@@ -2161,8 +2159,8 @@ function getJoursRestantsClass($jours)
         function showNotification(message, type = 'info') {
             const notification = document.createElement('div');
             notification.className = `fixed top-4 right-4 z-50 px-6 py-3 rounded-lg shadow-lg transition-opacity duration-300 ${type === 'success' ? 'bg-green-100 text-green-800 border border-green-200' :
-                    type === 'error' ? 'bg-red-100 text-red-800 border border-red-200' :
-                        'bg-blue-100 text-blue-800 border border-blue-200'
+                type === 'error' ? 'bg-red-100 text-red-800 border border-red-200' :
+                    'bg-blue-100 text-blue-800 border border-blue-200'
                 }`;
 
             notification.innerHTML = `
