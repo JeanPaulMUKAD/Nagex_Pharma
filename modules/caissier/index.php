@@ -383,13 +383,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $stmt = $pdo->prepare("SELECT nom FROM produits WHERE id = :produit_id");
                         $stmt->execute([':produit_id' => intval($_POST['produit_id'] ?? 0)]);
                         $produit_info = $stmt->fetch();
-            
+
                         if ($produit_info) {
                             $type_promo = $_POST['type_promotion'] ?? 'pourcentage';
                             $valeur = $_POST['valeur'] ?? 0;
                             $date_debut = $_POST['date_debut'] ?? date('Y-m-d');
                             $date_fin = $_POST['date_fin'] ?? 'Indéfinie';
-                            
+
                             $details_promo = sprintf(
                                 "Promotion %s de %s%s sur %s - Période: %s à %s",
                                 $type_promo,
@@ -399,7 +399,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 $date_debut,
                                 $date_fin
                             );
-            
+
                             logActivity(
                                 $pdo,
                                 $_SESSION['user_id'],
@@ -420,6 +420,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } catch (Exception $e) {
                     $pdo->rollBack();
                     $error = "❌ Erreur lors de l'application de la promotion: " . $e->getMessage();
+
+                    try {
+                        logActivity(
+                            $pdo,
+                            $_SESSION['user_id'],
+                            $_SESSION['user_nom'] ?? 'Caissier',
+                            'caissier',
+                            'erreur_application_promotion',
+                            "Échec application promotion - Produit ID: " . intval($_POST['produit_id'] ?? 0) .
+                            " - Erreur: " . $e->getMessage(),
+                            'promotions',
+                            intval($_POST['produit_id'] ?? 0)
+                        );
+                    } catch (Exception $logError) {
+                        error_log("Erreur journalisation échec: " . $logError->getMessage());
+                    }
+
                 }
                 break;
 
@@ -475,6 +492,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             ':commande_id2' => intval($_POST['commande_id'] ?? 0)
                         ]);
 
+                        $pdo->commit();
+
                         try {
                             // Récupérer les infos de la commande pour le journal
                             $stmt = $pdo->prepare("
@@ -493,9 +512,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     $_SESSION['user_nom'] ?? 'Caissier',
                                     'caissier',
                                     'traitement_retour',
-                                    "Retour traité - Commande: #" . $commande_info['numero_commande'] .
-                                    " - Montant remboursé: " . formatMontant($commande_info['montant_total']) .
-                                    " - Client: " . $commande_info['client_nom'],
+                                    sprintf(
+                                        "Retour traité - Commande: #%s - Montant remboursé: %s - Client: %s",
+                                        $commande_info['numero_commande'],
+                                        formatMontant($commande_info['montant_total']),
+                                        $commande_info['client_nom']
+                                    ),
                                     'commandes',
                                     intval($_POST['commande_id'] ?? 0)
                                 );
@@ -504,7 +526,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             error_log("Erreur journalisation traitement retour: " . $e->getMessage());
                         }
 
-                        $pdo->commit();
                         $message = "✅ Retour traité avec succès!";
                     } else {
                         $pdo->rollBack();
@@ -514,6 +535,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } catch (Exception $e) {
                     $pdo->rollBack();
                     $error = "❌ Erreur lors du traitement du retour: " . $e->getMessage();
+
+                    try {
+                        logActivity(
+                            $pdo,
+                            $_SESSION['user_id'],
+                            $_SESSION['user_nom'] ?? 'Caissier',
+                            'caissier',
+                            'erreur_traitement_retour',
+                            "Échec traitement retour - Commande ID: " . intval($_POST['commande_id'] ?? 0) .
+                            " - Erreur: " . $e->getMessage(),
+                            'commandes',
+                            intval($_POST['commande_id'] ?? 0)
+                        );
+                    } catch (Exception $logError) {
+                        error_log("Erreur journalisation échec: " . $logError->getMessage());
+                    }
                 }
                 break;
 
@@ -540,13 +577,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ]);
 
                     try {
+                        $nouveau_taux = floatval($_POST['taux'] ?? 1);
                         logActivity(
                             $pdo,
                             $_SESSION['user_id'],
                             $_SESSION['user_nom'] ?? 'Caissier',
                             'caissier',
                             'ajustement_taux_conversion',
-                            "Taux de conversion mis à jour: 1 USD = " . floatval($_POST['taux'] ?? 1) . " FC",
+                            sprintf(
+                                "Taux de conversion mis à jour: 1 USD = %.2f FC (ID: %d)",
+                                $nouveau_taux,
+                                $pdo->lastInsertId()
+                            ),
                             'taux_conversion',
                             $pdo->lastInsertId()
                         );
@@ -558,6 +600,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 } catch (Exception $e) {
                     $error = "❌ Erreur lors de la mise à jour du taux: " . $e->getMessage();
+                    try {
+                        logActivity(
+                            $pdo,
+                            $_SESSION['user_id'],
+                            $_SESSION['user_nom'] ?? 'Caissier',
+                            'caissier',
+                            'erreur_ajustement_taux',
+                            "Échec ajustement taux - Valeur proposée: " . floatval($_POST['taux'] ?? 1) .
+                            " - Erreur: " . $e->getMessage(),
+                            'taux_conversion',
+                            null
+                        );
+                    } catch (Exception $logError) {
+                        error_log("Erreur journalisation échec: " . $logError->getMessage());
+                    }
                 }
                 break;
         }
