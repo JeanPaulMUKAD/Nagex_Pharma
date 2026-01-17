@@ -433,7 +433,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $difference = $quantite_reelle - $quantite_totale;
 
                     // AJOUTER LE LOG D'ACTIVITÉ
-                    loggerActivity(
+                    logActivity(
                         $pdo,
                         $user_id,
                         $user_nom,
