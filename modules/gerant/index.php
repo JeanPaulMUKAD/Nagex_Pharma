@@ -409,9 +409,11 @@ function loadJournalData($db, $current_user_id = null)
     $data = [];
 
     try {
-        // Récupérer TOUTES les activités (y compris celles du gérant)
+        // Récupérer TOUTES les activités avec toutes les colonnes nécessaires
         $sql = "
-            SELECT ja.*, u.nom as utilisateur_nom_complet 
+            SELECT ja.*, 
+                   u.nom as utilisateur_nom_complet,
+                   u.role as utilisateur_role
             FROM journal_activites ja
             LEFT JOIN utilisateurs u ON ja.utilisateur_id = u.id
             ORDER BY ja.created_at DESC 
@@ -421,6 +423,20 @@ function loadJournalData($db, $current_user_id = null)
         $stmt = $db->prepare($sql);
         $stmt->execute();
         $data['activites'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Récupérer la liste des utilisateurs pour le filtre
+        $sql_utilisateurs = "
+            SELECT DISTINCT ja.utilisateur_id, 
+                   COALESCE(u.nom, ja.utilisateur_nom) as nom_complet
+            FROM journal_activites ja
+            LEFT JOIN utilisateurs u ON ja.utilisateur_id = u.id
+            WHERE ja.utilisateur_id IS NOT NULL
+            ORDER BY COALESCE(u.nom, ja.utilisateur_nom)
+        ";
+
+        $stmt = $db->prepare($sql_utilisateurs);
+        $stmt->execute();
+        $data['utilisateurs_filtre'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         // Statistiques par jour
         $stmt = $db->prepare("
@@ -441,6 +457,7 @@ function loadJournalData($db, $current_user_id = null)
     } catch (Exception $e) {
         error_log("Erreur chargement journal: " . $e->getMessage());
         $data['activites'] = [];
+        $data['utilisateurs_filtre'] = [];
         $data['stats_journal'] = [];
     }
 
@@ -1553,14 +1570,12 @@ function getJoursRestantsClass($jours)
                                                 Société</th>
                                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                                                 Contact</th>
-                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                                                Email/Téléphone</th>
+
                                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
                                                 Produits</th>
                                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Note
                                                 Qualité</th>
-                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Créé
-                                                le</th>
+
                                         </tr>
                                     </thead>
                                     <tbody class="bg-white divide-y divide-gray-200">
@@ -1583,14 +1598,7 @@ function getJoursRestantsClass($jours)
                                                     <td class="px-4 py-3 text-gray-500">
                                                         <?php echo htmlspecialchars($fournisseur['contact_principal'] ?? 'Non spécifié'); ?>
                                                     </td>
-                                                    <td class="px-4 py-3">
-                                                        <div class="text-sm text-gray-900">
-                                                            <?php echo htmlspecialchars($fournisseur['email'] ?? 'N/A'); ?>
-                                                        </div>
-                                                        <div class="text-xs text-gray-500">
-                                                            <?php echo htmlspecialchars($fournisseur['telephone'] ?? 'N/A'); ?>
-                                                        </div>
-                                                    </td>
+
                                                     <td class="px-4 py-3">
                                                         <span
                                                             class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
@@ -1605,12 +1613,10 @@ function getJoursRestantsClass($jours)
                                                                 </div>
                                                             </div>
                                                             <span
-                                                                class="text-sm font-medium text-gray-700"><?php echo number_format($fournisseur['note_qualite'] ?? 0, 1); ?>/5</span>
+                                                                class="text-sm font-medium text-gray-700"><?php echo number_format((float) ($fournisseur['note_qualite'] ?? 0), 1); ?>/5</span>
                                                         </div>
                                                     </td>
-                                                    <td class="px-4 py-3 text-gray-500">
-                                                        <?php echo date('d/m/Y', strtotime($fournisseur['created_at'])); ?>
-                                                    </td>
+
                                                 </tr>
                                             <?php endforeach; ?>
                                         <?php else: ?>
@@ -1799,7 +1805,7 @@ function getJoursRestantsClass($jours)
                         <div class="px-6 py-4 border-b flex justify-between items-center">
                             <h3 class="text-xl font-semibold text-gray-900">Journal des activités</h3>
                             <div class="flex gap-2">
-                                <button onclick="exportToExcel('journal')"
+                                <button onclick="exportWithConfirmation('journal')"
                                     class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg flex items-center transition-colors">
                                     <i class="fas fa-file-excel mr-2"></i>
                                     Exporter Excel
@@ -1814,13 +1820,9 @@ function getJoursRestantsClass($jours)
                                 <select id="filterUtilisateurJournal"
                                     class="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500">
                                     <option value="">Tous les utilisateurs</option>
-                                    <?php
-                                    $stmt = $db->prepare("SELECT DISTINCT ja.utilisateur_id, ja.utilisateur_nom FROM journal_activites ja WHERE ja.utilisateur_id != ? ORDER BY ja.utilisateur_nom");
-                                    $stmt->execute([$user_id]);
-                                    $utilisateurs_journal = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                                    foreach ($utilisateurs_journal as $u): ?>
+                                    <?php foreach ($data['utilisateurs_filtre'] ?? [] as $u): ?>
                                         <option value="<?php echo $u['utilisateur_id']; ?>">
-                                            <?php echo htmlspecialchars($u['utilisateur_nom']); ?>
+                                            <?php echo htmlspecialchars($u['nom_complet']); ?>
                                         </option>
                                     <?php endforeach; ?>
                                 </select>
@@ -1883,9 +1885,6 @@ function getJoursRestantsClass($jours)
                                                 Détails</th>
                                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">IP
                                             </th>
-                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">CODES
-                                            </th>
-                                            
                                         </tr>
                                     </thead>
                                     <tbody class="bg-white divide-y divide-gray-200">
@@ -1895,14 +1894,6 @@ function getJoursRestantsClass($jours)
                                                     data-date="<?php echo date('Y-m-d', strtotime($activite['created_at'])); ?>"
                                                     data-utilisateur="<?php echo $activite['utilisateur_id']; ?>"
                                                     data-action="<?php echo $activite['action']; ?>">
-                                                    <td class="px-4 py-3">
-                                                        <div class="font-medium text-gray-900">
-                                                            <?php echo htmlspecialchars($activite['utilisateur_nom_complet'] ?? $activite['utilisateur_nom']); ?>
-                                                            <?php if ($activite['utilisateur_id'] == $user_id): ?>
-                                                                <span class="ml-1 text-xs text-blue-600 font-semibold">(Vous)</span>
-                                                            <?php endif; ?>
-                                                        </div>
-                                                    </td>
                                                     <td class="px-4 py-3 text-gray-500">
                                                         <div class="font-medium">
                                                             <?php echo date('d/m/Y', strtotime($activite['created_at'])); ?>
@@ -1913,7 +1904,10 @@ function getJoursRestantsClass($jours)
                                                     </td>
                                                     <td class="px-4 py-3">
                                                         <div class="font-medium text-gray-900">
-                                                            <?php echo htmlspecialchars($activite['utilisateur_nom_complet'] ?? $activite['utilisateur_nom']); ?>
+                                                            <?php echo htmlspecialchars($activite['utilisateur_nom_complet'] ?? $activite['utilisateur_nom'] ?? 'Utilisateur inconnu'); ?>
+                                                            <?php if ($activite['utilisateur_id'] == $user_id): ?>
+                                                                <span class="ml-1 text-xs text-blue-600 font-semibold">(Vous)</span>
+                                                            <?php endif; ?>
                                                         </div>
                                                     </td>
                                                     <td class="px-4 py-3">
@@ -1924,9 +1918,9 @@ function getJoursRestantsClass($jours)
                                                             'caissier' => 'bg-green-100 text-green-800',
                                                             'pharmacien' => 'bg-purple-100 text-purple-800'
                                                         ];
-                                                        echo $role_colors[$activite['utilisateur_role']] ?? 'bg-gray-100 text-gray-800';
+                                                        echo $role_colors[$activite['utilisateur_role'] ?? ''] ?? 'bg-gray-100 text-gray-800';
                                                         ?>">
-                                                            <?php echo ucfirst($activite['utilisateur_role']); ?>
+                                                            <?php echo ucfirst($activite['utilisateur_role'] ?? 'inconnu'); ?>
                                                         </span>
                                                     </td>
                                                     <td class="px-4 py-3">
@@ -2142,7 +2136,7 @@ function getJoursRestantsClass($jours)
             });
         }
 
-        // Filtrer le journal
+        // Filtrer le journal avec des critères améliorés
         function filterJournal() {
             const date = document.getElementById('filterDateJournal').value;
             const utilisateur = document.getElementById('filterUtilisateurJournal').value;
@@ -2151,14 +2145,57 @@ function getJoursRestantsClass($jours)
             document.querySelectorAll('#journalTable .journal-row').forEach(row => {
                 const rowDate = row.getAttribute('data-date');
                 const rowUtilisateur = row.getAttribute('data-utilisateur');
-                const rowAction = row.getAttribute('data-action');
+                const rowAction = row.getAttribute('data-action').toLowerCase();
 
+                // Filtrer par date
                 const matchDate = !date || rowDate === date;
-                const matchUtilisateur = !utilisateur || rowUtilisateur === utilisateur;
-                const matchAction = !action || rowAction.includes(action);
 
+                // Filtrer par utilisateur
+                const matchUtilisateur = !utilisateur || rowUtilisateur === utilisateur;
+
+                // Filtrer par type d'action
+                let matchAction = true;
+                if (action) {
+                    matchAction = false;
+                    switch (action) {
+                        case 'connexion':
+                            matchAction = rowAction.includes('connexion');
+                            break;
+                        case 'creation':
+                            matchAction = rowAction.includes('creation');
+                            break;
+                        case 'modification':
+                            matchAction = rowAction.includes('modification');
+                            break;
+                        case 'suppression':
+                            matchAction = rowAction.includes('suppression');
+                            break;
+                        case 'visualisation':
+                            matchAction = rowAction.includes('visualisation');
+                            break;
+                    }
+                }
+
+                // Afficher ou masquer la ligne
                 row.style.display = (matchDate && matchUtilisateur && matchAction) ? '' : 'none';
             });
+
+            // Afficher un message si aucun résultat
+            const rowsVisible = document.querySelectorAll('#journalTable .journal-row[style=""]').length;
+            const rowsTotal = document.querySelectorAll('#journalTable .journal-row').length;
+
+            if (rowsVisible === 0) {
+                // Afficher un message si aucun résultat
+                showNotification(`Aucune activité trouvée (${rowsTotal} activités filtrées)`, 'info');
+            }
+        }
+
+        function clearFiltersJournal() {
+            document.getElementById('filterDateJournal').value = '';
+            document.getElementById('filterUtilisateurJournal').value = '';
+            document.getElementById('filterActionJournal').value = '';
+            filterJournal();
+            showNotification('Filtres réinitialisés', 'info');
         }
 
         function clearFiltersJournal() {
