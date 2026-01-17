@@ -12,6 +12,7 @@ session_start();
 
 // Inclure la classe Database
 require_once __DIR__ . '/../../config/database.php';
+require_once __DIR__ . '/../../config/journal_functions.php';
 
 // ============================================
 // CONNEXION À LA BASE DE DONNÉES
@@ -44,7 +45,20 @@ if (isset($_GET['api'])) {
     // GESTION DES FOURNISSEURS
     if ($_GET['api'] === 'fournisseur_details' && isset($_GET['id'])) {
         try {
+
             $fournisseur_id = intval($_GET['id']);
+            // AJOUT DU LOG DE VISUALISATION
+            if (isset($_SESSION['user_id'])) {
+                loggerVisualisation(
+                    $pdo,
+                    $_SESSION['user_id'],
+                    $_SESSION['user_nom'] ?? 'Pharmacien',
+                    $_SESSION['user_role'] ?? 'pharmacien',
+                    'fournisseurs',
+                    $fournisseur_id,
+                    "Consultation des détails du fournisseur"
+                );
+            }
 
             // Récupérer les informations détaillées du fournisseur
             $stmt = $pdo->prepare("
@@ -90,6 +104,20 @@ if (isset($_GET['api'])) {
     if ($_GET['api'] === 'produit_details' && isset($_GET['id'])) {
         try {
             $produit_id = intval($_GET['id']);
+
+            // AJOUT DU LOG DE VISUALISATION
+            if (isset($_SESSION['user_id'])) {
+                loggerVisualisation(
+                    $pdo,
+
+                    $_SESSION['user_id'],
+                    $_SESSION['user_nom'] ?? 'Pharmacien',
+                    $_SESSION['user_role'] ?? 'pharmacien',
+                    'produits',
+                    $produit_id,
+                    "Consultation des détails du produit"
+                );
+            }
 
             // Récupérer les informations détaillées du produit
             $stmt = $pdo->prepare("
@@ -234,6 +262,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $pdo->commit();
                     $message = "✅ Produit ajouté avec succès! Il est maintenant en attente de validation.";
+                    // AJOUT DU LOG
+                    loggerCreation(
+                        $pdo,
+                        $_SESSION['user_id'],
+                        $_SESSION['user_nom'] ?? 'Pharmacien',
+                        $_SESSION['user_role'] ?? 'pharmacien',
+                        'produits',
+                        $produit_id,
+                        "Création du produit: " . ($_POST['nom'] ?? 'Nouveau produit')
+                    );
+
 
                 } catch (Exception $e) {
                     $pdo->rollBack();
@@ -276,6 +315,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $pdo->commit();
                     $message = "✅ Produit modifié avec succès!";
+                    // AJOUT DU LOG
+                    loggerModification(
+                        $pdo,
+                        $_SESSION['user_id'],
+                        $_SESSION['user_nom'] ?? 'Pharmacien',
+                        $_SESSION['user_role'] ?? 'pharmacien',
+                        'produits',
+                        $produit_id,
+                        $changements
+                    );
+
 
                 } catch (Exception $e) {
                     $pdo->rollBack();
@@ -295,6 +345,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     if ($stmt->rowCount() > 0) {
                         $message = "✅ Produit validé pour la vente!";
+
+                        // AJOUT DU LOG
+                        logActivity(
+                            $pdo,
+                            $_SESSION['user_id'],
+                            $_SESSION['user_nom'] ?? 'Pharmacien',
+                            $_SESSION['user_role'] ?? 'pharmacien',
+                            'validation_produit',
+                            "Produit validé pour la vente (ID: $produit_id)",
+                            'produits',
+                            $produit_id
+                        );
+
                     } else {
                         $error = "❌ Le produit ne peut pas être validé (déjà validé ou non trouvé)";
                     }
@@ -313,6 +376,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ");
                     $stmt->execute([':id' => intval($_POST['produit_id'] ?? 0)]);
                     $message = "✅ Produit archivé avec succès!";
+                    // AJOUT DU LOG
+                    loggerSuppression(
+                        $pdo,
+                        $_SESSION['user_id'],
+                        $_SESSION['user_nom'] ?? 'Pharmacien',
+                        $_SESSION['user_role'] ?? 'pharmacien',
+                        'produits',
+                        $produit_id,
+                        "Produit archivé"
+                    );
+
+
                 } catch (Exception $e) {
                     $error = "❌ Erreur lors de l'archivage: " . $e->getMessage();
                 }
@@ -331,6 +406,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         ':created_by' => $_SESSION['user_id']
                     ]);
                     $message = "✅ Catégorie ajoutée avec succès!";
+
+                    // AJOUT DU LOG
+                    loggerCreation(
+                        $pdo,
+                        $_SESSION['user_id'],
+                        $_SESSION['user_nom'] ?? 'Pharmacien',
+                        $_SESSION['user_role'] ?? 'pharmacien',
+                        'categories',
+                        $categorie_id,
+                        "Création de la catégorie: " . ($_POST['nom_categorie'] ?? 'Nouvelle catégorie')
+                    );
+
                 } catch (Exception $e) {
                     $error = "❌ Erreur lors de l'ajout de la catégorie: " . $e->getMessage();
                 }
@@ -361,6 +448,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $pdo->commit();
                     $message = "✅ Fournisseur modifié avec succès!";
+
+                    // AJOUT DU LOG
+                    loggerModification(
+                        $pdo,
+                        $_SESSION['user_id'],
+                        $_SESSION['user_nom'] ?? 'Pharmacien',
+                        $_SESSION['user_role'] ?? 'pharmacien',
+                        'fournisseurs',
+                        $fournisseur_id,
+                        ["Modification des informations du fournisseur"]
+                    );
 
                 } catch (Exception $e) {
                     $pdo->rollBack();
@@ -409,6 +507,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
 
                     $message = "✅ Note enregistrée avec succès!";
+                    // AJOUT DU LOG
+                    logActivity(
+                        $pdo,
+                        $_SESSION['user_id'],
+                        $_SESSION['user_nom'] ?? 'Pharmacien',
+                        $_SESSION['user_role'] ?? 'pharmacien',
+                        'notation_fournisseur',
+                        "Note: $note/5" . (!empty($_POST['commentaire']) ? " - Commentaire: " . substr($_POST['commentaire'], 0, 100) : ""),
+                        'fournisseurs',
+                        $fournisseur_id
+                    );
+
 
                 } catch (Exception $e) {
                     $error = "❌ Erreur lors de l'enregistrement de la note: " . $e->getMessage();
@@ -426,6 +536,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     if ($stmt->rowCount() > 0) {
                         $message = "✅ Produit désarchivé avec succès! Il est maintenant actif.";
+
+                        // AJOUT DU LOG
+
+                        logActivity(
+                            $pdo,
+                            $_SESSION['user_id'],
+                            $_SESSION['user_nom'] ?? 'Pharmacien',
+                            $_SESSION['user_role'] ?? 'pharmacien',
+                            'desarchivage_produit',
+                            "Produit désarchivé (ID: $produit_id)",
+                            'produits',
+                            $produit_id
+                        );
+
                     } else {
                         $error = "❌ Le produit ne peut pas être désarchivé (déjà actif ou non trouvé)";
                     }
@@ -442,6 +566,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                  ");
                     $stmt->execute();
                     $message = "✅ Tous les produits ont été désarchivés avec succès!";
+                    // AJOUT DU LOG
+                    logActivity(
+                        $pdo,
+
+                        $_SESSION['user_id'],
+                        $_SESSION['user_nom'] ?? 'Pharmacien',
+                        $_SESSION['user_role'] ?? 'pharmacien',
+                        'desarchivage_masse_produits',
+                        "Désarchivage en masse: $nombre_desarchive produit(s)",
+                        'produits',
+                        null
+                    );
+
+
                 } catch (Exception $e) {
                     $error = "❌ Erreur lors du désarchivage en masse: " . $e->getMessage();
                 }
@@ -466,6 +604,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         ':user_id' => $_SESSION['user_id']
                     ]);
                     $message = "✅ Fournisseur ajouté avec succès!";
+
+                    // AJOUT DU LOG
+                    loggerCreation(
+                        $pdo,
+                        $_SESSION['user_id'],
+                        $_SESSION['user_nom'] ?? 'Pharmacien',
+                        $_SESSION['user_role'] ?? 'pharmacien',
+                        'fournisseurs',
+                        $fournisseur_id,
+                        "Création du fournisseur: " . ($_POST['nom_societe'] ?? 'Nouveau fournisseur')
+                    );
+
                 } catch (Exception $e) {
                     $error = "❌ Erreur lors de l'ajout du fournisseur: " . $e->getMessage();
                 }
@@ -1168,10 +1318,11 @@ try {
                                                         <div class="flex items-center">
                                                             <i class="fas fa-calendar-alt mr-1 text-xs"></i>
                                                             Expiration:
-                                                            <span class="font-semibold ml-1 <?php
-                                                            echo $alerte['jours_restants'] <= 7 ? 'text-red-600' :
-                                                                ($alerte['jours_restants'] <= 30 ? 'text-orange-600' : 'text-gray-700');
-                                                            ?>">
+                                                            <span
+                                                                class="font-semibold ml-1 <?php
+                                                                echo $alerte['jours_restants'] <= 7 ? 'text-red-600' :
+                                                                    ($alerte['jours_restants'] <= 30 ? 'text-orange-600' : 'text-gray-700');
+                                                                ?>">
                                                                 <?php echo date('d/m/Y', strtotime($alerte['date_expiration'])); ?>
                                                                 (<?php echo $alerte['jours_restants']; ?> jours)
                                                             </span>
@@ -2081,8 +2232,8 @@ try {
                                                 <div class="flex items-center">
                                                     <i class="fas fa-barcode text-gray-400 mr-2 text-sm"></i>
                                                     <code class="text-sm text-gray-900 bg-gray-50 px-2 py-1 rounded font-mono">
-                                                                                                                                                                                                                        <?php echo htmlspecialchars($produit['code_barre']); ?>
-                                                                                                                                                                                                                    </code>
+                                                                                                                                                                                                                                                                                                        <?php echo htmlspecialchars($produit['code_barre']); ?>
+                                                                                                                                                                                                                                                                                                    </code>
                                                 </div>
                                             </td>
                                             <td class="px-6 py-4">

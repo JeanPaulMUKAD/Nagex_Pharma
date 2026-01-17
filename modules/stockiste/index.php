@@ -18,12 +18,15 @@ if (!isset($_SESSION['user_id']) || ($_SESSION['user_role'] ?? '') !== 'stockist
 
 // Inclure la classe Database
 require_once __DIR__ . '/../../config/database.php';
+require_once __DIR__ . '/../../config/journal_functions.php';  // <-- AJOUTER CETTE LIGNE
 
 // Initialisation des variables
 $message = '';
 $error = '';
 $current_page = $_GET['page'] ?? 'dashboard';
 $user_id = $_SESSION['user_id'];
+$user_nom = $_SESSION['user_nom'] ?? 'Stockiste';
+$user_role = $_SESSION['user_role'] ?? 'stockiste';
 
 // ============================================
 // CONNEXION À LA BASE DE DONNÉES
@@ -153,6 +156,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $lot_id = $pdo->lastInsertId();
 
+                    // AJOUTER LE LOG D'ACTIVITÉ
+                    loggerCreation(
+                        $pdo,
+                        $user_id,
+                        $user_nom,
+                        $user_role,
+                        'lots',
+                        $lot_id,
+                        "Création du lot {$lot_id} - " . ($_POST['numero_lot'] ?? 'N/A') .
+                        " - Quantité: " . ($_POST['quantite_initiale'] ?? 0)
+                    );
+
                     // Enregistrer le mouvement de stock
                     $stmt = $pdo->prepare("
                         INSERT INTO mouvements_stock (
@@ -234,6 +249,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         ':id' => intval($_POST['lot_id'] ?? 0)
                     ]);
 
+                    // AJOUTER LE LOG D'ACTIVITÉ
+                    $changements = [
+                        'ancien_numero_lot' => $ancien_lot['numero_lot'],
+                        'nouveau_numero_lot' => $_POST['numero_lot'] ?? '',
+                        'ancienne_quantite' => $ancien_lot['quantite_actuelle'],
+                        'nouvelle_quantite' => $_POST['quantite_actuelle'] ?? 0,
+                        'ancienne_date_expiration' => $ancien_lot['date_expiration'],
+                        'nouvelle_date_expiration' => $_POST['date_expiration'] ?? ''
+                    ];
+
+                    loggerModification(
+                        $pdo,
+                        $user_id,
+                        $user_nom,
+                        $user_role,
+                        'lots',
+                        intval($_POST['lot_id'] ?? 0),
+                        $changements
+                    );
+
                     // Enregistrer le mouvement d'ajustement si la quantité a changé
                     $difference = intval($_POST['quantite_actuelle'] ?? 0) - $ancien_lot['quantite_actuelle'];
                     if ($difference != 0) {
@@ -286,6 +321,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
 
                     $difference = $nouvelle_quantite - $lot['quantite_actuelle'];
+
+
+                    // AJOUTER LE LOG D'ACTIVITÉ
+                    logActivity(
+                        $pdo,
+                        $user_id,
+                        $user_nom,
+                        $user_role,
+                        'ajustement_stock',
+                        "Ajustement du lot {$lot_id}: {$lot['quantite_actuelle']} → {$nouvelle_quantite} " .
+                        "({$difference} unités) - Raison: {$raison}",
+                        'lots',
+                        $lot_id
+                    );
+
                     $type_mouvement = $difference > 0 ? 'entree' : 'sortie';
 
                     // Mettre à jour le lot
@@ -1462,8 +1512,8 @@ switch ($current_page) {
                                                     <td class="px-6 py-4">
                                                         <code
                                                             class="text-sm text-gray-900 bg-gray-50 px-2 py-1 rounded font-mono border border-gray-200">
-                                                                                                                                                                                                                                                                                                            <?php echo htmlspecialchars($produit['code_barre']); ?>
-                                                                                                                                                                                                                                                                                                        </code>
+                                                                                                                                                                                                                                                                                                                                                            <?php echo htmlspecialchars($produit['code_barre']); ?>
+                                                                                                                                                                                                                                                                                                                                                        </code>
                                                     </td>
                                                     <td class="px-6 py-4">
                                                         <div class="flex items-center">
@@ -1643,7 +1693,7 @@ switch ($current_page) {
                                                     <i class="fas fa-dollar-sign mr-2 text-gray-400"></i> Prix d'achat
                                                 </div>
                                             </th>
-                                           
+
                                         </tr>
                                     </thead>
                                     <tbody class="bg-white divide-y divide-gray-200">
@@ -1680,8 +1730,8 @@ switch ($current_page) {
                                                         </div>
                                                         <div>
                                                             <code class="text-sm font-medium text-gray-900 font-mono">
-                                                                                                                                                                                                                                    <?php echo htmlspecialchars($lot['numero_lot']); ?>
-                                                                                                                                                                                                                                </code>
+                                                                                                                                                                                                                                                                        <?php echo htmlspecialchars($lot['numero_lot']); ?>
+                                                                                                                                                                                                                                                                    </code>
                                                             <div class="text-xs text-gray-500 mt-1">
                                                                 <i class="fas fa-calendar-plus mr-1"></i>
                                                                 <?php echo formatDate($lot['date_reception']); ?>
@@ -1783,7 +1833,7 @@ switch ($current_page) {
                                                     </div>
                                                 </td>
 
-                                               
+
                                             </tr>
                                         <?php endforeach; ?>
                                     </tbody>
@@ -2846,8 +2896,8 @@ switch ($current_page) {
                                                 <td class="px-6 py-4">
                                                     <code
                                                         class="text-sm text-gray-900 bg-gray-50 px-2 py-1 rounded font-mono border border-gray-200">
-                                                                                                                                                                            <?php echo htmlspecialchars($mouvement['numero_lot']); ?>
-                                                                                                                                                                        </code>
+                                                                                                                                                                                                                <?php echo htmlspecialchars($mouvement['numero_lot']); ?>
+                                                                                                                                                                                                            </code>
                                                 </td>
 
                                                 <!-- Type -->
@@ -3196,8 +3246,8 @@ switch ($current_page) {
                                                 <td class="px-6 py-4">
                                                     <code
                                                         class="text-sm text-gray-900 bg-gray-50 px-2 py-1 rounded font-mono border border-gray-200">
-                                                                                                                                                                <?php echo htmlspecialchars($produit['code_barre']); ?>
-                                                                                                                                                            </code>
+                                                                                                                                                                                                    <?php echo htmlspecialchars($produit['code_barre']); ?>
+                                                                                                                                                                                                </code>
                                                 </td>
 
                                                 <!-- Stock système -->

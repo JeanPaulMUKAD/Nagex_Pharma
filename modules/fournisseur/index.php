@@ -16,8 +16,13 @@ if (!isset($_SESSION['user_id']) || ($_SESSION['user_role'] ?? '') !== 'fourniss
     exit();
 }
 
+$user_id = $_SESSION['user_id'];
+$user_name = $_SESSION['user_nom'] ?? 'Fournisseur';
+$user_role = $_SESSION['user_role'] ?? 'fournisseur';
+
 // Inclure la classe Database
 require_once __DIR__ . '/../../config/database.php';
+require_once __DIR__ . '/../../config/journal_functions.php';
 
 // Initialisation des variables
 $message = '';
@@ -81,6 +86,18 @@ try {
         ]);
 
         $fournisseur_id = $pdo->lastInsertId();
+
+        // AJOUTER CETTE LIGNE POUR ENREGISTRER L'ACTIVITÉ
+        logActivity(
+            $pdo,
+            $user_id,
+            $user_name,
+            $user_role,
+            'creation_fournisseur',
+            "Création automatique du profil fournisseur: " . $nom_societe,
+            'fournisseurs',
+            $fournisseur_id
+        );
 
         // Message d'information
         $message = "✅ Votre profil fournisseur a été créé automatiquement. Veuillez compléter vos informations dans l'onglet 'Mon profil'.";
@@ -181,19 +198,20 @@ function formatDate(string $date): string
 /**
  * Enregistre une activité dans le journal
  */
-function logActivity($db, $user_id, $user_name, $user_role, $action, $details = null, $table = null, $element_id = null) {
+function logActivity($db, $user_id, $user_name, $user_role, $action, $details = null, $table = null, $element_id = null)
+{
     try {
         // Obtenir la connexion PDO depuis l'objet Database
         $pdo = $db->getConnection(); // ou $db->pdo selon votre implémentation
-        
+
         $ip_adresse = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
         $user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
-        
+
         $sql = "INSERT INTO journal_activites 
                 (utilisateur_id, utilisateur_nom, utilisateur_role, action, 
                  details, table_concernee, element_id, ip_adresse, user_agent)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
-        
+
         $stmt = $pdo->prepare($sql);
         return $stmt->execute([
             $user_id,
@@ -206,7 +224,7 @@ function logActivity($db, $user_id, $user_name, $user_role, $action, $details = 
             $ip_adresse,
             substr($user_agent, 0, 500)
         ]);
-        
+
     } catch (Exception $e) {
         error_log("Erreur logActivity: " . $e->getMessage());
         return false;
@@ -257,8 +275,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $message = "✅ Profil mis à jour avec succès!";
 
+
                 } catch (Exception $e) {
                     $error = "❌ Erreur lors de la mise à jour du profil: " . $e->getMessage();
+
+                    // LOG D'ERREUR
+                    logActivity(
+                        $pdo,
+                        $user_id,
+                        $user_name,
+                        $user_role,
+                        'erreur_modification_profil',
+                        "Erreur: " . $e->getMessage(),
+                        'fournisseurs',
+                        $fournisseur_id
+                    );
                 }
                 break;
 
@@ -300,6 +331,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $produit_id = $pdo->lastInsertId();
 
+                    $pdo->commit();
                     // AJOUTER CETTE LIGNE POUR ENREGISTRER L'ACTIVITÉ
                     logActivity(
                         $pdo,
@@ -311,13 +343,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'produits',
                         $produit_id
                     );
-
-                    $pdo->commit();
                     $message = "✅ Produit ajouté au catalogue! En attente de validation par le pharmacien.";
 
                 } catch (Exception $e) {
                     $pdo->rollBack();
                     $error = "❌ Erreur lors de l'ajout du produit: " . $e->getMessage();
+
+                    // LOG D'ERREUR
+                    logActivity(
+                        $pdo,
+                        $user_id,
+                        $user_name,
+                        $user_role,
+                        'erreur_ajout_produit',
+                        "Erreur: " . $e->getMessage(),
+                        'produits'
+                    );
                 }
                 break;
 
@@ -345,6 +386,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             ':fournisseur_id' => $fournisseur_id
                         ]);
 
+                        // AJOUTER CETTE LIGNE POUR ENREGISTRER L'ACTIVITÉ
+                        logActivity(
+                            $pdo,
+                            $user_id,
+                            $user_name,
+                            $user_role,
+                            'modification_disponibilite',
+                            "Mise à jour disponibilité produit ID: " . intval($_POST['produit_id'] ?? 0) .
+                            " - Disponible: " . (isset($_POST['disponible']) ? 'Oui' : 'Non') .
+                            " - Prix: " . floatval($_POST['prix_achat'] ?? 0),
+                            'produits_fournisseur',
+                            intval($_POST['produit_id'] ?? 0)
+                        );
+
                         $message = "✅ Disponibilité mise à jour avec succès!";
                     } else {
                         $error = "❌ La table 'produits_fournisseur' n'existe pas.";
@@ -352,6 +407,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 } catch (Exception $e) {
                     $error = "❌ Erreur lors de la mise à jour: " . $e->getMessage();
+
+                    // LOG D'ERREUR
+                    logActivity(
+                        $pdo,
+                        $user_id,
+                        $user_name,
+                        $user_role,
+                        'erreur_modification_disponibilite',
+                        "Erreur: " . $e->getMessage(),
+                        'produits_fournisseur',
+                        intval($_POST['produit_id'] ?? 0)
+                    );
                 }
                 break;
 
@@ -391,12 +458,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         );
 
                         $message = "✅ Message envoyé avec succès!";
+
                     } else {
                         $error = "❌ La table 'messages_fournisseur' n'existe pas.";
                     }
 
                 } catch (Exception $e) {
                     $error = "❌ Erreur lors de l'envoi du message: " . $e->getMessage();
+
+                    // LOG D'ERREUR
+                    logActivity(
+                        $pdo,
+                        $user_id,
+                        $user_name,
+                        $user_role,
+                        'erreur_envoi_message',
+                        "Erreur: " . $e->getMessage(),
+                        'messages_fournisseur'
+                    );
                 }
                 break;
         }
@@ -425,6 +504,18 @@ if (isset($_GET['action']) && $_GET['action'] == 'get_produit' && isset($_GET['i
         $produit = $stmt->fetch();
 
         if ($produit) {
+            // AJOUTER CETTE LIGNE POUR ENREGISTRER L'ACTIVITÉ
+            logActivity(
+                $pdo,
+                $user_id,
+                $user_name,
+                $user_role,
+                'consultation_produit_ajax',
+                "Consultation détails produit ID: " . intval($_GET['id']),
+                'produits',
+                intval($_GET['id'])
+            );
+
             header('Content-Type: application/json');
             echo json_encode($produit);
         } else {
@@ -502,8 +593,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
                 echo "✅ Produit modifié avec succès! Les changements seront validés par le pharmacien.";
 
+
             } catch (Exception $e) {
                 echo "❌ Erreur: " . $e->getMessage();
+
+                // LOG D'ERREUR
+                logActivity(
+                    $pdo,
+                    $user_id,
+                    $user_name,
+                    $user_role,
+                    'erreur_modification_produit',
+                    "Erreur: " . $e->getMessage(),
+                    'produits',
+                    intval($_POST['produit_id'] ?? 0)
+                );
             }
             exit();
             break;

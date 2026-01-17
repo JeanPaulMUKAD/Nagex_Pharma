@@ -33,6 +33,10 @@ if (!isset($_SESSION['user_id']) || ($_SESSION['user_role'] ?? '') !== 'client')
     exit();
 }
 
+$user_id = $_SESSION['user_id'];
+$user_name = $_SESSION['user_nom'] ?? 'Client';
+$user_role = $_SESSION['user_role'] ?? 'client';
+
 // Inclure la classe Database
 require_once __DIR__ . '/../../config/database.php';
 require_once __DIR__ . '/../../config/journal_functions.php';
@@ -1048,6 +1052,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 } catch (Exception $e) {
                     $error = "❌ Erreur lors de l'ajout au panier: " . $e->getMessage();
+
+                    // LOG D'ERREUR
+                    logActivity(
+                        $pdo,
+                        $user_id,
+                        $user_name,
+                        $user_role,
+                        'erreur_ajout_panier',
+                        "Erreur: " . $e->getMessage(),
+                        'paniers',
+                        $produit_id
+                    );
                 }
                 break;
 
@@ -1107,6 +1123,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 } catch (Exception $e) {
                     $error = "❌ Erreur lors de la modification: " . $e->getMessage();
+                    // LOG D'ERREUR
+                    logActivity(
+                        $pdo,
+                        $user_id,
+                        $user_name,
+                        $user_role,
+                        'erreur_modification_panier',
+                        "Erreur: " . $e->getMessage(),
+                        'paniers',
+                        $produit_id
+                    );
                 }
                 break;
 
@@ -1308,6 +1335,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 } catch (Exception $e) {
                     $error = "❌ Erreur: " . $e->getMessage();
+
+                    // LOG D'ERREUR
+                    logActivity(
+                        $pdo,
+                        $user_id,
+                        $user_name,
+                        $user_role,
+                        'erreur_ajout_favori',
+                        "Erreur: " . $e->getMessage(),
+                        'favoris',
+                        $produit_id
+                    );
                 }
                 break;
 
@@ -1341,6 +1380,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 } catch (Exception $e) {
                     $error = "❌ Erreur: " . $e->getMessage();
+                    // LOG D'ERREUR
+                    logActivity(
+                        $pdo,
+                        $user_id,
+                        $user_name,
+                        $user_role,
+                        'erreur_retrait_favori',
+                        "Erreur: " . $e->getMessage(),
+                        'favoris',
+                        $produit_id
+                    );
                 }
                 break;
 
@@ -1395,6 +1445,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </script>';
                     exit();
                 }
+                // LOG D'ERREUR
+                logActivity(
+                    $pdo,
+                    $user_id,
+                    $user_name,
+                    $user_role,
+                    'erreur_telechargement_recu',
+                    "Erreur: " . $e->getMessage(),
+                    'commandes',
+                    $commande_id
+                );
                 break;
 
 
@@ -1440,6 +1501,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 } catch (Exception $e) {
                     $error = "❌ Erreur lors de la mise à jour: " . $e->getMessage();
+
+                    // LOG D'ERREUR
+                    logActivity(
+                        $pdo,
+                        $user_id,
+                        $user_name,
+                        $user_role,
+                        'erreur_modification_profil',
+                        "Erreur: " . $e->getMessage(),
+                        'utilisateurs',
+                        $user_id
+                    );
                 }
                 break;
         }

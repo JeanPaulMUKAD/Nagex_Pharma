@@ -1883,6 +1883,9 @@ function getJoursRestantsClass($jours)
                                                 Détails</th>
                                             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">IP
                                             </th>
+                                            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">CODES
+                                            </th>
+                                            
                                         </tr>
                                     </thead>
                                     <tbody class="bg-white divide-y divide-gray-200">
@@ -2016,6 +2019,17 @@ function getJoursRestantsClass($jours)
         // Fonction pour exporter en Excel
         function exportToExcel(type) {
             console.log('exportToExcel appelée avec:', type);
+            // ENREGISTRER L'ACTIVITÉ
+            logActivity(
+                $pdo,
+                $user_id,
+                $user_name,
+                $user_role,
+                'export_excel',
+                "Exportation Excel de la section: {$type}",
+                $type,
+                null
+            );
             let tableId, filename;
 
             switch (type) {
