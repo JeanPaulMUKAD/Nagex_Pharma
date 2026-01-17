@@ -520,10 +520,10 @@ $stats = getDashboardStats($pdo);
 $produits = [];
 try {
     $stmt = $pdo->query("
-        SELECT p.id, p.nom, p.code_barre, c.nom as categorie
+        SELECT p.id, p.nom, p.code_barre, c.nom as categorie, p.statut
         FROM produits p
         LEFT JOIN categories c ON p.categorie_id = c.id
-        WHERE p.statut = 'actif'
+        WHERE p.statut IN ('actif', 'en_attente') 
         ORDER BY p.nom
     ");
     $produits = $stmt->fetchAll();
@@ -1537,8 +1537,8 @@ switch ($current_page) {
                                                     <td class="px-6 py-4">
                                                         <code
                                                             class="text-sm text-gray-900 bg-gray-50 px-2 py-1 rounded font-mono border border-gray-200">
-                                                                                                                                                                                                                                                                                                                                                                                            <?php echo htmlspecialchars($produit['code_barre']); ?>
-                                                                                                                                                                                                                                                                                                                                                                                        </code>
+                                                                                                                                                                                                                                                                                                                                                                                                            <?php echo htmlspecialchars($produit['code_barre']); ?>
+                                                                                                                                                                                                                                                                                                                                                                                                        </code>
                                                     </td>
                                                     <td class="px-6 py-4">
                                                         <div class="flex items-center">
@@ -1755,8 +1755,8 @@ switch ($current_page) {
                                                         </div>
                                                         <div>
                                                             <code class="text-sm font-medium text-gray-900 font-mono">
-                                                                                                                                                                                                                                                                                                <?php echo htmlspecialchars($lot['numero_lot']); ?>
-                                                                                                                                                                                                                                                                                            </code>
+                                                                                                                                                                                                                                                                                                            <?php echo htmlspecialchars($lot['numero_lot']); ?>
+                                                                                                                                                                                                                                                                                                        </code>
                                                             <div class="text-xs text-gray-500 mt-1">
                                                                 <i class="fas fa-calendar-plus mr-1"></i>
                                                                 <?php echo formatDate($lot['date_reception']); ?>
@@ -2921,8 +2921,8 @@ switch ($current_page) {
                                                 <td class="px-6 py-4">
                                                     <code
                                                         class="text-sm text-gray-900 bg-gray-50 px-2 py-1 rounded font-mono border border-gray-200">
-                                                                                                                                                                                                                                        <?php echo htmlspecialchars($mouvement['numero_lot']); ?>
-                                                                                                                                                                                                                                    </code>
+                                                                                                                                                                                                                                                    <?php echo htmlspecialchars($mouvement['numero_lot']); ?>
+                                                                                                                                                                                                                                                </code>
                                                 </td>
 
                                                 <!-- Type -->
@@ -3271,8 +3271,8 @@ switch ($current_page) {
                                                 <td class="px-6 py-4">
                                                     <code
                                                         class="text-sm text-gray-900 bg-gray-50 px-2 py-1 rounded font-mono border border-gray-200">
-                                                                                                                                                                                                                            <?php echo htmlspecialchars($produit['code_barre']); ?>
-                                                                                                                                                                                                                        </code>
+                                                                                                                                                                                                                                        <?php echo htmlspecialchars($produit['code_barre']); ?>
+                                                                                                                                                                                                                                    </code>
                                                 </td>
 
                                                 <!-- Stock système -->
