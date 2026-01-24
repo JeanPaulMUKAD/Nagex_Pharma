@@ -1964,167 +1964,22 @@ try {
                         </a>
                     </div>
 
-                    <!-- Pop-up Modals -->
-                    <!-- Modal Valider Produit -->
-                    <div id="modalValiderProduit"
-                        class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                        <div
-                            class="bg-gradient-to-br from-white to-emerald-50 rounded-2xl shadow-2xl w-full max-w-md transform transition-all duration-300 scale-95 opacity-0">
-                            <div class="p-6 border-b border-emerald-200">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center">
-                                        <div class="p-3 bg-gradient-to-br from-emerald-100 to-emerald-200 rounded-xl mr-3">
-                                            <i class="fas fa-check-circle text-emerald-600"></i>
-                                        </div>
-                                        <h3 class="text-xl font-bold text-gray-800">Valider le produit</h3>
-                                    </div>
-                                    <button onclick="fermerModal('modalValiderProduit')"
-                                        class="p-2 hover:bg-emerald-100 rounded-full transition-colors">
-                                        <i class="fas fa-times text-gray-500 hover:text-gray-700"></i>
-                                    </button>
+                    <!-- Message si pas de produits -->
+                    <?php if (count($produits) === 0): ?>
+                        <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-6 rounded-lg">
+                            <div class="flex items-center">
+                                <div class="flex-shrink-0">
+                                    <i class="fas fa-exclamation-triangle text-yellow-400 text-xl mr-3"></i>
                                 </div>
-                                <p class="text-gray-600 mt-2">Confirmez-vous la validation de ce produit ?</p>
-                            </div>
-                            <div class="p-6">
-                                <div class="space-y-4">
-                                    <div
-                                        class="flex items-center p-4 bg-gradient-to-r from-emerald-50 to-emerald-100 rounded-lg border border-emerald-200">
-                                        <div class="p-3 bg-white rounded-lg shadow-sm mr-4">
-                                            <i class="fas fa-capsules text-emerald-600"></i>
-                                        </div>
-                                        <div>
-                                            <h4 class="font-semibold text-gray-800" id="validerProduitNom"></h4>
-                                            <p class="text-sm text-gray-600" id="validerProduitDetails"></p>
-                                        </div>
+                                <div class="ml-3">
+                                    <h3 class="text-sm font-medium text-yellow-800">Aucun produit trouvé</h3>
+                                    <div class="mt-1 text-sm text-yellow-700">
+                                        <p>Aucun produit actif n'a été trouvé dans la base de données.</p>
                                     </div>
-                                    <div
-                                        class="p-4 bg-gradient-to-r from-yellow-50 to-yellow-100 rounded-lg border border-yellow-200">
-                                        <div class="flex items-center">
-                                            <i class="fas fa-info-circle text-yellow-600 mr-3"></i>
-                                            <p class="text-sm text-yellow-800">
-                                                Le produit sera marqué comme <span class="font-semibold">"actif"</span> et
-                                                disponible pour la vente.
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="flex justify-end space-x-3 mt-8 pt-6 border-t border-gray-200">
-                                    <button onclick="fermerModal('modalValiderProduit')"
-                                        class="px-5 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors font-medium">
-                                        Annuler
-                                    </button>
-                                    <button onclick="confirmerValidation()"
-                                        class="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white rounded-lg shadow hover:shadow-md transition-all duration-200 font-medium">
-                                        <i class="fas fa-check mr-2"></i>Confirmer la validation
-                                    </button>
                                 </div>
                             </div>
                         </div>
-                    </div>
-
-                    <!-- Modal Archiver Produit -->
-                    <div id="modalArchiverProduit"
-                        class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                        <div
-                            class="bg-gradient-to-br from-white to-red-50 rounded-2xl shadow-2xl w-full max-w-md transform transition-all duration-300 scale-95 opacity-0">
-                            <div class="p-6 border-b border-red-200">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center">
-                                        <div class="p-3 bg-gradient-to-br from-red-100 to-red-200 rounded-xl mr-3">
-                                            <i class="fas fa-archive text-red-600"></i>
-                                        </div>
-                                        <h3 class="text-xl font-bold text-gray-800">Archiver le produit</h3>
-                                    </div>
-                                    <button onclick="fermerModal('modalArchiverProduit')"
-                                        class="p-2 hover:bg-red-100 rounded-full transition-colors">
-                                        <i class="fas fa-times text-gray-500 hover:text-gray-700"></i>
-                                    </button>
-                                </div>
-                                <p class="text-gray-600 mt-2">Cette action est irréversible</p>
-                            </div>
-                            <div class="p-6">
-                                <div class="space-y-4">
-                                    <div
-                                        class="flex items-center p-4 bg-gradient-to-r from-red-50 to-red-100 rounded-lg border border-red-200">
-                                        <div class="p-3 bg-white rounded-lg shadow-sm mr-4">
-                                            <i class="fas fa-exclamation-triangle text-red-600"></i>
-                                        </div>
-                                        <div>
-                                            <h4 class="font-semibold text-gray-800" id="archiverProduitNom"></h4>
-                                            <p class="text-sm text-gray-600" id="archiverProduitDetails"></p>
-                                        </div>
-                                    </div>
-                                    <div
-                                        class="p-4 bg-gradient-to-r from-red-50 to-red-100 rounded-lg border border-red-200">
-                                        <div class="flex items-start">
-                                            <i class="fas fa-exclamation-circle text-red-600 mr-3 mt-0.5"></i>
-                                            <div>
-                                                <p class="text-sm text-red-800 font-semibold mb-1">Attention !</p>
-                                                <ul class="text-sm text-red-700 space-y-1">
-                                                    <li class="flex items-center"><i class="fas fa-times text-xs mr-2"></i>
-                                                        Le produit ne sera plus disponible pour la vente</li>
-                                                    <li class="flex items-center"><i class="fas fa-times text-xs mr-2"></i>
-                                                        Il disparaîtra des listes de recherche</li>
-                                                    <li class="flex items-center"><i class="fas fa-times text-xs mr-2"></i>
-                                                        Les statistiques ne seront plus mises à jour</li>
-                                                </ul>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div
-                                        class="p-4 bg-gradient-to-r from-yellow-50 to-yellow-100 rounded-lg border border-yellow-200">
-                                        <label class="flex items-start space-x-3 cursor-pointer">
-                                            <input type="checkbox" id="confirmationArchivage" class="mt-1">
-                                            <span class="text-sm text-gray-700">Je confirme vouloir archiver ce produit de
-                                                manière permanente</span>
-                                        </label>
-                                    </div>
-                                </div>
-                                <div class="flex justify-end space-x-3 mt-8 pt-6 border-t border-gray-200">
-                                    <button onclick="fermerModal('modalArchiverProduit')"
-                                        class="px-5 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors font-medium">
-                                        Annuler
-                                    </button>
-                                    <button onclick="confirmerArchivage()" id="btnConfirmerArchivage" disabled
-                                        class="px-5 py-2.5 bg-gradient-to-r from-gray-300 to-gray-400 text-white rounded-lg font-medium cursor-not-allowed">
-                                        <i class="fas fa-archive mr-2"></i>Archiver
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Modal Voir Détails Produit -->
-                    <div id="modalDetailsProduit"
-                        class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                        <div
-                            class="bg-gradient-to-br from-white to-blue-50 rounded-2xl shadow-2xl w-full max-w-2xl transform transition-all duration-300 scale-95 opacity-0">
-                            <div class="p-6 border-b border-blue-200">
-                                <div class="flex items-center justify-between">
-                                    <div class="flex items-center">
-                                        <div class="p-3 bg-gradient-to-br from-blue-100 to-blue-200 rounded-xl mr-3">
-                                            <i class="fas fa-eye text-blue-600"></i>
-                                        </div>
-                                        <h3 class="text-xl font-bold text-gray-800">Détails du produit</h3>
-                                    </div>
-                                    <button onclick="fermerModal('modalDetailsProduit')"
-                                        class="p-2 hover:bg-blue-100 rounded-full transition-colors">
-                                        <i class="fas fa-times text-gray-500 hover:text-gray-700"></i>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="p-6" id="detailsProduitContent">
-                                <!-- Les détails seront chargés ici dynamiquement -->
-                                <div class="text-center py-12">
-                                    <div
-                                        class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-gradient-to-r from-blue-100 to-blue-200 mb-6">
-                                        <i class="fas fa-spinner fa-spin text-blue-600 text-2xl"></i>
-                                    </div>
-                                    <p class="text-gray-600">Chargement des détails...</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                    <?php endif; ?>
 
                     <div
                         class="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg overflow-hidden border border-gray-200">
@@ -2133,8 +1988,14 @@ try {
                             <div class="flex flex-col md:flex-row justify-between items-center gap-4">
                                 <div class="flex items-center">
                                     <i class="fas fa-filter text-gray-400 mr-2"></i>
-                                    <span class="text-sm text-gray-600"><?php echo count($produits); ?> produit(s)
-                                        trouvé(s)</span>
+                                    <span class="text-sm text-gray-600">
+                                        <?php echo count($produits); ?> produit(s) trouvé(s)
+                                        <?php if ($stats['produits_attente'] > 0): ?>
+                                            <span class="ml-2 text-orange-600 font-semibold">
+                                                (<?php echo $stats['produits_attente']; ?> en attente)
+                                            </span>
+                                        <?php endif; ?>
+                                    </span>
                                 </div>
                                 <div class="flex items-center space-x-2">
                                     <div class="relative">
@@ -2152,261 +2013,271 @@ try {
                         </div>
 
                         <!-- Tableau -->
-                        <div class="overflow-x-auto">
-                            <table class="min-w-full divide-y divide-gray-200">
-                                <thead>
-                                    <tr class="bg-gradient-to-r from-gray-50 to-gray-100">
-                                        <th
-                                            class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                                            <div class="flex items-center">
-                                                <i class="fas fa-hashtag mr-2 text-gray-400"></i> ID
-                                            </div>
-                                        </th>
-                                        <th
-                                            class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                                            <div class="flex items-center">
-                                                <i class="fas fa-tag mr-2 text-gray-400"></i> Nom
-                                            </div>
-                                        </th>
-                                        <th
-                                            class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                                            <div class="flex items-center">
-                                                <i class="fas fa-folder mr-2 text-gray-400"></i> Catégorie
-                                            </div>
-                                        </th>
-                                        <th
-                                            class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                                            <div class="flex items-center">
-                                                <i class="fas fa-truck mr-2 text-gray-400"></i> Fournisseur
-                                            </div>
-                                        </th>
-                                        <th
-                                            class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                                            <div class="flex items-center">
-                                                <i class="fas fa-money-bill-wave mr-2 text-gray-400"></i> Prix FC
-                                            </div>
-                                        </th>
-                                        <th
-                                            class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                                            <div class="flex items-center">
-                                                <i class="fas fa-dollar-sign mr-2 text-gray-400"></i> Prix USD
-                                            </div>
-                                        </th>
-                                        <th
-                                            class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                                            <div class="flex items-center">
-                                                <i class="fas fa-boxes mr-2 text-gray-400"></i> Quantité
-                                            </div>
-                                        </th>
-                                        <th
-                                            class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                                            <div class="flex items-center">
-                                                <i class="fas fa-circle mr-2 text-gray-400"></i> Statut
-                                            </div>
-                                        </th>
-                                        <th
-                                            class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                                            <div class="flex items-center">
-                                                <i class="fas fa-barcode mr-2 text-gray-400"></i> Code barre
-                                            </div>
-                                        </th>
-                                        <th
-                                            class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                                            <div class="flex items-center">
-                                                <i class="fas fa-cogs mr-2 text-gray-400"></i> Actions
-                                            </div>
-                                        </th>
-                                    </tr>
-                                </thead>
-                                <tbody class="bg-white divide-y divide-gray-200">
-                                    <?php foreach ($produits as $produit): ?>
-                                        <tr
-                                            class="hover:bg-gradient-to-r hover:from-blue-50 hover:to-transparent transition-all duration-200 group">
-                                            <td class="px-6 py-4">
-                                                <div
-                                                    class="text-sm font-medium text-gray-900 bg-gray-50 px-3 py-1 rounded-lg inline-block">
-                                                    #<?php echo str_pad((string) $produit['id'], 4, '0', STR_PAD_LEFT); ?>
-                                                </div>
-                                            </td>
-                                            <td class="px-6 py-4">
+                        <?php if (count($produits) > 0): ?>
+                            <div class="overflow-x-auto">
+                                <table class="min-w-full divide-y divide-gray-200">
+                                    <thead>
+                                        <tr class="bg-gradient-to-r from-gray-50 to-gray-100">
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
                                                 <div class="flex items-center">
-                                                    <div class="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg mr-3">
-                                                        <i class="fas fa-pills text-blue-600 text-sm"></i>
-                                                    </div>
-                                                    <div>
-                                                        <div
-                                                            class="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
-                                                            <?php echo htmlspecialchars($produit['nom']); ?>
-                                                        </div>
-                                                        <?php if ($produit['necessite_ordonnance']): ?>
-                                                            <span
-                                                                class="inline-flex items-center mt-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gradient-to-r from-purple-100 to-purple-50 text-purple-800 border border-purple-200">
-                                                                <i class="fas fa-file-prescription mr-1 text-xs"></i> Ordonnance
-                                                            </span>
-                                                        <?php endif; ?>
-                                                    </div>
+                                                    <i class="fas fa-hashtag mr-2 text-gray-400"></i> ID
                                                 </div>
-                                            </td>
-                                            <td class="px-6 py-4">
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
                                                 <div class="flex items-center">
-                                                    <span
-                                                        class="px-3 py-1 rounded-full text-xs font-medium bg-gradient-to-r from-emerald-50 to-emerald-100 text-emerald-800 border border-emerald-200">
-                                                        <?php echo htmlspecialchars($produit['categorie_nom']); ?>
-                                                    </span>
+                                                    <i class="fas fa-tag mr-2 text-gray-400"></i> Nom
                                                 </div>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <div class="text-sm text-gray-900">
-                                                    <?php echo htmlspecialchars($produit['fournisseur_nom']); ?>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-folder mr-2 text-gray-400"></i> Catégorie
                                                 </div>
-                                            </td>
-                                            <!-- Dans la boucle foreach qui affiche les produits, ajoutez ces cellules -->
-                                            <td class="px-6 py-4">
-                                                <?php if (!empty($produit['prix_fc'])): ?>
-                                                    <div class="flex flex-col">
-                                                        <div class="text-lg font-bold text-green-700">
-                                                            <?php echo number_format(floatval($produit['prix_fc']), 2, ',', ' '); ?>
-                                                            FC
-                                                        </div>
-                                                        <div class="text-xs text-gray-500 mt-1">
-                                                            <?php if (!empty($produit['date_debut'])): ?>
-                                                                Depuis <?php echo date('d/m/Y', strtotime($produit['date_debut'])); ?>
-                                                            <?php endif; ?>
-                                                        </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-truck mr-2 text-gray-400"></i> Fournisseur
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-money-bill-wave mr-2 text-gray-400"></i> Prix FC
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-dollar-sign mr-2 text-gray-400"></i> Prix USD
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-boxes mr-2 text-gray-400"></i> Stock
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-circle mr-2 text-gray-400"></i> Statut
+                                                </div>
+                                            </th>
+                                            <th
+                                                class="px-6 py-4 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                                                <div class="flex items-center">
+                                                    <i class="fas fa-cogs mr-2 text-gray-400"></i> Actions
+                                                </div>
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="bg-white divide-y divide-gray-200">
+                                        <?php foreach ($produits as $produit): ?>
+                                            <?php
+                                            // Débug: Afficher les données brutes (à commenter en production)
+                                            // echo "<!-- Produit ID: " . ($produit['id'] ?? 'NULL') . " -->";
+                                            ?>
+                                            <tr
+                                                class="hover:bg-gradient-to-r hover:from-blue-50 hover:to-transparent transition-all duration-200 group">
+                                                <td class="px-6 py-4">
+                                                    <div
+                                                        class="text-sm font-medium text-gray-900 bg-gray-50 px-3 py-1 rounded-lg inline-block">
+                                                        #<?php echo str_pad((string) ($produit['id'] ?? 0), 4, '0', STR_PAD_LEFT); ?>
                                                     </div>
-                                                <?php else: ?>
-                                                    <div class="text-center">
-                                                        <span
-                                                            class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gradient-to-r from-yellow-100 to-yellow-50 text-yellow-800 border border-yellow-200">
-                                                            <i class="fas fa-exclamation-circle mr-1"></i> Non défini
-                                                        </span>
-                                                    </div>
-                                                <?php endif; ?>
-                                            </td>
-
-                                            <td class="px-6 py-4">
-                                                <?php if (!empty($produit['prix_usd'])): ?>
-                                                    <div class="flex flex-col">
-                                                        <div class="text-lg font-bold text-blue-700">
-                                                            $<?php echo number_format(floatval($produit['prix_usd']), 2, ',', ' '); ?>
-                                                        </div>
-                                                        <div class="text-xs text-gray-500 mt-1">
-                                                            <?php if (!empty($produit['taux_conversion'])): ?>
-                                                                Taux:
-                                                                <?php echo number_format(floatval($produit['taux_conversion']), 4, ',', ' '); ?>
-                                                            <?php endif; ?>
-                                                        </div>
-                                                    </div>
-                                                <?php else: ?>
-                                                    <div class="text-center">
-                                                        <span
-                                                            class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gradient-to-r from-yellow-100 to-yellow-50 text-yellow-800 border border-yellow-200">
-                                                            <i class="fas fa-exclamation-circle mr-1"></i> Non défini
-                                                        </span>
-                                                    </div>
-                                                <?php endif; ?>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <div class="flex flex-col items-start">
+                                                </td>
+                                                <td class="px-6 py-4">
                                                     <div class="flex items-center">
-                                                        <div class="relative">
-                                                            <span class="text-2xl font-bold <?php
-                                                            echo $produit['quantite_totale'] <= 10 ? 'text-red-600' :
-                                                                ($produit['quantite_totale'] <= 20 ? 'text-yellow-600' : 'text-emerald-700');
-                                                            ?>">
-                                                                <?php echo intval($produit['quantite_totale']); ?>
-                                                            </span>
-                                                            <?php if ($produit['quantite_totale'] > 0): ?>
-                                                                <div
-                                                                    class="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full">
-                                                                </div>
+                                                        <div class="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg mr-3">
+                                                            <i class="fas fa-pills text-blue-600 text-sm"></i>
+                                                        </div>
+                                                        <div>
+                                                            <div
+                                                                class="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
+                                                                <?php echo htmlspecialchars($produit['nom'] ?? 'Nom inconnu'); ?>
+                                                            </div>
+                                                            <?php if (($produit['necessite_ordonnance'] ?? 0) == 1): ?>
+                                                                <span
+                                                                    class="inline-flex items-center mt-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gradient-to-r from-purple-100 to-purple-50 text-purple-800 border border-purple-200">
+                                                                    <i class="fas fa-file-prescription mr-1 text-xs"></i> Ordonnance
+                                                                </span>
                                                             <?php endif; ?>
                                                         </div>
-                                                        <span class="text-xs text-gray-500 ml-2">unités</span>
                                                     </div>
-                                                    <?php if ($produit['nombre_lots'] > 0): ?>
-                                                        <div class="text-xs text-gray-500 mt-1">
-                                                            <i class="fas fa-layer-group mr-1 text-xs"></i>
-                                                            <?php echo intval($produit['nombre_lots']); ?> lot(s)
+                                                </td>
+                                                <td class="px-6 py-4">
+                                                    <div class="flex items-center">
+                                                        <span
+                                                            class="px-3 py-1 rounded-full text-xs font-medium bg-gradient-to-r from-emerald-50 to-emerald-100 text-emerald-800 border border-emerald-200">
+                                                            <?php echo htmlspecialchars($produit['categorie_nom'] ?? 'Non catégorisé'); ?>
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                                <td class="px-6 py-4">
+                                                    <div class="text-sm text-gray-900">
+                                                        <?php echo htmlspecialchars($produit['fournisseur_nom'] ?? 'Non spécifié'); ?>
+                                                    </div>
+                                                </td>
+                                                <td class="px-6 py-4">
+                                                    <?php if (!empty($produit['prix_fc'])): ?>
+                                                        <div class="flex flex-col">
+                                                            <div class="text-lg font-bold text-green-700">
+                                                                <?php echo number_format(floatval($produit['prix_fc']), 2, ',', ' '); ?>
+                                                                FC
+                                                            </div>
+                                                            <div class="text-xs text-gray-500 mt-1">
+                                                                <?php if (!empty($produit['date_debut'])): ?>
+                                                                    Depuis <?php echo date('d/m/Y', strtotime($produit['date_debut'])); ?>
+                                                                <?php endif; ?>
+                                                            </div>
                                                         </div>
                                                     <?php else: ?>
-                                                        <div class="text-xs text-red-500 mt-1">
-                                                            <i class="fas fa-exclamation-circle mr-1 text-xs"></i>
-                                                            Pas de stock
+                                                        <div class="text-center">
+                                                            <span
+                                                                class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gradient-to-r from-yellow-100 to-yellow-50 text-yellow-800 border border-yellow-200">
+                                                                <i class="fas fa-exclamation-circle mr-1"></i> Non défini
+                                                            </span>
                                                         </div>
                                                     <?php endif; ?>
-                                                </div>
-                                            </td>
-
-                                            <td class="px-6 py-4">
-                                                <?php if ($produit['statut'] == 'actif'): ?>
-                                                    <span
-                                                        class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-green-100 to-green-50 text-green-800 border border-green-200">
-                                                        <i class="fas fa-check-circle mr-1 text-xs"></i> Actif
-                                                    </span>
-                                                <?php elseif ($produit['statut'] == 'en_attente'): ?>
-                                                    <span
-                                                        class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-yellow-100 to-yellow-50 text-yellow-800 border border-yellow-200">
-                                                        <i class="fas fa-clock mr-1 text-xs"></i> En attente
-                                                    </span>
-                                                <?php else: ?>
-                                                    <span
-                                                        class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-red-100 to-red-50 text-red-800 border border-red-200">
-                                                        <i class="fas fa-times-circle mr-1 text-xs"></i> Inactif
-                                                    </span>
-                                                <?php endif; ?>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <div class="flex items-center">
-                                                    <i class="fas fa-barcode text-gray-400 mr-2 text-sm"></i>
-                                                    <code class="text-sm text-gray-900 bg-gray-50 px-2 py-1 rounded font-mono">
-                                                                                                                                                                                                                                                                                                                <?php echo htmlspecialchars($produit['code_barre']); ?>
-                                                                                                                                                                                                                                                                                                            </code>
-                                                </div>
-                                            </td>
-                                            <td class="px-6 py-4">
-                                                <div class="flex items-center space-x-2">
-                                                    <a href="?page=modifier_produit&id=<?php echo $produit['id']; ?>"
-                                                        class="p-2 bg-gradient-to-br from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-600 rounded-lg border border-blue-200 hover:shadow-sm transition-all duration-200 group/edit"
-                                                        title="Modifier">
-                                                        <i
-                                                            class="fas fa-edit text-sm group-hover/edit:scale-110 transition-transform"></i>
-                                                    </a>
-
-                                                    <button
-                                                        onclick="ouvrirModalArchiver(<?php echo $produit['id']; ?>, '<?php echo addslashes(htmlspecialchars($produit['nom'])); ?>', '<?php echo addslashes(htmlspecialchars($produit['categorie_nom'])); ?>')"
-                                                        class="p-2 bg-gradient-to-br from-red-50 to-red-100 hover:from-red-100 hover:to-red-200 text-red-600 rounded-lg border border-red-200 hover:shadow-sm transition-all duration-200 group/archive"
-                                                        title="Archiver">
-                                                        <i
-                                                            class="fas fa-archive text-sm group-hover/archive:scale-110 transition-transform"></i>
-                                                    </button>
-
-                                                    <?php if ($produit['statut'] == 'en_attente'): ?>
-                                                        <button
-                                                            onclick="ouvrirModalValider(<?php echo $produit['id']; ?>, '<?php echo addslashes(htmlspecialchars($produit['nom'])); ?>', '<?php echo addslashes(htmlspecialchars($produit['categorie_nom'])); ?>')"
-                                                            class="p-2 bg-gradient-to-br from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-600 rounded-lg border border-green-200 hover:shadow-sm transition-all duration-200 group/validate"
-                                                            title="Valider">
-                                                            <i
-                                                                class="fas fa-check text-sm group-hover/validate:scale-110 transition-transform"></i>
-                                                        </button>
+                                                </td>
+                                                <td class="px-6 py-4">
+                                                    <?php if (!empty($produit['prix_usd'])): ?>
+                                                        <div class="flex flex-col">
+                                                            <div class="text-lg font-bold text-blue-700">
+                                                                $<?php echo number_format(floatval($produit['prix_usd']), 2, ',', ' '); ?>
+                                                            </div>
+                                                            <div class="text-xs text-gray-500 mt-1">
+                                                                <?php if (!empty($produit['taux_conversion'])): ?>
+                                                                    Taux:
+                                                                    <?php echo number_format(floatval($produit['taux_conversion']), 4, ',', ' '); ?>
+                                                                <?php endif; ?>
+                                                            </div>
+                                                        </div>
+                                                    <?php else: ?>
+                                                        <div class="text-center">
+                                                            <span
+                                                                class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gradient-to-r from-yellow-100 to-yellow-50 text-yellow-800 border border-yellow-200">
+                                                                <i class="fas fa-exclamation-circle mr-1"></i> Non défini
+                                                            </span>
+                                                        </div>
                                                     <?php endif; ?>
+                                                </td>
+                                                <td class="px-6 py-4">
+                                                    <div class="flex flex-col items-start">
+                                                        <div class="flex items-center">
+                                                            <div class="relative">
+                                                                <span class="text-2xl font-bold <?php
+                                                                $quantite = intval($produit['quantite_totale'] ?? 0);
+                                                                echo $quantite <= 10 ? 'text-red-600' :
+                                                                    ($quantite <= 20 ? 'text-yellow-600' : 'text-emerald-700');
+                                                                ?>">
+                                                                    <?php echo $quantite; ?>
+                                                                </span>
+                                                                <?php if ($quantite > 0): ?>
+                                                                    <div
+                                                                        class="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full">
+                                                                    </div>
+                                                                <?php endif; ?>
+                                                            </div>
+                                                            <span class="text-xs text-gray-500 ml-2">unités</span>
+                                                        </div>
+                                                        <?php if (($produit['nombre_lots'] ?? 0) > 0): ?>
+                                                            <div class="text-xs text-gray-500 mt-1">
+                                                                <i class="fas fa-layer-group mr-1 text-xs"></i>
+                                                                <?php echo intval($produit['nombre_lots'] ?? 0); ?> lot(s)
+                                                            </div>
+                                                        <?php else: ?>
+                                                            <div class="text-xs text-red-500 mt-1">
+                                                                <i class="fas fa-exclamation-circle mr-1 text-xs"></i>
+                                                                Pas de stock
+                                                            </div>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                </td>
+                                                <td class="px-6 py-4">
+                                                    <?php $statut = $produit['statut'] ?? 'inactif'; ?>
+                                                    <?php if ($statut == 'actif'): ?>
+                                                        <span
+                                                            class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-green-100 to-green-50 text-green-800 border border-green-200">
+                                                            <i class="fas fa-check-circle mr-1 text-xs"></i> Actif
+                                                        </span>
+                                                    <?php elseif ($statut == 'en_attente'): ?>
+                                                        <span
+                                                            class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-yellow-100 to-yellow-50 text-yellow-800 border border-yellow-200">
+                                                            <i class="fas fa-clock mr-1 text-xs"></i> En attente
+                                                        </span>
+                                                    <?php else: ?>
+                                                        <span
+                                                            class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-gradient-to-r from-red-100 to-red-50 text-red-800 border border-red-200">
+                                                            <i class="fas fa-times-circle mr-1 text-xs"></i> Inactif
+                                                        </span>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <td class="px-6 py-4">
+                                                    <div class="flex items-center space-x-2">
+                                                        <!-- Bouton Modifier -->
+                                                        <?php if (isset($produit['id'])): ?>
+                                                            <a href="?page=modifier_produit&id=<?php echo $produit['id']; ?>"
+                                                                class="p-2 bg-gradient-to-br from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-600 rounded-lg border border-blue-200 hover:shadow-sm transition-all duration-200 group/edit"
+                                                                title="Modifier">
+                                                                <i
+                                                                    class="fas fa-edit text-sm group-hover/edit:scale-110 transition-transform"></i>
+                                                            </a>
 
-                                                    <button onclick="voirDetailsProduit(<?php echo $produit['id']; ?>)"
-                                                        class="p-2 bg-gradient-to-br from-gray-50 to-gray-100 hover:from-gray-100 hover:to-gray-200 text-gray-600 rounded-lg border border-gray-200 hover:shadow-sm transition-all duration-200 group/view"
-                                                        title="Voir détails">
-                                                        <i
-                                                            class="fas fa-eye text-sm group-hover/view:scale-110 transition-transform"></i>
-                                                    </button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
+                                                            <!-- Bouton Archiver -->
+                                                            <button
+                                                                onclick="ouvrirModalArchiver(<?php echo $produit['id']; ?>, '<?php echo addslashes(htmlspecialchars($produit['nom'] ?? '')); ?>', '<?php echo addslashes(htmlspecialchars($produit['categorie_nom'] ?? '')); ?>')"
+                                                                class="p-2 bg-gradient-to-br from-red-50 to-red-100 hover:from-red-100 hover:to-red-200 text-red-600 rounded-lg border border-red-200 hover:shadow-sm transition-all duration-200 group/archive"
+                                                                title="Archiver">
+                                                                <i
+                                                                    class="fas fa-archive text-sm group-hover/archive:scale-110 transition-transform"></i>
+                                                            </button>
 
-                        <!-- Produits archives -->
+                                                            <!-- Bouton Valider (seulement pour les produits en attente) -->
+                                                            <?php if ($statut == 'en_attente'): ?>
+                                                                <button
+                                                                    onclick="ouvrirModalValider(<?php echo $produit['id']; ?>, '<?php echo addslashes(htmlspecialchars($produit['nom'] ?? '')); ?>', '<?php echo addslashes(htmlspecialchars($produit['categorie_nom'] ?? '')); ?>')"
+                                                                    class="p-2 bg-gradient-to-br from-green-50 to-green-100 hover:from-green-100 hover:to-green-200 text-green-600 rounded-lg border border-green-200 hover:shadow-sm transition-all duration-200 group/validate"
+                                                                    title="Valider">
+                                                                    <i
+                                                                        class="fas fa-check text-sm group-hover/validate:scale-110 transition-transform"></i>
+                                                                </button>
+                                                            <?php endif; ?>
 
+                                                            <!-- Bouton Voir Détails -->
+                                                            <button onclick="voirDetailsProduit(<?php echo $produit['id']; ?>)"
+                                                                class="p-2 bg-gradient-to-br from-gray-50 to-gray-100 hover:from-gray-100 hover:to-gray-200 text-gray-600 rounded-lg border border-gray-200 hover:shadow-sm transition-all duration-200 group/view"
+                                                                title="Voir détails">
+                                                                <i
+                                                                    class="fas fa-eye text-sm group-hover/view:scale-110 transition-transform"></i>
+                                                            </button>
+                                                        <?php else: ?>
+                                                            <span class="text-xs text-gray-400">ID manquant</span>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        <?php else: ?>
+                            <!-- Message quand aucun produit n'est trouvé -->
+                            <div class="text-center py-12">
+                                <div
+                                    class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-gradient-to-r from-gray-100 to-gray-200 mb-4">
+                                    <i class="fas fa-box-open text-gray-400 text-2xl"></i>
+                                </div>
+                                <h3 class="text-lg font-medium text-gray-700 mb-2">Aucun produit trouvé</h3>
+                                <p class="text-gray-500 mb-6">Commencez par ajouter votre premier produit.</p>
+                                <a href="?page=ajouter_produit"
+                                    class="inline-flex items-center px-4 py-2 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white rounded-lg font-medium shadow hover:shadow-md transition-all duration-200">
+                                    <i class="fas fa-plus mr-2"></i>Ajouter un produit
+                                </a>
+                            </div>
+                        <?php endif; ?>
 
                         <!-- Pagination -->
                         <?php if (isset($pagination) && $pagination['total_pages'] > 1): ?>
@@ -2441,6 +2312,167 @@ try {
                                 </div>
                             </div>
                         <?php endif; ?>
+                    </div>
+                </div>
+
+                <!-- Ajoutez ces modals AVANT la fermeture du script JavaScript -->
+                <!-- Modal Valider Produit -->
+                <div id="modalValiderProduit"
+                    class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div
+                        class="bg-gradient-to-br from-white to-emerald-50 rounded-2xl shadow-2xl w-full max-w-md transform transition-all duration-300 scale-95 opacity-0">
+                        <div class="p-6 border-b border-emerald-200">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center">
+                                    <div class="p-3 bg-gradient-to-br from-emerald-100 to-emerald-200 rounded-xl mr-3">
+                                        <i class="fas fa-check-circle text-emerald-600"></i>
+                                    </div>
+                                    <h3 class="text-xl font-bold text-gray-800">Valider le produit</h3>
+                                </div>
+                                <button onclick="fermerModal('modalValiderProduit')"
+                                    class="p-2 hover:bg-emerald-100 rounded-full transition-colors">
+                                    <i class="fas fa-times text-gray-500 hover:text-gray-700"></i>
+                                </button>
+                            </div>
+                            <p class="text-gray-600 mt-2">Confirmez-vous la validation de ce produit ?</p>
+                        </div>
+                        <div class="p-6">
+                            <div class="space-y-4">
+                                <div
+                                    class="flex items-center p-4 bg-gradient-to-r from-emerald-50 to-emerald-100 rounded-lg border border-emerald-200">
+                                    <div class="p-3 bg-white rounded-lg shadow-sm mr-4">
+                                        <i class="fas fa-capsules text-emerald-600"></i>
+                                    </div>
+                                    <div>
+                                        <h4 class="font-semibold text-gray-800" id="validerProduitNom"></h4>
+                                        <p class="text-sm text-gray-600" id="validerProduitDetails"></p>
+                                    </div>
+                                </div>
+                                <div
+                                    class="p-4 bg-gradient-to-r from-yellow-50 to-yellow-100 rounded-lg border border-yellow-200">
+                                    <div class="flex items-center">
+                                        <i class="fas fa-info-circle text-yellow-600 mr-3"></i>
+                                        <p class="text-sm text-yellow-800">
+                                            Le produit sera marqué comme <span class="font-semibold">"actif"</span> et
+                                            disponible pour la vente.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="flex justify-end space-x-3 mt-8 pt-6 border-t border-gray-200">
+                                <button onclick="fermerModal('modalValiderProduit')"
+                                    class="px-5 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors font-medium">
+                                    Annuler
+                                </button>
+                                <button onclick="confirmerValidation()"
+                                    class="px-5 py-2.5 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white rounded-lg shadow hover:shadow-md transition-all duration-200 font-medium">
+                                    <i class="fas fa-check mr-2"></i>Confirmer la validation
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Modal Archiver Produit -->
+                <div id="modalArchiverProduit"
+                    class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div
+                        class="bg-gradient-to-br from-white to-red-50 rounded-2xl shadow-2xl w-full max-w-md transform transition-all duration-300 scale-95 opacity-0">
+                        <div class="p-6 border-b border-red-200">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center">
+                                    <div class="p-3 bg-gradient-to-br from-red-100 to-red-200 rounded-xl mr-3">
+                                        <i class="fas fa-archive text-red-600"></i>
+                                    </div>
+                                    <h3 class="text-xl font-bold text-gray-800">Archiver le produit</h3>
+                                </div>
+                                <button onclick="fermerModal('modalArchiverProduit')"
+                                    class="p-2 hover:bg-red-100 rounded-full transition-colors">
+                                    <i class="fas fa-times text-gray-500 hover:text-gray-700"></i>
+                                </button>
+                            </div>
+                            <p class="text-gray-600 mt-2">Cette action est irréversible</p>
+                        </div>
+                        <div class="p-6">
+                            <div class="space-y-4">
+                                <div
+                                    class="flex items-center p-4 bg-gradient-to-r from-red-50 to-red-100 rounded-lg border border-red-200">
+                                    <div class="p-3 bg-white rounded-lg shadow-sm mr-4">
+                                        <i class="fas fa-exclamation-triangle text-red-600"></i>
+                                    </div>
+                                    <div>
+                                        <h4 class="font-semibold text-gray-800" id="archiverProduitNom"></h4>
+                                        <p class="text-sm text-gray-600" id="archiverProduitDetails"></p>
+                                    </div>
+                                </div>
+                                <div class="p-4 bg-gradient-to-r from-red-50 to-red-100 rounded-lg border border-red-200">
+                                    <div class="flex items-start">
+                                        <i class="fas fa-exclamation-circle text-red-600 mr-3 mt-0.5"></i>
+                                        <div>
+                                            <p class="text-sm text-red-800 font-semibold mb-1">Attention !</p>
+                                            <ul class="text-sm text-red-700 space-y-1">
+                                                <li class="flex items-center"><i class="fas fa-times text-xs mr-2"></i>
+                                                    Le produit ne sera plus disponible pour la vente</li>
+                                                <li class="flex items-center"><i class="fas fa-times text-xs mr-2"></i>
+                                                    Il disparaîtra des listes de recherche</li>
+                                                <li class="flex items-center"><i class="fas fa-times text-xs mr-2"></i>
+                                                    Les statistiques ne seront plus mises à jour</li>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div
+                                    class="p-4 bg-gradient-to-r from-yellow-50 to-yellow-100 rounded-lg border border-yellow-200">
+                                    <label class="flex items-start space-x-3 cursor-pointer">
+                                        <input type="checkbox" id="confirmationArchivage" class="mt-1">
+                                        <span class="text-sm text-gray-700">Je confirme vouloir archiver ce produit de
+                                            manière permanente</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="flex justify-end space-x-3 mt-8 pt-6 border-t border-gray-200">
+                                <button onclick="fermerModal('modalArchiverProduit')"
+                                    class="px-5 py-2.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors font-medium">
+                                    Annuler
+                                </button>
+                                <button onclick="confirmerArchivage()" id="btnConfirmerArchivage" disabled
+                                    class="px-5 py-2.5 bg-gradient-to-r from-gray-300 to-gray-400 text-white rounded-lg font-medium cursor-not-allowed">
+                                    <i class="fas fa-archive mr-2"></i>Archiver
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Modal Voir Détails Produit -->
+                <div id="modalDetailsProduit"
+                    class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div
+                        class="bg-gradient-to-br from-white to-blue-50 rounded-2xl shadow-2xl w-full max-w-2xl transform transition-all duration-300 scale-95 opacity-0">
+                        <div class="p-6 border-b border-blue-200">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center">
+                                    <div class="p-3 bg-gradient-to-br from-blue-100 to-blue-200 rounded-xl mr-3">
+                                        <i class="fas fa-eye text-blue-600"></i>
+                                    </div>
+                                    <h3 class="text-xl font-bold text-gray-800">Détails du produit</h3>
+                                </div>
+                                <button onclick="fermerModal('modalDetailsProduit')"
+                                    class="p-2 hover:bg-blue-100 rounded-full transition-colors">
+                                    <i class="fas fa-times text-gray-500 hover:text-gray-700"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="p-6" id="detailsProduitContent">
+                            <!-- Les détails seront chargés ici dynamiquement -->
+                            <div class="text-center py-12">
+                                <div
+                                    class="inline-flex items-center justify-center w-20 h-20 rounded-full bg-gradient-to-r from-blue-100 to-blue-200 mb-6">
+                                    <i class="fas fa-spinner fa-spin text-blue-600 text-2xl"></i>
+                                </div>
+                                <p class="text-gray-600">Chargement des détails...</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -7223,6 +7255,7 @@ try {
             </div>
         </div>
     </div>
+
 
     <script>
         // Variables globales

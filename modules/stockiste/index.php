@@ -574,7 +574,7 @@ switch ($current_page) {
                         WHEN 'moyen' THEN 2
                         WHEN 'faible' THEN 3
                     END,
-                    a.created_at DESC
+                    a.created_at ASC
             ");
             $stmt->execute();
             $alertes = $stmt->fetchAll();
@@ -596,7 +596,7 @@ switch ($current_page) {
                 LEFT JOIN lots l ON m.lot_id = l.id
                 LEFT JOIN utilisateurs u ON m.created_by = u.id
                 WHERE DATE(m.created_at) BETWEEN :date_debut AND :date_fin
-                ORDER BY m.created_at DESC
+                ORDER BY m.created_at ASC
             ");
             $stmt->execute([
                 ':date_debut' => $date_debut,
@@ -1537,8 +1537,8 @@ switch ($current_page) {
                                                     <td class="px-6 py-4">
                                                         <code
                                                             class="text-sm text-gray-900 bg-gray-50 px-2 py-1 rounded font-mono border border-gray-200">
-                                                                                                                                                                                                                                                                                                                                                                                                            <?php echo htmlspecialchars($produit['code_barre']); ?>
-                                                                                                                                                                                                                                                                                                                                                                                                        </code>
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                            <?php echo htmlspecialchars($produit['code_barre']); ?>
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                        </code>
                                                     </td>
                                                     <td class="px-6 py-4">
                                                         <div class="flex items-center">
@@ -1614,6 +1614,7 @@ switch ($current_page) {
                 </div>
 
             <?php elseif ($current_page == 'lots'): ?>
+
                 <!-- ========== LISTE DES LOTS ========== -->
                 <div class="mb-8">
                     <!-- En-tête avec statistiques -->
@@ -1659,7 +1660,14 @@ switch ($current_page) {
                                         <div class="flex items-center space-x-2">
                                             <span
                                                 class="px-2 py-1 bg-gradient-to-r from-emerald-100 to-emerald-50 text-emerald-800 rounded-full text-xs font-medium border border-emerald-200">
-                                                <?php echo array_sum(array_column($lots, 'quantite_actuelle')); ?> unités total
+                                                <?php
+                                                // Calcul sécurisé du total
+                                                $total_unites = 0;
+                                                foreach ($lots as $lot_item) {
+                                                    $total_unites += intval($lot_item['quantite_actuelle'] ?? 0);
+                                                }
+                                                echo $total_unites;
+                                                ?> unités total
                                             </span>
                                         </div>
                                     </div>
@@ -1718,31 +1726,71 @@ switch ($current_page) {
                                                     <i class="fas fa-dollar-sign mr-2 text-gray-400"></i> Prix d'achat
                                                 </div>
                                             </th>
-
                                         </tr>
                                     </thead>
                                     <tbody class="bg-white divide-y divide-gray-200">
-                                        <?php foreach ($lots as $lot):
-                                            $jours_restants = $lot['jours_restants'] ?? joursAvantPeremption($lot['date_expiration']);
-                                            $jours_class = '';
-                                            if ($jours_restants <= 0) {
-                                                $jours_class = 'bg-gradient-to-r from-red-100 to-red-50 text-red-800 border-red-200';
-                                                $texte_jours = 'Expiré';
-                                                $jours_icon = 'fas fa-times-circle';
-                                            } elseif ($jours_restants <= 30) {
-                                                $jours_class = 'bg-gradient-to-r from-orange-100 to-orange-50 text-orange-800 border-orange-200';
-                                                $texte_jours = $jours_restants . ' jours';
-                                                $jours_icon = 'fas fa-exclamation-triangle';
-                                            } else {
-                                                $jours_class = 'bg-gradient-to-r from-green-100 to-green-50 text-green-800 border-green-200';
-                                                $texte_jours = $jours_restants . ' jours';
-                                                $jours_icon = 'fas fa-check-circle';
+                                        <?php
+                                        // Initialiser les compteurs pour les statistiques
+                                        $lots_expires = 0;
+                                        $lots_proche = 0;
+                                        $lots_bas = 0;
+
+                                        foreach ($lots as $lot):
+                                            // Récupérer les valeurs avec des valeurs par défaut
+                                            $numero_lot = $lot['numero_lot'] ?? 'N/A';
+                                            $produit_nom = $lot['produit_nom'] ?? 'N/A';
+                                            $code_barre = $lot['code_barre'] ?? '';
+                                            $date_reception = $lot['date_reception'] ?? '';
+                                            $date_expiration = $lot['date_expiration'] ?? '';
+                                            $quantite_actuelle = intval($lot['quantite_actuelle'] ?? 0);
+                                            $quantite_initiale = intval($lot['quantite_initiale'] ?? 0);
+                                            $prix_achat = floatval($lot['prix_achat'] ?? 0);
+
+                                            // Calculer les jours restants
+                                            $jours_restants = null;
+                                            if (!empty($date_expiration) && $date_expiration != '0000-00-00') {
+                                                $jours_restants = $lot['jours_restants'] ?? joursAvantPeremption($date_expiration);
                                             }
 
-                                            // Classe quantité
-                                            $quantite_class = $lot['quantite_actuelle'] <= 10 ?
-                                                'bg-gradient-to-r from-red-100 to-red-50 text-red-800 border-red-200' :
-                                                'bg-gradient-to-r from-green-100 to-green-50 text-green-800 border-green-200';
+                                            // Déterminer la classe pour les jours restants
+                                            $jours_class = '';
+                                            $texte_jours = 'N/A';
+                                            $jours_icon = 'fas fa-question-circle';
+
+                                            if (!is_null($jours_restants)) {
+                                                if ($jours_restants <= 0) {
+                                                    $jours_class = 'bg-gradient-to-r from-red-100 to-red-50 text-red-800 border-red-200';
+                                                    $texte_jours = 'Expiré';
+                                                    $jours_icon = 'fas fa-times-circle';
+                                                    $lots_expires++;
+                                                } elseif ($jours_restants <= 30) {
+                                                    $jours_class = 'bg-gradient-to-r from-orange-100 to-orange-50 text-orange-800 border-orange-200';
+                                                    $texte_jours = $jours_restants . ' jours';
+                                                    $jours_icon = 'fas fa-exclamation-triangle';
+                                                    $lots_proche++;
+                                                } else {
+                                                    $jours_class = 'bg-gradient-to-r from-green-100 to-green-50 text-green-800 border-green-200';
+                                                    $texte_jours = $jours_restants . ' jours';
+                                                    $jours_icon = 'fas fa-check-circle';
+                                                }
+                                            }
+
+                                            // Classe pour la quantité
+                                            $quantite_class = '';
+                                            if ($quantite_actuelle <= 10) {
+                                                $quantite_class = 'bg-gradient-to-r from-red-100 to-red-50 text-red-800 border-red-200';
+                                                $lots_bas++;
+                                            } else {
+                                                $quantite_class = 'bg-gradient-to-r from-green-100 to-green-50 text-green-800 border-green-200';
+                                            }
+
+                                            // Calcul du pourcentage pour la barre de progression
+                                            $pourcentage = 0;
+                                            if ($quantite_initiale > 0) {
+                                                $pourcentage = ($quantite_actuelle / $quantite_initiale) * 100;
+                                            }
+                                            $couleur_barre = $pourcentage <= 25 ? 'bg-red-500' :
+                                                ($pourcentage <= 50 ? 'bg-yellow-500' : 'bg-green-500');
                                             ?>
                                             <tr
                                                 class="hover:bg-gradient-to-r hover:from-emerald-50 hover:to-transparent transition-all duration-200 group">
@@ -1755,12 +1803,14 @@ switch ($current_page) {
                                                         </div>
                                                         <div>
                                                             <code class="text-sm font-medium text-gray-900 font-mono">
-                                                                                                                                                                                                                                                                                                            <?php echo htmlspecialchars($lot['numero_lot']); ?>
-                                                                                                                                                                                                                                                                                                        </code>
-                                                            <div class="text-xs text-gray-500 mt-1">
-                                                                <i class="fas fa-calendar-plus mr-1"></i>
-                                                                <?php echo formatDate($lot['date_reception']); ?>
-                                                            </div>
+                                                                    <?php echo htmlspecialchars($numero_lot); ?>
+                                                                </code>
+                                                            <?php if (!empty($date_reception)): ?>
+                                                                <div class="text-xs text-gray-500 mt-1">
+                                                                    <i class="fas fa-calendar-plus mr-1"></i>
+                                                                    <?php echo formatDate($date_reception); ?>
+                                                                </div>
+                                                            <?php endif; ?>
                                                         </div>
                                                     </div>
                                                 </td>
@@ -1775,12 +1825,14 @@ switch ($current_page) {
                                                         <div>
                                                             <div
                                                                 class="font-semibold text-gray-900 group-hover:text-emerald-700 transition-colors">
-                                                                <?php echo htmlspecialchars($lot['produit_nom']); ?>
+                                                                <?php echo htmlspecialchars($produit_nom); ?>
                                                             </div>
-                                                            <div class="text-xs text-gray-500 mt-1">
-                                                                <i class="fas fa-barcode mr-1"></i>
-                                                                <?php echo htmlspecialchars($lot['code_barre']); ?>
-                                                            </div>
+                                                            <?php if (!empty($code_barre)): ?>
+                                                                <div class="text-xs text-gray-500 mt-1">
+                                                                    <i class="fas fa-barcode mr-1"></i>
+                                                                    <?php echo htmlspecialchars($code_barre); ?>
+                                                                </div>
+                                                            <?php endif; ?>
                                                         </div>
                                                     </div>
                                                 </td>
@@ -1792,21 +1844,20 @@ switch ($current_page) {
                                                             <span
                                                                 class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold <?php echo $quantite_class; ?> border">
                                                                 <i class="fas fa-box mr-1 text-xs"></i>
-                                                                <?php echo $lot['quantite_actuelle']; ?> actuel
+                                                                <?php echo $quantite_actuelle; ?> actuel
                                                             </span>
                                                             <span class="text-xs text-gray-500">
-                                                                / <?php echo $lot['quantite_initiale']; ?> initial
+                                                                / <?php echo $quantite_initiale; ?> initial
                                                             </span>
                                                         </div>
                                                         <!-- Barre de progression -->
-                                                        <div class="w-full bg-gray-200 rounded-full h-1.5">
-                                                            <?php
-                                                            $pourcentage = ($lot['quantite_actuelle'] / $lot['quantite_initiale']) * 100;
-                                                            $couleur_barre = $pourcentage <= 25 ? 'bg-red-500' : ($pourcentage <= 50 ? 'bg-yellow-500' : 'bg-green-500');
-                                                            ?>
-                                                            <div class="h-1.5 rounded-full <?php echo $couleur_barre; ?>"
-                                                                style="width: <?php echo $pourcentage; ?>%"></div>
-                                                        </div>
+                                                        <?php if ($quantite_initiale > 0): ?>
+                                                            <div class="w-full bg-gray-200 rounded-full h-1.5">
+                                                                <div class="h-1.5 rounded-full <?php echo $couleur_barre; ?>"
+                                                                    style="width: <?php echo min($pourcentage, 100); ?>%">
+                                                                </div>
+                                                            </div>
+                                                        <?php endif; ?>
                                                     </div>
                                                 </td>
 
@@ -1814,9 +1865,15 @@ switch ($current_page) {
                                                 <td class="px-6 py-4">
                                                     <div class="flex items-center text-sm text-gray-900">
                                                         <i class="far fa-calendar-alt text-gray-400 mr-2"></i>
-                                                        <?php echo formatDate($lot['date_expiration']); ?>
+                                                        <?php
+                                                        if (!empty($date_expiration) && $date_expiration != '0000-00-00') {
+                                                            echo formatDate($date_expiration);
+                                                        } else {
+                                                            echo 'N/A';
+                                                        }
+                                                        ?>
                                                     </div>
-                                                    <?php if ($jours_restants <= 30): ?>
+                                                    <?php if (!is_null($jours_restants) && $jours_restants <= 30): ?>
                                                         <div
                                                             class="text-xs <?php echo $jours_restants <= 0 ? 'text-red-600' : 'text-orange-600'; ?> mt-1">
                                                             <i class="fas fa-clock mr-1"></i>
@@ -1827,16 +1884,20 @@ switch ($current_page) {
 
                                                 <!-- Jours restants -->
                                                 <td class="px-6 py-4">
-                                                    <div
-                                                        class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold <?php echo $jours_class; ?> border">
-                                                        <i class="<?php echo $jours_icon; ?> mr-1 text-xs"></i>
-                                                        <?php echo $texte_jours; ?>
-                                                    </div>
-                                                    <?php if ($jours_restants <= 15): ?>
-                                                        <div class="text-xs text-gray-500 mt-1">
-                                                            <i class="fas fa-running mr-1"></i>
-                                                            Action requise
+                                                    <?php if (!is_null($jours_restants)): ?>
+                                                        <div
+                                                            class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold <?php echo $jours_class; ?> border">
+                                                            <i class="<?php echo $jours_icon; ?> mr-1 text-xs"></i>
+                                                            <?php echo $texte_jours; ?>
                                                         </div>
+                                                        <?php if ($jours_restants <= 15 && $jours_restants > 0): ?>
+                                                            <div class="text-xs text-gray-500 mt-1">
+                                                                <i class="fas fa-running mr-1"></i>
+                                                                Action requise
+                                                            </div>
+                                                        <?php endif; ?>
+                                                    <?php else: ?>
+                                                        <span class="text-gray-400 text-sm">N/A</span>
                                                     <?php endif; ?>
                                                 </td>
 
@@ -1844,21 +1905,19 @@ switch ($current_page) {
                                                 <td class="px-6 py-4">
                                                     <div class="text-sm font-bold text-gray-900">
                                                         <?php
-                                                        $prix = $lot['prix_achat'];
-                                                        // Nettoyer la valeur (enlever les espaces, virgules, etc.)
-                                                        $prix = str_replace(',', '.', $prix);
-                                                        $prix = preg_replace('/[^0-9.]/', '', $prix);
-                                                        echo number_format(floatval($prix), 2);
-                                                        ?> $
+                                                        $prix_format = number_format($prix_achat, 2, ',', ' ');
+                                                        echo $prix_format; ?> $
                                                     </div>
-                                                    <div class="text-xs text-gray-500">
-                                                        Unitaire:
-                                                        <?php echo number_format($lot['prix_achat'] / $lot['quantite_initiale'], 2); ?>
-                                                        $
-                                                    </div>
+                                                    <?php if ($quantite_initiale > 0 && $prix_achat > 0): ?>
+                                                        <div class="text-xs text-gray-500">
+                                                            Unitaire:
+                                                            <?php
+                                                            $prix_unitaire = $prix_achat / $quantite_initiale;
+                                                            echo number_format($prix_unitaire, 2, ',', ' ');
+                                                            ?> $
+                                                        </div>
+                                                    <?php endif; ?>
                                                 </td>
-
-
                                             </tr>
                                         <?php endforeach; ?>
                                     </tbody>
@@ -1868,19 +1927,6 @@ switch ($current_page) {
                             <!-- Statistiques en bas -->
                             <div class="px-6 py-4 border-t border-gray-200 bg-gray-50">
                                 <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                    <?php
-                                    $lots_expires = count(array_filter($lots, function ($lot) {
-                                        $jours = joursAvantPeremption($lot['date_expiration']);
-                                        return $jours <= 0;
-                                    }));
-                                    $lots_proche = count(array_filter($lots, function ($lot) {
-                                        $jours = joursAvantPeremption($lot['date_expiration']);
-                                        return $jours > 0 && $jours <= 30;
-                                    }));
-                                    $lots_bas = count(array_filter($lots, function ($lot) {
-                                        return $lot['quantite_actuelle'] <= 10;
-                                    }));
-                                    ?>
                                     <div class="text-center">
                                         <div class="text-lg font-bold text-emerald-700"><?php echo count($lots); ?></div>
                                         <div class="text-sm text-gray-600">Lots total</div>
@@ -1929,6 +1975,8 @@ switch ($current_page) {
                 </div>
 
             <?php elseif ($current_page == 'ajouter_lot'): ?>
+
+
                 <!-- ========== AJOUTER UN LOT ========== -->
                 <div class="mb-8">
                     <!-- En-tête -->
@@ -1944,7 +1992,7 @@ switch ($current_page) {
 
                     <div
                         class="bg-gradient-to-br from-white to-emerald-50 rounded-xl shadow-lg p-8 border border-emerald-200">
-                        <form method="POST" action="" class="space-y-8">
+                        <form method="POST" action="">
                             <input type="hidden" name="action" value="ajouter_lot">
 
                             <!-- Section Informations du lot -->
@@ -1968,18 +2016,9 @@ switch ($current_page) {
                                                 class="w-full px-4 py-3 pl-11 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all duration-200 shadow-sm hover:shadow appearance-none bg-white">
                                                 <option value="" disabled selected>Sélectionnez un produit</option>
                                                 <?php foreach ($produits as $produit): ?>
-                                                    <option value="<?php echo $produit['id']; ?>" class="py-2">
-                                                        <span
-                                                            class="font-medium"><?php echo htmlspecialchars($produit['nom']); ?></span>
-                                                        <span class="text-gray-500 ml-2">
-                                                            (<?php echo htmlspecialchars($produit['code_barre']); ?>)
-                                                        </span>
-                                                        <?php if (!empty($produit['categorie_nom'])): ?>
-                                                            <span
-                                                                class="inline-block ml-2 px-2 py-0.5 bg-gray-100 text-gray-700 text-xs rounded border border-gray-300">
-                                                                <?php echo htmlspecialchars($produit['categorie_nom']); ?>
-                                                            </span>
-                                                        <?php endif; ?>
+                                                    <option value="<?php echo $produit['id']; ?>">
+                                                        <?php echo htmlspecialchars($produit['nom']); ?>
+
                                                     </option>
                                                 <?php endforeach; ?>
                                             </select>
@@ -2023,23 +2062,6 @@ switch ($current_page) {
                                                 <i class="fas fa-boxes"></i>
                                             </div>
                                         </div>
-                                        <div class="flex items-center space-x-4 mt-2">
-                                            <button type="button"
-                                                onclick="document.getElementById('quantite_initiale').value = 50"
-                                                class="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border border-gray-300">
-                                                50
-                                            </button>
-                                            <button type="button"
-                                                onclick="document.getElementById('quantite_initiale').value = 100"
-                                                class="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border border-gray-300">
-                                                100
-                                            </button>
-                                            <button type="button"
-                                                onclick="document.getElementById('quantite_initiale').value = 500"
-                                                class="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border border-gray-300">
-                                                500
-                                            </button>
-                                        </div>
                                     </div>
                                 </div>
 
@@ -2065,10 +2087,6 @@ switch ($current_page) {
                                                 <i class="fas fa-calendar-times"></i>
                                             </div>
                                         </div>
-                                        <div class="mt-2 text-xs text-gray-500">
-                                            <i class="fas fa-info-circle mr-1"></i>
-                                            Minimum: <?php echo date('d/m/Y', strtotime('+30 days')); ?> (30 jours)
-                                        </div>
                                     </div>
 
                                     <!-- Prix d'achat -->
@@ -2086,23 +2104,6 @@ switch ($current_page) {
                                             <div class="absolute right-3 top-1/2 transform -translate-y-1/2">
                                                 <span class="text-gray-500 font-medium">$</span>
                                             </div>
-                                        </div>
-                                        <div class="flex items-center space-x-4 mt-2">
-                                            <button type="button"
-                                                onclick="document.getElementById('prix_achat').value = 1.50"
-                                                class="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border border-gray-300">
-                                                1.50 $
-                                            </button>
-                                            <button type="button"
-                                                onclick="document.getElementById('prix_achat').value = 2.99"
-                                                class="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border border-gray-300">
-                                                2.99 $
-                                            </button>
-                                            <button type="button"
-                                                onclick="document.getElementById('prix_achat').value = 5.50"
-                                                class="text-xs px-2 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border border-gray-300">
-                                                5.50 $
-                                            </button>
                                         </div>
                                     </div>
 
@@ -2124,32 +2125,6 @@ switch ($current_page) {
                                 </div>
                             </div>
 
-                            <!-- Aperçu du lot -->
-                            <div
-                                class="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-6 border border-gray-300 mt-6">
-                                <div class="flex items-center mb-4">
-                                    <div class="p-2 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg mr-3">
-                                        <i class="fas fa-eye text-blue-600"></i>
-                                    </div>
-                                    <h4 class="text-lg font-semibold text-gray-800">Aperçu du lot</h4>
-                                </div>
-                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    <div class="bg-white p-4 rounded-lg border border-gray-200">
-                                        <div class="text-sm text-gray-600 mb-1">Identifiant</div>
-                                        <div id="lot-preview-number" class="font-medium text-gray-900">-</div>
-                                    </div>
-                                    <div class="bg-white p-4 rounded-lg border border-gray-200">
-                                        <div class="text-sm text-gray-600 mb-1">Produit</div>
-                                        <div id="lot-preview-product" class="font-medium text-gray-900">Non sélectionné
-                                        </div>
-                                    </div>
-                                    <div class="bg-white p-4 rounded-lg border border-gray-200">
-                                        <div class="text-sm text-gray-600 mb-1">Valeur totale</div>
-                                        <div id="lot-preview-value" class="font-medium text-gray-900">0.00 $</div>
-                                    </div>
-                                </div>
-                            </div>
-
                             <!-- Boutons d'action -->
                             <div class="pt-6 border-t border-gray-200">
                                 <div class="flex flex-col sm:flex-row justify-end space-y-3 sm:space-y-0 sm:space-x-4">
@@ -2162,9 +2137,6 @@ switch ($current_page) {
                                         class="group relative bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700 text-white px-8 py-3 rounded-xl font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:-translate-y-0.5">
                                         <i class="fas fa-save mr-2 group-hover:rotate-12 transition-transform"></i>
                                         Enregistrer le lot
-                                        <div
-                                            class="absolute inset-0 rounded-xl border border-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                                        </div>
                                     </button>
                                 </div>
                             </div>
@@ -2921,8 +2893,8 @@ switch ($current_page) {
                                                 <td class="px-6 py-4">
                                                     <code
                                                         class="text-sm text-gray-900 bg-gray-50 px-2 py-1 rounded font-mono border border-gray-200">
-                                                                                                                                                                                                                                                    <?php echo htmlspecialchars($mouvement['numero_lot']); ?>
-                                                                                                                                                                                                                                                </code>
+                                                                                                                                                                                                                                                                                                    <?php echo htmlspecialchars($mouvement['numero_lot']); ?>
+                                                                                                                                                                                                                                                                                                </code>
                                                 </td>
 
                                                 <!-- Type -->
@@ -3112,16 +3084,20 @@ switch ($current_page) {
                         </div>
                     </div>
 
-                    <?php if (count($inventaire_data) > 0): ?>
+                    <?php
+                    // Vérification et correction de la requête SQL
+                    if (isset($inventaire_data) && count($inventaire_data) > 0):
+                        // Debug: Afficher la structure des données (à commenter en production)
+                        // echo '<pre>'; print_r($inventaire_data); echo '</pre>';
+                        ?>
                         <!-- Résumé des écarts -->
                         <?php
                         $total_ecart = 0;
                         $produits_ecart = 0;
                         foreach ($inventaire_data as $produit) {
-                            if ($produit['quantite_stock'] != $produit['quantite_stock']) { // Cette condition semble incorrecte, devrait être comparée à une quantité réelle
-                                $produits_ecart++;
-                                // $total_ecart += abs($produit['quantite_stock'] - $produit['quantite_reelle']);
-                            }
+                            $quantite_stock = intval($produit['quantite_stock'] ?? 0);
+                            // Note: Nous ne pouvons pas calculer l'écart ici car nous n'avons pas encore la quantité réelle saisie
+                            // L'écart sera calculé en JavaScript
                         }
                         ?>
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
@@ -3234,10 +3210,17 @@ switch ($current_page) {
                                         </tr>
                                     </thead>
                                     <tbody class="bg-white divide-y divide-gray-200" id="inventory-table">
-                                        <?php foreach ($inventaire_data as $produit): ?>
+                                        <?php foreach ($inventaire_data as $produit):
+                                            // Récupération sécurisée des données
+                                            $produit_id = intval($produit['id'] ?? 0);
+                                            $produit_nom = htmlspecialchars($produit['nom'] ?? 'N/A');
+                                            $produit_categorie = htmlspecialchars($produit['categorie'] ?? 'Non catégorisé');
+                                            $produit_code_barre = htmlspecialchars($produit['code_barre'] ?? '');
+                                            $quantite_stock = intval($produit['quantite_stock'] ?? 0);
+                                            $quantite_reelle = $quantite_stock; // Valeur par défaut égale au stock système
+                                            ?>
                                             <tr class="inventory-row hover:bg-gradient-to-r hover:from-emerald-50 hover:to-transparent transition-all duration-200"
-                                                data-id="<?php echo $produit['id']; ?>"
-                                                data-stock="<?php echo $produit['quantite_stock']; ?>">
+                                                data-id="<?php echo $produit_id; ?>" data-stock="<?php echo $quantite_stock; ?>">
                                                 <!-- Produit -->
                                                 <td class="px-6 py-4">
                                                     <div class="flex items-center">
@@ -3247,7 +3230,7 @@ switch ($current_page) {
                                                         </div>
                                                         <div>
                                                             <div class="font-semibold text-gray-900">
-                                                                <?php echo htmlspecialchars($produit['nom']); ?>
+                                                                <?php echo $produit_nom; ?>
                                                             </div>
                                                             <?php if (isset($produit['fournisseur'])): ?>
                                                                 <div class="text-xs text-gray-500 mt-1">
@@ -3263,16 +3246,20 @@ switch ($current_page) {
                                                 <td class="px-6 py-4">
                                                     <span
                                                         class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gradient-to-r from-gray-50 to-gray-100 text-gray-800 border border-gray-200">
-                                                        <?php echo htmlspecialchars($produit['categorie']); ?>
+                                                        <?php echo $produit_categorie; ?>
                                                     </span>
                                                 </td>
 
                                                 <!-- Code barre -->
                                                 <td class="px-6 py-4">
-                                                    <code
-                                                        class="text-sm text-gray-900 bg-gray-50 px-2 py-1 rounded font-mono border border-gray-200">
-                                                                                                                                                                                                                                        <?php echo htmlspecialchars($produit['code_barre']); ?>
-                                                                                                                                                                                                                                    </code>
+                                                    <?php if (!empty($produit_code_barre)): ?>
+                                                        <span
+                                                            class="text-sm text-gray-900 bg-gray-50 px-2 py-1 rounded font-mono border border-gray-200">
+                                                            <?php echo $produit_code_barre; ?>
+                                                        </span>
+                                                    <?php else: ?>
+                                                        <span class="text-gray-400 text-sm">N/A</span>
+                                                    <?php endif; ?>
                                                 </td>
 
                                                 <!-- Stock système -->
@@ -3280,13 +3267,13 @@ switch ($current_page) {
                                                     <div class="flex flex-col items-start">
                                                         <span
                                                             class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold 
-                                            <?php echo $produit['quantite_stock'] <= 10 ?
-                                                'bg-gradient-to-r from-red-100 to-red-50 text-red-800 border border-red-200' :
-                                                'bg-gradient-to-r from-green-100 to-green-50 text-green-800 border border-green-200'; ?>">
+                                                <?php echo $quantite_stock <= 10 ?
+                                                    'bg-gradient-to-r from-red-100 to-red-50 text-red-800 border border-red-200' :
+                                                    'bg-gradient-to-r from-green-100 to-green-50 text-green-800 border border-green-200'; ?>">
                                                             <i class="fas fa-box mr-1 text-xs"></i>
-                                                            <?php echo $produit['quantite_stock']; ?> unités
+                                                            <?php echo $quantite_stock; ?> unités
                                                         </span>
-                                                        <?php if ($produit['quantite_stock'] <= 10): ?>
+                                                        <?php if ($quantite_stock <= 10): ?>
                                                             <div class="text-xs text-red-600 mt-1">
                                                                 <i class="fas fa-exclamation-circle mr-1"></i> Stock bas
                                                             </div>
@@ -3300,11 +3287,12 @@ switch ($current_page) {
                                                         <form method="POST" action="" class="inventory-form">
                                                             <input type="hidden" name="action" value="realiser_inventaire">
                                                             <input type="hidden" name="produit_id"
-                                                                value="<?php echo $produit['id']; ?>">
+                                                                value="<?php echo $produit_id; ?>">
                                                             <div class="relative">
                                                                 <input type="number" name="quantite_reelle" min="0"
-                                                                    value="<?php echo $produit['quantite_stock']; ?>"
-                                                                    class="w-32 px-4 py-2 pl-11 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all duration-200 shadow-sm"
+                                                                    value="<?php echo $quantite_reelle; ?>"
+                                                                    class="w-32 px-4 py-2 pl-11 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all duration-200 shadow-sm inventory-quantity-input"
+                                                                    data-stock="<?php echo $quantite_stock; ?>"
                                                                     onchange="updateEcart(this)">
                                                                 <div
                                                                     class="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400">
@@ -3327,13 +3315,13 @@ switch ($current_page) {
                                                 <td class="px-6 py-4">
                                                     <div class="flex items-center space-x-2">
                                                         <button type="button" onclick="validateInventoryRow(this)"
-                                                            class="p-2 bg-gradient-to-br from-emerald-50 to-emerald-100 hover:from-emerald-100 hover:to-emerald-200 text-emerald-600 rounded-lg border border-emerald-200 hover:shadow-sm transition-all duration-200 group/validate"
+                                                            class="p-2 bg-gradient-to-br from-emerald-50 to-emerald-100 hover:from-emerald-100 hover:to-emerald-200 text-emerald-600 rounded-lg border border-emerald-200 hover:shadow-sm transition-all duration-200 group/validate validate-btn"
                                                             title="Valider l'inventaire">
                                                             <i
                                                                 class="fas fa-check text-sm group-hover/validate:scale-110 transition-transform"></i>
                                                         </button>
 
-                                                        <a href="?page=ajouter_lot&produit_id=<?php echo $produit['id']; ?>"
+                                                        <a href="?page=ajouter_lot&produit_id=<?php echo $produit_id; ?>"
                                                             class="p-2 bg-gradient-to-br from-blue-50 to-blue-100 hover:from-blue-100 hover:to-blue-200 text-blue-600 rounded-lg border border-blue-200 hover:shadow-sm transition-all duration-200 group/add"
                                                             title="Ajouter un lot">
                                                             <i
@@ -3407,15 +3395,18 @@ switch ($current_page) {
 
                 <!-- Scripts pour l'inventaire -->
                 <script>
-
                     document.addEventListener('DOMContentLoaded', function () {
                         // Initialiser les écarts
                         updateAllEcarts();
                         updateStats();
 
                         // Ajouter un événement de saisie sur tous les champs d'inventaire
-                        document.querySelectorAll('input[name="quantite_reelle"]').forEach(input => {
+                        document.querySelectorAll('.inventory-quantity-input').forEach(input => {
                             input.addEventListener('input', function () {
+                                updateEcart(this);
+                                updateStats();
+                            });
+                            input.addEventListener('change', function () {
                                 updateEcart(this);
                                 updateStats();
                             });
@@ -3431,30 +3422,29 @@ switch ($current_page) {
                         const ecartDisplay = row.querySelector('.ecart-display');
                         const ecartBadge = row.querySelector('.ecart-badge');
 
-                        ecartDisplay.textContent = ecart;
-
-                        // Mettre à jour le style de l'écart
-                        ecartDisplay.className = 'ecart-display text-sm font-bold ' +
-                            (ecart > 0 ? 'text-green-700' :
-                                ecart < 0 ? 'text-red-700' : 'text-gray-900');
-
+                        // Mettre à jour l'affichage de l'écart
                         ecartDisplay.textContent = (ecart > 0 ? '+' : '') + ecart;
 
-                        // Mettre à jour ou créer le badge
-                        if (ecart !== 0) {
-                            ecartBadge.className = 'ecart-badge inline-flex items-center px-2 py-1 rounded-full text-xs font-medium mt-1 ' +
-                                (ecart > 0 ? 'bg-gradient-to-r from-green-100 to-green-50 text-green-800 border border-green-200' :
-                                    'bg-gradient-to-r from-red-100 to-red-50 text-red-800 border border-red-200');
-                            ecartBadge.innerHTML = (ecart > 0 ? '<i class="fas fa-plus mr-1"></i>Surplus' :
-                                '<i class="fas fa-minus mr-1"></i>Manquant');
-                            ecartBadge.style.display = 'inline-flex';
+                        // Changer la couleur selon l'écart
+                        if (ecart > 0) {
+                            ecartDisplay.className = 'ecart-display text-sm font-bold text-green-700';
+                            ecartBadge.className = 'ecart-badge inline-flex items-center px-2 py-1 rounded-full text-xs font-medium mt-1 bg-gradient-to-r from-green-100 to-green-50 text-green-800 border border-green-200';
+                            ecartBadge.innerHTML = '<i class="fas fa-plus mr-1"></i>Surplus';
+                        } else if (ecart < 0) {
+                            ecartDisplay.className = 'ecart-display text-sm font-bold text-red-700';
+                            ecartBadge.className = 'ecart-badge inline-flex items-center px-2 py-1 rounded-full text-xs font-medium mt-1 bg-gradient-to-r from-red-100 to-red-50 text-red-800 border border-red-200';
+                            ecartBadge.innerHTML = '<i class="fas fa-minus mr-1"></i>Manquant';
                         } else {
-                            ecartBadge.style.display = 'none';
+                            ecartDisplay.className = 'ecart-display text-sm font-semibold text-gray-900';
+                            ecartBadge.className = 'ecart-badge hidden';
+                            ecartBadge.innerHTML = '';
                         }
+
+                        ecartBadge.style.display = ecart !== 0 ? 'inline-flex' : 'none';
                     }
 
                     function updateAllEcarts() {
-                        document.querySelectorAll('input[name="quantite_reelle"]').forEach(input => {
+                        document.querySelectorAll('.inventory-quantity-input').forEach(input => {
                             updateEcart(input);
                         });
                     }
@@ -3464,7 +3454,7 @@ switch ($current_page) {
                         let validatedCount = 0;
 
                         document.querySelectorAll('.inventory-row').forEach(row => {
-                            const realInput = row.querySelector('input[name="quantite_reelle"]');
+                            const realInput = row.querySelector('.inventory-quantity-input');
                             const stockValue = parseInt(row.getAttribute('data-stock'));
                             const realValue = parseInt(realInput.value) || 0;
 
@@ -3472,8 +3462,9 @@ switch ($current_page) {
                                 ecartCount++;
                             }
 
-                            // Compter les lignes validées (pourrait être étendu avec des données de validation)
-                            if (realInput.value !== '') {
+                            // Compter les lignes avec bouton de validation cliqué
+                            const validateBtn = row.querySelector('.validate-btn');
+                            if (validateBtn && validateBtn.disabled) {
                                 validatedCount++;
                             }
                         });
@@ -3483,26 +3474,64 @@ switch ($current_page) {
                     }
 
                     function validateInventoryRow(button) {
-                        const form = button.closest('tr').querySelector('.inventory-form');
-                        if (form) {
-                            // Ajouter un indicateur visuel de validation
-                            const row = button.closest('tr');
-                            row.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
-                            button.disabled = true;
-                            button.innerHTML = '<i class="fas fa-check text-green-600"></i>';
+                        const row = button.closest('tr');
+                        const form = row.querySelector('.inventory-form');
 
-                            // Soumettre le formulaire après un court délai pour l'animation
-                            setTimeout(() => {
-                                form.submit();
-                            }, 500);
+                        if (form) {
+                            // Récupérer les valeurs
+                            const quantiteInput = row.querySelector('.inventory-quantity-input');
+                            const stockValue = parseInt(row.getAttribute('data-stock'));
+                            const realValue = parseInt(quantiteInput.value) || 0;
+
+                            if (realValue === stockValue) {
+                                alert('Aucun écart détecté. Aucun ajustement nécessaire.');
+                                return;
+                            }
+
+                            // Confirmation
+                            const difference = realValue - stockValue;
+                            const message = difference > 0
+                                ? `Ajouter ${difference} unités à ce produit ?`
+                                : `Retirer ${Math.abs(difference)} unités de ce produit ?`;
+
+                            if (confirm(message)) {
+                                // Ajouter un indicateur visuel de validation
+                                row.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
+                                button.disabled = true;
+                                button.innerHTML = '<i class="fas fa-check text-green-600"></i>';
+
+                                // Soumettre le formulaire
+                                setTimeout(() => {
+                                    form.submit();
+                                }, 500);
+                            }
                         }
                     }
 
                     function validateAllInventory() {
+                        const rows = document.querySelectorAll('.inventory-row');
+                        let hasEcart = false;
+
+                        // Vérifier s'il y a des écarts
+                        rows.forEach(row => {
+                            const realInput = row.querySelector('.inventory-quantity-input');
+                            const stockValue = parseInt(row.getAttribute('data-stock'));
+                            const realValue = parseInt(realInput.value) || 0;
+
+                            if (realValue !== stockValue) {
+                                hasEcart = true;
+                            }
+                        });
+
+                        if (!hasEcart) {
+                            alert('Aucun écart détecté sur tous les produits. Aucun ajustement nécessaire.');
+                            return;
+                        }
+
                         if (confirm('Valider tout l\'inventaire ? Cette action ajustera tous les écarts détectés.')) {
                             // Marquer toutes les lignes comme validées visuellement
                             document.querySelectorAll('.inventory-row').forEach(row => {
-                                const button = row.querySelector('[title="Valider l\'inventaire"]');
+                                const button = row.querySelector('.validate-btn');
                                 if (button) {
                                     row.style.backgroundColor = 'rgba(16, 185, 129, 0.1)';
                                     button.disabled = true;
@@ -3510,10 +3539,16 @@ switch ($current_page) {
                                 }
                             });
 
-                            // Soumettre tous les formulaires
+                            // Soumettre tous les formulaires qui ont un écart
                             setTimeout(() => {
                                 document.querySelectorAll('.inventory-form').forEach(form => {
-                                    form.submit();
+                                    const input = form.querySelector('.inventory-quantity-input');
+                                    const stockValue = parseInt(input.getAttribute('data-stock'));
+                                    const realValue = parseInt(input.value) || 0;
+
+                                    if (realValue !== stockValue) {
+                                        form.submit();
+                                    }
                                 });
                             }, 1000);
                         }
@@ -3523,7 +3558,7 @@ switch ($current_page) {
                         if (confirm('Réinitialiser toutes les valeurs d\'inventaire aux valeurs système ?')) {
                             document.querySelectorAll('.inventory-row').forEach(row => {
                                 const stockValue = parseInt(row.getAttribute('data-stock'));
-                                const input = row.querySelector('input[name="quantite_reelle"]');
+                                const input = row.querySelector('.inventory-quantity-input');
                                 input.value = stockValue;
                                 updateEcart(input);
                             });
@@ -3534,7 +3569,7 @@ switch ($current_page) {
                     function copyStockValue(button) {
                         const row = button.closest('tr');
                         const stockValue = row.getAttribute('data-stock');
-                        const input = row.querySelector('input[name="quantite_reelle"]');
+                        const input = row.querySelector('.inventory-quantity-input');
 
                         input.value = stockValue;
                         updateEcart(input);
@@ -3928,7 +3963,7 @@ switch ($current_page) {
                     LEFT JOIN lots l ON p.id = l.produit_id AND l.statut = 'en_stock'
                     WHERE p.statut = 'actif'
                     GROUP BY p.id
-                    ORDER BY quantite DESC
+                    ORDER BY quantite ASC
                     LIMIT 5
                 ");
                                 $top_produits = $stmt->fetchAll();

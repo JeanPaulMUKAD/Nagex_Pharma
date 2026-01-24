@@ -632,15 +632,21 @@ $stats = getDashboardStats($pdo, $_SESSION['user_id']);
 $produits = [];
 try {
     $stmt = $pdo->query("
-        SELECT p.id, p.nom, p.code_barre, c.nom as categorie_nom,
-               pv.prix_fc, pv.prix_usd, pv.taux_conversion
-        FROM produits p
-        LEFT JOIN categories c ON p.categorie_id = c.id
-        LEFT JOIN prix_vente pv ON p.id = pv.produit_id AND pv.date_fin IS NULL
-        WHERE p.statut = 'actif'
-        ORDER BY p.nom
-        LIMIT 100
-    ");
+    SELECT 
+        p.id, 
+        p.nom, 
+        COALESCE(p.code_barre, 'N/A') as code_barre,
+        COALESCE(c.nom, 'Non catégorisé') as categorie_nom,
+        pv.prix_fc, 
+        pv.prix_usd, 
+        COALESCE(pv.taux_conversion, 1) as taux_conversion
+    FROM produits p
+    LEFT JOIN categories c ON p.categorie_id = c.id
+    LEFT JOIN prix_vente pv ON p.id = pv.produit_id AND pv.date_fin IS NULL
+    WHERE p.statut = 'actif'
+    ORDER BY p.nom
+    LIMIT 100
+");
     $produits = $stmt->fetchAll();
 } catch (Exception $e) {
     $error = "Erreur lors du chargement des produits: " . $e->getMessage();
@@ -1678,86 +1684,182 @@ try {
                     }, 30000);
                 </script>
 
-            <?php elseif ($current_page == 'gestion_prix'): ?>
-                <!-- ========== GESTION DES PRIX ========== -->
-                <div class="mb-6 flex justify-between items-center">
-                    <div>
-                        <h1 class="text-2xl font-bold text-gray-800">Gestion des prix</h1>
-                        <p class="text-gray-600">Définissez les prix des produits en FC et USD</p>
-                    </div>
-                </div>
+<?php elseif ($current_page == 'gestion_prix'): ?>
+    <!-- ========== GESTION DES PRIX ========== -->
+    <div class="mb-6 flex justify-between items-center">
+        <div>
+            <h1 class="text-2xl font-bold text-gray-800">Gestion des prix</h1>
+            <p class="text-gray-600">Définissez les prix des produits en FC et USD</p>
+        </div>
+        <div class="text-sm text-gray-600">
+            <?php echo count($produits); ?> produit(s) actif(s)
+        </div>
+    </div>
 
-                <div class="bg-white rounded-lg shadow-md overflow-hidden mb-6">
-                    <div class="overflow-x-auto">
-                        <table class="min-w-full divide-y divide-gray-200">
-                            <thead class="bg-gray-50">
-                                <tr>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Produit</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code barre
-                                    </th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Catégorie
-                                    </th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Prix FC</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Prix USD
-                                    </th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Taux</th>
-                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody class="bg-white divide-y divide-gray-200">
-                                <?php foreach ($produits as $produit): ?>
-                                    <tr>
-                                        <td class="px-6 py-4 font-semibold"><?php echo e($produit['nom']); ?></td>
-                                        <td class="px-6 py-4 text-sm text-gray-500"><?php echo e($produit['code_barre']); ?>
-                                        </td>
-                                        <td class="px-6 py-4 text-sm text-gray-500"><?php echo e($produit['categorie_nom']); ?>
-                                        </td>
-                                        <td class="px-6 py-4">
-                                            <?php if ($produit['prix_fc']): ?>
-                                                <span
-                                                    class="font-bold text-green-600"><?php echo formatMontant($produit['prix_fc']); ?></span>
-                                            <?php else: ?>
-                                                <span class="text-red-500 text-sm">Non défini</span>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td class="px-6 py-4">
-                                            <?php if ($produit['prix_usd']): ?>
-                                                <span class="font-bold text-blue-600">
-                                                    <?php
-                                                    if (is_numeric($produit['prix_usd']) && $produit['prix_usd'] > 0) {
-                                                        echo '$' . number_format((float) $produit['prix_usd'], 2);
-                                                    } else {
-                                                        echo '<span class="text-red-500 text-sm">Non défini</span>';
-                                                    }
-                                                    ?>
-                                                </span>
-                                            <?php else: ?>
-                                                <span class="text-red-500 text-sm">Non défini</span>
-                                            <?php endif; ?>
-                                        </td>
-                                        <td class="px-6 py-4 text-sm text-gray-500">
-                                            <?php
-                                            $taux = $produit['taux_conversion'] ?? 1;
-                                            if (is_numeric($taux)) {
-                                                echo number_format((float) $taux, 4);
-                                            } else {
-                                                echo '1.0000';
-                                            }
-                                            ?>
-                                        </td>
-                                        <td class="px-6 py-4">
-                                            <button
-                                                onclick="modifierPrix(<?php echo $produit['id']; ?>, '<?php echo e($produit['nom']); ?>', <?php echo $produit['prix_fc'] ?? 0; ?>, <?php echo $produit['prix_usd'] ?? 0; ?>)"
-                                                class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
-                                                <i class="fas fa-edit mr-1"></i>Modifier
-                                            </button>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
+    <div class="bg-white rounded-lg shadow-md overflow-hidden mb-6">
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Produit</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Code barre</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Catégorie</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Prix FC</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Prix USD</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Taux</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    <?php foreach ($produits as $produit): ?>
+                        <?php
+                        // Déterminer si le produit a un prix défini
+                        $hasPrice = !empty($produit['prix_fc']) && $produit['prix_fc'] > 0;
+                        $prixFcValue = $produit['prix_fc'] ?? 0;
+                        $prixUsdValue = $produit['prix_usd'] ?? 0;
+                        ?>
+                        <tr class="<?php echo !$hasPrice ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-50'; ?>">
+                            <!-- Nom du produit -->
+                            <td class="px-6 py-4 font-semibold">
+                                <div class="flex items-center">
+                                    <?php if (!$hasPrice): ?>
+                                        <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-red-100 text-red-600 mr-2 text-xs">
+                                            <i class="fas fa-exclamation"></i>
+                                        </span>
+                                    <?php endif; ?>
+                                    <?php echo e($produit['nom']); ?>
+                                </div>
+                            </td>
+                            
+                            <!-- Code barre -->
+                            <td class="px-6 py-4 text-sm">
+                                <?php if (!empty($produit['code_barre']) && $produit['code_barre'] !== 'N/A'): ?>
+                                    <span class="text-gray-700 font-mono bg-gray-100 px-2 py-1 rounded">
+                                        <?php echo e($produit['code_barre']); ?>
+                                    </span>
+                                <?php else: ?>
+                                    <span class="text-gray-400 italic">Non renseigné</span>
+                                <?php endif; ?>
+                            </td>
+                            
+                            <!-- Catégorie -->
+                            <td class="px-6 py-4 text-sm">
+                                <?php if (!empty($produit['categorie_nom']) && $produit['categorie_nom'] !== 'Non catégorisé'): ?>
+                                    <span class="text-gray-700">
+                                        <?php echo e($produit['categorie_nom']); ?>
+                                    </span>
+                                <?php else: ?>
+                                    <span class="text-gray-400 italic">Non catégorisé</span>
+                                <?php endif; ?>
+                            </td>
+                            
+                            <!-- Prix FC -->
+                            <td class="px-6 py-4">
+                                <?php if ($hasPrice): ?>
+                                    <span class="font-bold text-green-600">
+                                        <?php echo formatMontant($produit['prix_fc']); ?>
+                                    </span>
+                                <?php else: ?>
+                                    <div class="flex flex-col">
+                                        <span class="text-red-500 font-medium text-sm">Non défini</span>
+                                        <span class="text-xs text-red-400">À définir</span>
+                                    </div>
+                                <?php endif; ?>
+                            </td>
+                            
+                            <!-- Prix USD -->
+                            <td class="px-6 py-4">
+                                <?php if ($hasPrice && !empty($produit['prix_usd']) && $produit['prix_usd'] > 0): ?>
+                                    <span class="font-bold text-blue-600">
+                                        $<?php echo number_format((float)$produit['prix_usd'], 2); ?>
+                                    </span>
+                                <?php elseif ($hasPrice): ?>
+                                    <div class="text-sm text-gray-500">
+                                        <span class="text-gray-400">—</span>
+                                    </div>
+                                <?php else: ?>
+                                    <div class="flex flex-col">
+                                        <span class="text-red-500 font-medium text-sm">Non défini</span>
+                                        <span class="text-xs text-red-400">À définir</span>
+                                    </div>
+                                <?php endif; ?>
+                            </td>
+                            
+                            <!-- Taux de conversion -->
+                            <td class="px-6 py-4 text-sm">
+                                <?php
+                                $taux = $produit['taux_conversion'] ?? 1;
+                                if (is_numeric($taux) && $taux > 0): 
+                                ?>
+                                    <span class="text-gray-600 font-mono bg-gray-50 px-2 py-1 rounded">
+                                        1:$ = <?php echo number_format((float)$taux, 2); ?>
+                                    </span>
+                                    <?php if ($hasPrice): ?>
+                                        <div class="text-xs text-gray-400 mt-1">
+                                            <?php echo number_format((float)$taux, 4); ?>
+                                        </div>
+                                    <?php endif; ?>
+                                <?php else: ?>
+                                    <span class="text-gray-400 italic">Par défaut</span>
+                                <?php endif; ?>
+                            </td>
+                            
+                            <!-- Actions -->
+                            <td class="px-6 py-4">
+                                <button
+                                    onclick="modifierPrix(
+                                        <?php echo $produit['id']; ?>, 
+                                        '<?php echo e($produit['nom']); ?>', 
+                                        <?php echo $prixFcValue; ?>, 
+                                        <?php echo $prixUsdValue; ?>,
+                                        '<?php echo !empty($produit['code_barre']) ? e($produit['code_barre']) : ''; ?>'
+                                    )"
+                                    class="<?php echo $hasPrice ? 'bg-blue-600 hover:bg-blue-700' : 'bg-green-600 hover:bg-green-700'; ?> text-white px-3 py-2 rounded text-sm font-medium transition-colors duration-200 flex items-center">
+                                    <i class="<?php echo $hasPrice ? 'fas fa-edit' : 'fas fa-dollar-sign'; ?> mr-2"></i>
+                                    <?php echo $hasPrice ? 'Modifier' : 'Définir'; ?>
+                                </button>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Pied de tableau -->
+        <div class="px-6 py-4 bg-gray-50 border-t border-gray-200">
+            <div class="flex justify-between items-center">
+                <div class="text-sm text-gray-600">
+                    <span class="font-medium">Légende :</span>
+                    <span class="ml-3 inline-flex items-center">
+                        <span class="w-3 h-3 rounded-full bg-red-100 border border-red-300 mr-1"></span>
+                        <span class="text-xs">Produit sans prix</span>
+                    </span>
+                    <span class="ml-3 inline-flex items-center">
+                        <span class="w-3 h-3 rounded-full bg-green-100 border border-green-300 mr-1"></span>
+                        <span class="text-xs">Prix défini</span>
+                    </span>
                 </div>
+                <div class="text-xs text-gray-500">
+                    Mis à jour le <?php echo date('d/m/Y H:i'); ?>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Note d'information -->
+    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+        <div class="flex items-start">
+            <i class="fas fa-info-circle text-blue-500 mt-1 mr-3"></i>
+            <div>
+                <h4 class="font-medium text-blue-800 mb-1">Information importante</h4>
+                <p class="text-sm text-blue-700">
+                    Les produits sans prix ne peuvent pas être vendus. 
+                    <span class="font-medium">Cliquez sur "Définir"</span> pour attribuer un prix à un produit.
+                    Les prix sont en Francs Congolais (FC) avec équivalent en USD calculé automatiquement.
+                </p>
+            </div>
+        </div>
+    </div>
 
             <?php elseif ($current_page == 'produits_sans_prix'): ?>
                 <!-- ========== PRODUITS SANS PRIX ========== -->
