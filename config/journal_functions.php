@@ -107,6 +107,8 @@ function loggerVisualisation($db, $utilisateur_id, $utilisateur_nom, $utilisateu
     return logActivity($db, $utilisateur_id, $utilisateur_nom, $utilisateur_role, $action, $details, $table, $element_id);
 }
 
+
+
 // Fonction pour récupérer les activités
 function getJournalActivites($db, $limit = 100, $utilisateur_id = null, $date_debut = null, $date_fin = null)
 {

@@ -235,22 +235,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 try {
                     $pdo->beginTransaction();
 
+                    // Récupérer le dernier ID de produit pour générer un code unique si nécessaire
+                    $produit_id = null;
+
+                    // Gestion du code barre : convertir chaîne vide en NULL
+                    $code_barre = trim($_POST['code_barre'] ?? '');
+                    $code_barre = ($code_barre === '') ? null : $code_barre;
+
+                    // Si le code barre est null, générer un code temporaire unique
+                    if ($code_barre === null) {
+                        // Option 1 : Code basé sur timestamp + random
+                        $code_barre = 'TEMP_' . date('YmdHis') . '_' . rand(1000, 9999);
+
+                        // Option 2 : Vérifier que ce code n'existe pas déjà (plus sécurisé)
+                        do {
+                            $code_barre = 'TEMP_' . date('YmdHis') . '_' . rand(1000, 9999);
+                            $checkStmt = $pdo->prepare("SELECT COUNT(*) FROM produits WHERE code_barre = :code_barre");
+                            $checkStmt->execute([':code_barre' => $code_barre]);
+                            $count = $checkStmt->fetchColumn();
+                        } while ($count > 0);
+                    } else {
+                        // Vérifier si le code barre spécifié existe déjà
+                        $checkStmt = $pdo->prepare("SELECT COUNT(*) FROM produits WHERE code_barre = :code_barre");
+                        $checkStmt->execute([':code_barre' => $code_barre]);
+                        $count = $checkStmt->fetchColumn();
+
+                        if ($count > 0) {
+                            throw new Exception("Le code barre '{$code_barre}' existe déjà. Veuillez en utiliser un autre.");
+                        }
+                    }
+
                     $stmt = $pdo->prepare("
-                        INSERT INTO produits (
-                            nom, description, code_barre, categorie_id, 
-                            fournisseur_id, necessite_ordonnance, composition, 
-                            posologie, contre_indications, statut, created_by
-                        ) VALUES (
-                            :nom, :description, :code_barre, :categorie_id,
-                            :fournisseur_id, :necessite_ordonnance, :composition,
-                            :posologie, :contre_indications, 'en_attente', :created_by
-                        )
-                    ");
+            INSERT INTO produits (
+                nom, description, code_barre, categorie_id, 
+                fournisseur_id, necessite_ordonnance, composition, 
+                posologie, contre_indications, statut, created_by
+            ) VALUES (
+                :nom, :description, :code_barre, :categorie_id,
+                :fournisseur_id, :necessite_ordonnance, :composition,
+                :posologie, :contre_indications, 'en_attente', :created_by
+            )
+        ");
 
                     $stmt->execute([
                         ':nom' => $_POST['nom'] ?? '',
                         ':description' => $_POST['description'] ?? '',
-                        ':code_barre' => $_POST['code_barre'] ?? '',
+                        ':code_barre' => $code_barre,
                         ':categorie_id' => intval($_POST['categorie_id'] ?? 0),
                         ':fournisseur_id' => intval($_POST['fournisseur_id'] ?? 0),
                         ':necessite_ordonnance' => isset($_POST['necessite_ordonnance']) ? 1 : 0,
@@ -260,23 +290,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         ':created_by' => $_SESSION['user_id']
                     ]);
 
+                    $produit_id = $pdo->lastInsertId();
+
                     $pdo->commit();
                     $message = "✅ Produit ajouté avec succès! Il est maintenant en attente de validation.";
-                    // AJOUT DU LOG
-                    loggerCreation(
-                        $pdo,
-                        $_SESSION['user_id'],
-                        $_SESSION['user_nom'] ?? 'Pharmacien',
-                        $_SESSION['user_role'] ?? 'pharmacien',
-                        'produits',
-                        $produit_id,
-                        "Création du produit: " . ($_POST['nom'] ?? 'Nouveau produit')
-                    );
 
+                    // AJOUT DU LOG
+                    if (isset($_SESSION['user_id'])) {
+                        $changements = [
+                            "nom" => $_POST['nom'] ?? 'Nouveau produit',
+                            "statut" => "en_attente",
+                            "code_barre" => $code_barre ?? 'Généré automatiquement'
+                        ];
+
+                        loggerCreation(
+                            $pdo,
+                            $_SESSION['user_id'],
+                            $_SESSION['user_nom'] ?? 'Pharmacien',
+                            $_SESSION['user_role'] ?? 'pharmacien',
+                            'produits',
+                            $produit_id,
+                            "Création du produit: " . ($_POST['nom'] ?? 'Nouveau produit') . " - " . json_encode($changements)
+                        );
+                    }
 
                 } catch (Exception $e) {
                     $pdo->rollBack();
                     $error = "❌ Erreur lors de l'ajout: " . $e->getMessage();
+
+                    // Log de l'erreur
+                    if (isset($_SESSION['user_id'])) {
+                        logActivity(
+                            $pdo,
+                            $_SESSION['user_id'],
+                            $_SESSION['user_nom'] ?? 'Pharmacien',
+                            $_SESSION['user_role'] ?? 'pharmacien',
+                            'erreur_ajout_produit',
+                            "Échec ajout produit: " . $e->getMessage(),
+                            'produits',
+                            null
+                        );
+                    }
                 }
                 break;
 
@@ -285,51 +339,126 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 try {
                     $pdo->beginTransaction();
 
+                    $produit_id = intval($_POST['produit_id'] ?? 0);
+
+                    if ($produit_id <= 0) {
+                        throw new Exception("ID de produit invalide");
+                    }
+
+                    // Récupérer les anciennes valeurs pour le log
+                    $stmtOld = $pdo->prepare("SELECT nom, code_barre FROM produits WHERE id = :id");
+                    $stmtOld->execute([':id' => $produit_id]);
+                    $oldData = $stmtOld->fetch(PDO::FETCH_ASSOC);
+
+                    // Gestion du code barre : convertir chaîne vide en NULL
+                    $code_barre = trim($_POST['code_barre'] ?? '');
+                    $code_barre = ($code_barre === '') ? null : $code_barre;
+
+                    // Si le code barre est null, générer un code temporaire unique
+                    if ($code_barre === null) {
+                        // Générer un code temporaire unique
+                        do {
+                            $code_barre = 'TEMP_' . date('YmdHis') . '_' . rand(1000, 9999);
+                            $checkStmt = $pdo->prepare("SELECT COUNT(*) FROM produits WHERE code_barre = :code_barre AND id != :id");
+                            $checkStmt->execute([':code_barre' => $code_barre, ':id' => $produit_id]);
+                            $count = $checkStmt->fetchColumn();
+                        } while ($count > 0);
+                    } else {
+                        // Vérifier si le code barre spécifié existe déjà pour un autre produit
+                        $checkStmt = $pdo->prepare("SELECT COUNT(*) FROM produits WHERE code_barre = :code_barre AND id != :id");
+                        $checkStmt->execute([':code_barre' => $code_barre, ':id' => $produit_id]);
+                        $count = $checkStmt->fetchColumn();
+
+                        if ($count > 0) {
+                            throw new Exception("Le code barre '{$code_barre}' est déjà utilisé par un autre produit.");
+                        }
+                    }
+
                     $stmt = $pdo->prepare("
-                        UPDATE produits SET
-                            nom = :nom,
-                            description = :description,
-                            code_barre = :code_barre,
-                            categorie_id = :categorie_id,
-                            fournisseur_id = :fournisseur_id,
-                            necessite_ordonnance = :necessite_ordonnance,
-                            composition = :composition,
-                            posologie = :posologie,
-                            contre_indications = :contre_indications,
-                            updated_at = NOW()
-                        WHERE id = :id
-                    ");
+            UPDATE produits SET
+                nom = :nom,
+                description = :description,
+                code_barre = :code_barre,
+                categorie_id = :categorie_id,
+                fournisseur_id = :fournisseur_id,
+                necessite_ordonnance = :necessite_ordonnance,
+                composition = :composition,
+                posologie = :posologie,
+                contre_indications = :contre_indications,
+                updated_at = NOW()
+            WHERE id = :id
+        ");
 
                     $stmt->execute([
                         ':nom' => $_POST['nom'] ?? '',
                         ':description' => $_POST['description'] ?? '',
-                        ':code_barre' => $_POST['code_barre'] ?? '',
+                        ':code_barre' => $code_barre,
                         ':categorie_id' => intval($_POST['categorie_id'] ?? 0),
                         ':fournisseur_id' => intval($_POST['fournisseur_id'] ?? 0),
                         ':necessite_ordonnance' => isset($_POST['necessite_ordonnance']) ? 1 : 0,
                         ':composition' => $_POST['composition'] ?? '',
                         ':posologie' => $_POST['posologie'] ?? '',
                         ':contre_indications' => $_POST['contre_indications'] ?? '',
-                        ':id' => intval($_POST['produit_id'] ?? 0)
+                        ':id' => $produit_id
                     ]);
 
                     $pdo->commit();
                     $message = "✅ Produit modifié avec succès!";
-                    // AJOUT DU LOG
-                    loggerModification(
-                        $pdo,
-                        $_SESSION['user_id'],
-                        $_SESSION['user_nom'] ?? 'Pharmacien',
-                        $_SESSION['user_role'] ?? 'pharmacien',
-                        'produits',
-                        $produit_id,
-                        $changements
-                    );
 
+                    // AJOUT DU LOG
+                    if (isset($_SESSION['user_id'])) {
+                        // Préparer les changements pour le log
+                        $changements = [];
+
+                        if ($oldData && isset($_POST['nom']) && $oldData['nom'] != $_POST['nom']) {
+                            $changements[] = "Nom: '{$oldData['nom']}' → '{$_POST['nom']}'";
+                        }
+
+                        if ($oldData && $oldData['code_barre'] != $code_barre) {
+                            $oldCode = $oldData['code_barre'] ?? 'Vide';
+                            $newCode = $code_barre ?? 'Généré automatiquement';
+                            $changements[] = "Code barre: '{$oldCode}' → '{$newCode}'";
+                        }
+
+                        if (!empty($_POST['categorie_id']) && isset($oldData['categorie_id']) && $oldData['categorie_id'] != $_POST['categorie_id']) {
+                            $changements[] = "Catégorie modifiée";
+                        }
+
+                        if (!empty($_POST['fournisseur_id']) && isset($oldData['fournisseur_id']) && $oldData['fournisseur_id'] != $_POST['fournisseur_id']) {
+                            $changements[] = "Fournisseur modifié";
+                        }
+
+                        // Si des changements ont été détectés
+                        if (!empty($changements)) {
+                            loggerModification(
+                                $pdo,
+                                $_SESSION['user_id'],
+                                $_SESSION['user_nom'] ?? 'Pharmacien',
+                                $_SESSION['user_role'] ?? 'pharmacien',
+                                'produits',
+                                $produit_id,
+                                $changements
+                            );
+                        }
+                    }
 
                 } catch (Exception $e) {
                     $pdo->rollBack();
                     $error = "❌ Erreur lors de la modification: " . $e->getMessage();
+
+                    // Log de l'erreur
+                    if (isset($_SESSION['user_id'])) {
+                        logActivity(
+                            $pdo,
+                            $_SESSION['user_id'],
+                            $_SESSION['user_nom'] ?? 'Pharmacien',
+                            $_SESSION['user_role'] ?? 'pharmacien',
+                            'erreur_modification_produit',
+                            "Échec modification produit ID {$produit_id}: " . $e->getMessage(),
+                            'produits',
+                            $produit_id
+                        );
+                    }
                 }
                 break;
 
@@ -1318,11 +1447,10 @@ try {
                                                         <div class="flex items-center">
                                                             <i class="fas fa-calendar-alt mr-1 text-xs"></i>
                                                             Expiration:
-                                                            <span
-                                                                class="font-semibold ml-1 <?php
-                                                                echo $alerte['jours_restants'] <= 7 ? 'text-red-600' :
-                                                                    ($alerte['jours_restants'] <= 30 ? 'text-orange-600' : 'text-gray-700');
-                                                                ?>">
+                                                            <span class="font-semibold ml-1 <?php
+                                                            echo $alerte['jours_restants'] <= 7 ? 'text-red-600' :
+                                                                ($alerte['jours_restants'] <= 30 ? 'text-orange-600' : 'text-gray-700');
+                                                            ?>">
                                                                 <?php echo date('d/m/Y', strtotime($alerte['date_expiration'])); ?>
                                                                 (<?php echo $alerte['jours_restants']; ?> jours)
                                                             </span>
@@ -2232,8 +2360,8 @@ try {
                                                 <div class="flex items-center">
                                                     <i class="fas fa-barcode text-gray-400 mr-2 text-sm"></i>
                                                     <code class="text-sm text-gray-900 bg-gray-50 px-2 py-1 rounded font-mono">
-                                                                                                                                                                                                                                                                                                        <?php echo htmlspecialchars($produit['code_barre']); ?>
-                                                                                                                                                                                                                                                                                                    </code>
+                                                                                                                                                                                                                                                                                                                <?php echo htmlspecialchars($produit['code_barre']); ?>
+                                                                                                                                                                                                                                                                                                            </code>
                                                 </div>
                                             </td>
                                             <td class="px-6 py-4">
